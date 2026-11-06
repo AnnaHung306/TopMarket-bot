@@ -13,7 +13,7 @@ export const scanStatusMarkup = `
 
 export function updateScanStatus(phase, message, progress = null) {
   const titles = {
-    idle: '等待查詢', preparing: '準備查詢', refreshing: '檢查新區塊', scanning: '掃描 Base 區塊',
+    idle: '等待查詢', preparing: '準備查詢', initializing: '回補歷史資料', refreshing: '檢查新區塊', scanning: '掃描 Base 區塊',
     holdings: '核實卡片持倉', stopping: '正在停止', stopped: '掃描已停止',
     complete: '區塊掃描完成', error: '掃描中斷',
   };

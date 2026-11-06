@@ -41,7 +41,7 @@ Vercel 與本機報表從 Neon 讀取歷史。同步與持倉核對使用 Alchem
 oracle 地址讀 selector 0x2630c12f，再讀 decimals() 0x05300b28。僅 decimals=6 且價格有效才顯示。
 
 ## API 與掃描
-GET / 是前端。GET /api/init 回傳已發佈的 Base 最終確認區塊、起點及合約。POST /api/refresh 檢查並同步新區塊，同步進行中回傳 202。GET /api/scan?wallet=0x…&from=…&to=… 依錢包從 Neon 取回事件與證據。POST /api/holdings 接受 JSON {wallet,block,assets:[{collection,tokenId}]}，最多 40 筆。
+GET / 是前端。GET /api/init 回傳已發佈的 Base 最終確認區塊、起點及合約。首次回補時回傳 202 和已完成區塊。POST /api/refresh 檢查並同步新區塊，同步進行中回傳 202。GET /api/scan?wallet=0x…&from=…&to=… 依錢包從 Neon 取回事件與證據。POST /api/holdings 接受 JSON {wallet,block,assets:[{collection,tokenId}]}，最多 40 筆。
 
 抽卡盒各從部署區塊起算，StakingPool 從 50,634,768、Marketplace 從 50,635,450 起算。同步只查已識別地址的事件 topic 和對應收據，再將可核對的金庫、結算幣種與費用收款方資料寫入 Neon。錢包查詢按參與方與區塊範圍讀取，並按交易雜湊與 log index 去重。收款方歷史證據由每筆已識別交易的 USDC Transfer 提供。自訂發款地址、無對應事件的轉帳，以及完整的延期提款歸屬暫未索引。
 

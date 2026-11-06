@@ -1,5 +1,5 @@
 import worker, { holdings, valid } from './index.js';
-import { indexSummary, walletReport } from './history/report.js';
+import { indexProgress, indexSummary, walletReport } from './history/report.js';
 import { database } from './history/store.js';
 import { refreshHistory } from './history/refresh.js';
 
@@ -15,7 +15,7 @@ export default {
       const sql = database();
       if (url.pathname === '/api/init' && request.method === 'GET') {
         const index = await indexSummary(sql);
-        if (!index) return json({ error: 'Neon 歷史索引正在回補' }, 503);
+        if (!index) return json({ initializing: true, progress: await indexProgress(sql) }, 202);
         return json({ head: index.block, start: index.start, contracts: index.contracts, collections: index.collections,
           collectionsError: null, rpc: 'Neon / Alchemy Base Mainnet', chainId: 8453, asOf: index.as_of, indexed: true, refreshOnRequest: true });
       }

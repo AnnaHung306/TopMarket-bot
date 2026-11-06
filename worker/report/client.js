@@ -40,7 +40,7 @@ function reportMetrics(totals, held) {
     ? priced.reduce((sum, asset) => sum + asset.referenceValue, 0)
     : null;
   const unit = started && !complete ? 'USDC · 部分' : 'USDC';
-  const noResult = () => state.scanError ? '查詢失敗' : started ? '查詢未完成' : '尚未查詢';
+  const noResult = () => state.scanError ? '查詢失敗' : state.initializing ? '歷史回補中' : started ? '查詢未完成' : '尚未查詢';
   const receipt = (key, raw, verified, pending) => ({
     label: labels[key],
     value: verified ? money(amount(raw), 6) : pending ? '有事件待核對' : complete ? '查無入帳' : noResult(),
@@ -82,6 +82,22 @@ const cash=known?(t.net>0n?'+':'')+money(Number(t.net)/1e6):'—';$('cash').text
 async function checkHoldings(){const candidates=totals().events.filter(x=>x.collection&&x.tokenId&&['won','kept','staked','purchaseGross','nftReceived'].includes(x.category));const unique=[...new Map(candidates.map(x=>[x.collection+':'+x.tokenId,{collection:x.collection,tokenId:x.tokenId}])).values()];state.assets=[];for(let i=0;i<unique.length;i+=40){updateScanStatus('holdings', '正在核實卡片持有權 '+(i+1)+' / '+unique.length, blockProgress());const r=await fetch('/api/holdings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({wallet:state.wallet,assets:unique.slice(i,i+40),block:state.head})});const d=await r.json();if(!r.ok)throw Error(d.error||'Holdings lookup failed');state.assets.push(...d.assets);}const costs=linkAcquisitionCosts(totals().events);state.assets=state.assets.map(asset=>{const matches=costs.filter(c=>c.collection===asset.collection&&c.tokenId===asset.tokenId);return {...asset,drawAcquisitionCost:matches.length===1?matches[0].acquisitionCost:null,costNote:'Observed draw acquisition expenditure only; current lot basis unknown'};});state.holdingsChecked=true;}
 function clearPosterDownload(){const file=$('posterFile');if(file){URL.revokeObjectURL(file.href);file.remove();}$('posterImage')?.remove();}
 async function get(path){const r=await fetch(path);const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'資料讀取失敗');return d;}
+async function loadReportIndex() {
+  let init = await get('/api/init');
+  while (init.initializing && !stopped) {
+    state.initializing = true;
+    const { start, through } = init.progress || {};
+    const detail = through >= start && Number.isSafeInteger(through)
+      ? '目前已補到區塊 ' + through.toLocaleString() + '。'
+      : '正在初始化合約索引。';
+    updateScanStatus('initializing', '首次歷史回補中。' + detail + '完成後會自動查詢錢包。');
+    render();
+    await new Promise(resolve => setTimeout(resolve, 10_000));
+    if (!stopped) init = await get('/api/init');
+  }
+  state.initializing = false;
+  return init;
+}
 async function prepareIndexedReport(init) {
   let through, lastHead = init.head;
   let deadline = Date.now() + 5 * 60_000;
@@ -135,8 +151,8 @@ $('form').onsubmit = async event => {
   updateScanStatus('preparing', '正在讀取 Base 區塊與工廠合約…');
   render();
   try {
-    let init = await get('/api/init');
-    if (init.refreshOnRequest) init = await prepareIndexedReport(init);
+    let init = await loadReportIndex();
+    if (!stopped && init.refreshOnRequest) init = await prepareIndexedReport(init);
     if (stopped) {
       updateScanStatus('stopped', '已停止錢包查詢。');
       return;

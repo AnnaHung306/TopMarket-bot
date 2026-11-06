@@ -10,6 +10,11 @@ export async function indexSummary(sql) {
   return row;
 }
 
+export async function indexProgress(sql) {
+  const [row] = await sql`SELECT min(deployment) AS start, min(through) AS through FROM wallet_index_sources`;
+  return row;
+}
+
 export async function walletReport(sql, wallet, from, to) {
   const [row] = await sql`WITH activity AS MATERIALIZED (
     SELECT a.* FROM wallet_index_logs a
