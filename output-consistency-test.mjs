@@ -10,12 +10,17 @@ const won={...common,id:'won',category:'won',requestId:'7',winId:'8',collection:
 const kept={...common,id:'kept',category:'kept',winId:'8',collection:nft,tokenId:'9',block:3,acquisitionVerified:true,nftReceiptId:'0xabc:0x5'};
 const receipt=(id,category,raw)=>({...common,id,category,raw,amount:Number(raw)/1e6});
 const confirmed=receipt('buyback-receipt','buyback-claim-confirmed','9000000');
-ctx.input=[draw,won,kept,receipt('refund','refund-confirmed','1000000'),receipt('sale','sales','2000000'),receipt('staking','staking-confirmed','3000000'),confirmed,confirmed,receipt('nominal','buyback','9000000'),receipt('pending','buyback-claim-pending','8000000')];
+const purchase=receipt("purchase","purchaseGross","6000000");
+const nonUsdcPurchase={...purchase,id:"non-usdc",raw:null,amount:null};
+const unverifiedDraw={...draw,id:"unverified-draw",requestId:"99",paymentVerified:false,raw:"7000000"};
+ctx.input=[draw,unverifiedDraw,won,kept,purchase,purchase,nonUsdcPurchase,receipt('refund','refund-confirmed','1000000'),receipt('sale','sales','2000000'),receipt('staking','staking-confirmed','3000000'),confirmed,confirmed,receipt('nominal','buyback','9000000'),receipt('pending','buyback-claim-pending','8000000')];
 vm.runInContext("save=(text)=>{globalThis.exported=text;};state={events:input,wallet:'0xabc',started:true,from:1,through:4,complete:true,asOf:'test'};render();$('csv').onclick();",ctx);
-assert.equal(nodes.get('cash').textContent,'15.00','confirmed buyback added once, nominal/pending excluded');
-assert.equal(nodes.get('posterCash').textContent,'15.00');
-assert(nodes.get('metrics').innerHTML.includes('已核實回購實收'));
+assert.equal(nodes.get('cash').textContent,'-2.00','15.00 confirmed inflows less 11.00 for draws and 6.00 for a single USDC market purchase');
+assert.equal(nodes.get('posterCash').textContent,'-2.00');
+assert(nodes.get('metrics').innerHTML.includes('回購收入（已核實）'));
+assert(nodes.get('posterMetrics').innerHTML.includes('<span>補貼</span><b>待確認（未計入）</b>'));
 assert(nodes.get('warning').textContent.includes('回購待核對 1 筆'));
+assert(nodes.get('warning').textContent.includes('抽卡付款待核對 1 筆'));
 assert(html.includes('收入小計：已核實退款 + 市場銷售實收 + WinRecycled 質押分潤實收 + 得獎者回購實收'));
 assert(!html.includes('收入小計：退款 + 市場銷售的實際 USDC 入帳。'));
 function parse(line){const out=[];let text='',quoted=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){if(quoted&&line[i+1]==='"'){text+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){out.push(text);text='';}else text+=c;}out.push(text);return out;}
@@ -27,6 +32,9 @@ assert.equal(keptRow.collection,nft);assert.equal(keptRow.token_id,'9');assert.e
 assert.equal(keptRow.acquisition_cost_raw,'11000000');assert.equal(keptRow.acquisition_cost_usdc,'11');
 assert.equal(keptRow.acquisition_cost_status,'verified-acquisition');assert.equal(keptRow.nft_receipt_id,'0xabc:0x5');
 vm.runInContext("$('json').onclick();",ctx);const json=JSON.parse(ctx.exported);
+assert.equal(json.cashFlow.inflowsRaw, '15000000');
+assert.equal(json.cashFlow.outflowsRaw, '17000000');
+assert.equal(json.cashFlow.netRaw, '-2000000');
 assert(json.methodology.identifiedInflows.includes('winner buybacks'));
 assert.equal(json.acquisitionCosts[0].acquisitionCostRaw,keptRow.acquisition_cost_raw);
 ctx.input=[{...draw,sourceStatus:'adapter-source-unresolved',randomnessSource:box},won,kept];
@@ -36,4 +44,4 @@ assert.equal(pendingRows.find(x=>x.category==='kept').acquisition_cost_raw,'UNKN
 assert.equal(pendingRows.find(x=>x.category==='kept').acquisition_cost_status,'unknown');
 assert.equal(pendingRows.find(x=>x.category==='pack').source_status,'adapter-source-unresolved');
 assert.equal(pendingRows.find(x=>x.category==='pack').randomness_source,box);
-console.log('PASS: CSV/JSON cost linkage, unknown fields, HTML/poster inflow totals and buyback methodology agree');
+console.log('PASS: CSV/JSON cost linkage, unknown fields, HTML/poster net cash flow and buyback methodology agree');
