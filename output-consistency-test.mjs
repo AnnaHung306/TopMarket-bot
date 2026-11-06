@@ -48,6 +48,7 @@ ctx.input=[receipt('small-stake','staking-confirmed','1000')];
 vm.runInContext("state.events=input;render();$('example').onclick();",ctx);
 assert(nodes.get('posterMetrics').innerHTML.includes('<span>質押收益（已核實）</span><b>0.001</b>'));
 assert.equal(nodes.get('wallet').value,'0x394d3f699e0082fe9c4970f0e3c2de248ea21eed');
+assert.equal(nodes.get('range').value,'50000');
 const refreshRequests=[];
 ctx.setTimeout=callback=>callback();
 ctx.fetch=async (path, options)=>{

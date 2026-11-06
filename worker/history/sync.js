@@ -1,7 +1,7 @@
 import { boxes, hex, MARKET, STAKE } from '../index.js';
 import { readHistoricalCalls } from './multicall.js';
 import { alchemy, callRecord, callRecordKey, evidencePlan, getSourceLogs, receiptRecord, walletLog } from './chain.js';
-import { callRows, initialize, listSources, publishedHead, publish, receiptKeys, rememberSources, saveChunk } from './store.js';
+import { callRows, HistoryChunkTooLarge, initialize, listSources, publishedHead, publish, receiptKeys, rememberSources, saveChunk } from './store.js';
 
 const initialSources = [
   { address: STAKE, kind: 'stake', deployment: 50634768 },
@@ -54,6 +54,28 @@ async function prepareEvidence(sql, reader, logs) {
   const calls = missingCalls.map((call, i) => callRecord(call, callResponses[i]));
   for (const record of calls) evidence.set(callRecordKey(record), record.result);
   return { receipts, calls, evidence };
+}
+
+async function commitPreparedChunk(sql, sources, { from, to, logs, receipts, calls, evidence }, assertLock) {
+  const receiptsByTx = new Map(receipts.map(row => [row.tx, row]));
+  const callsByKey = new Map(calls.map(row => [callRecordKey(row), row]));
+  async function write(start, end, subset, receiptSubset, callSubset) {
+    assertLock();
+    try {
+      await saveChunk(sql, sources, start, end, subset.map(log => walletLog(log, evidence)), receiptSubset, callSubset);
+    } catch (error) {
+      if (!(error instanceof HistoryChunkTooLarge) || start === end) throw error;
+      const middle = Math.floor((start + end) / 2);
+      for (const [lower, upper] of [[start, middle], [middle + 1, end]]) {
+        const part = subset.filter(log => Number(log.blockNumber) >= lower && Number(log.blockNumber) <= upper);
+        const plan = evidencePlan(part);
+        const partReceipts = plan.receipts.map(tx => receiptsByTx.get(tx)).filter(Boolean);
+        const partCalls = plan.calls.map(call => callsByKey.get(callRecordKey(callRecord(call)))).filter(Boolean);
+        await write(lower, upper, part, partReceipts, partCalls);
+      }
+    }
+  }
+  await write(from, to, logs, receipts, calls);
 }
 
 export async function synchronize(sql, {
@@ -112,8 +134,7 @@ export async function synchronize(sql, {
         throw result.error;
       }
       const { from, to, logs, receipts, calls, evidence } = result;
-      assertLock();
-      await saveChunk(sql, group, from, to, logs.map(log => walletLog(log, evidence)), receipts, calls);
+      await commitPreparedChunk(sql, group, { from, to, logs, receipts, calls, evidence }, assertLock);
       for (const source of group) source.through = to;
       totals.chunks++;
       totals.logs += logs.length;

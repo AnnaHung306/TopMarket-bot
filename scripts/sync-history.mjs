@@ -11,7 +11,7 @@ try {
     throw Error('Invalid history RPC budget or throughput');
   }
   const report = await withHistoryLock(assertLock => synchronize(database(), {
-    reader: alchemy({ maxUnits, perSecond, beforeRequest: assertLock }), parallelChunks: 3, assertLock,
+    reader: alchemy({ maxUnits, perSecond, beforeRequest: assertLock }), parallelChunks: 3, range: 10_000, assertLock,
     onProgress: data => { if (progress) console.error(JSON.stringify(data)); },
   }));
   if (!report) throw Error('History synchronization already running');

@@ -67,22 +67,30 @@ export async function publish(sql, head, collections) {
   ]);
 }
 
+export class HistoryChunkTooLarge extends Error {}
+
 export async function saveChunk(sql, sources, from, to, logs, receipts, calls) {
+  const encoded = [logs, receipts, calls].map(rows => JSON.stringify(rows));
+  // The Neon HTTP driver serializes the JSON arguments as strings inside a second JSON envelope.
+  if (Buffer.byteLength(JSON.stringify(encoded)) > 48 * 1024 * 1024) {
+    throw new HistoryChunkTooLarge('Neon history chunk exceeds the safe HTTP request size');
+  }
+  const [logRows, receiptRows, callRows] = encoded;
   const addresses = sources.map(source => source.address).sort();
   await sql.transaction([
     sql`SELECT address FROM wallet_index_sources WHERE address = ANY(${addresses})
       ORDER BY address FOR UPDATE`,
     sql`INSERT INTO wallet_index_logs (tx, position, block, source, wallets, log)
       SELECT tx, position, block, source, wallets, log
-      FROM jsonb_to_recordset(${JSON.stringify(logs)}::jsonb)
+      FROM jsonb_to_recordset(${logRows}::jsonb)
         AS r(tx text, position integer, block integer, source text, wallets text[], log jsonb)
       ON CONFLICT (tx, position) DO NOTHING`,
     sql`INSERT INTO wallet_index_receipts (tx, receipt)
-      SELECT tx, receipt FROM jsonb_to_recordset(${JSON.stringify(receipts)}::jsonb) AS r(tx text, receipt jsonb)
+      SELECT tx, receipt FROM jsonb_to_recordset(${receiptRows}::jsonb) AS r(tx text, receipt jsonb)
       ON CONFLICT (tx) DO NOTHING`,
     sql`INSERT INTO wallet_index_calls (source, block, input, result)
       SELECT source, block, input, result
-      FROM jsonb_to_recordset(${JSON.stringify(calls)}::jsonb)
+      FROM jsonb_to_recordset(${callRows}::jsonb)
         AS r(source text, block integer, input text, result text)
       ON CONFLICT (source, block, input) DO NOTHING`,
     sql`UPDATE wallet_index_sources SET through = ${to}

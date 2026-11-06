@@ -38,7 +38,11 @@ export default {
         }
         if (refund) return json({ error: '歷史索引僅涵蓋平台已識別的發款；請清除自訂退款地址' }, 422);
         const report = await walletReport(sql, wallet, from, to);
-        return report ? json(report) : json({ error: '區塊範圍超出已發佈的索引' }, 409);
+        if (!report) return json({ error: '區塊範圍超出已發佈的索引' }, 409);
+        if (report.to < to && url.searchParams.get('paged') !== '1') {
+          return json({ error: '報表版本已更新，請重新整理頁面再查詢' }, 409);
+        }
+        return json(report);
       }
       if (url.pathname === '/api/holdings' && request.method === 'POST') {
         if (!process.env.ALCHEMY_API_KEY?.trim()) return json({ error: 'Alchemy Base RPC 尚未設定' }, 503);

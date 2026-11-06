@@ -15,11 +15,21 @@ export async function indexProgress(sql) {
   return row;
 }
 
+const WALLET_PAGE_LOGS = 500;
+
 export async function walletReport(sql, wallet, from, to) {
-  const [row] = await sql`WITH activity AS MATERIALIZED (
-    SELECT a.* FROM wallet_index_logs a
+  const [row] = await sql`WITH first_blocks AS MATERIALIZED (
+    SELECT a.block FROM wallet_index_logs a
     JOIN wallet_index_sources s ON s.address = a.source AND s.published
     WHERE a.wallets @> ARRAY[${wallet}]::text[] AND a.block BETWEEN ${from} AND ${to}
+    ORDER BY a.block
+    LIMIT ${WALLET_PAGE_LOGS + 1}
+  ), page AS (
+    SELECT CASE WHEN count(*) > ${WALLET_PAGE_LOGS} THEN max(block) ELSE ${to} END AS through FROM first_blocks
+  ), activity AS MATERIALIZED (
+    SELECT a.* FROM wallet_index_logs a
+    JOIN wallet_index_sources s ON s.address = a.source AND s.published
+    WHERE a.wallets @> ARRAY[${wallet}]::text[] AND a.block BETWEEN ${from} AND (SELECT through FROM page)
   ), relevant_calls AS (
     SELECT DISTINCT source, block FROM activity
     UNION SELECT DISTINCT source, block - 1 FROM activity
@@ -28,7 +38,7 @@ export async function walletReport(sql, wallet, from, to) {
     JOIN wallet_index_logs a USING (source, block)
     WHERE a.log -> 'topics' ->> 0 IN (${SIG.treasuryUpdated}, ${SIG.feeRecipientUpdated})
   )
-  SELECT h.block, h.collections, h.as_of,
+  SELECT h.block, h.collections, h.as_of, (SELECT through FROM page) AS through,
     (SELECT jsonb_agg(log ORDER BY block, position) FROM activity) AS logs,
     (SELECT jsonb_agg(r) FROM (SELECT DISTINCT tx FROM activity) a JOIN wallet_index_receipts r USING (tx)) AS receipts,
     (SELECT jsonb_agg(c) FROM relevant_calls a JOIN wallet_index_calls c USING (source, block)) AS calls,
@@ -71,5 +81,5 @@ export async function walletReport(sql, wallet, from, to) {
   ));
   // Only the winner gets the nominal buyback line. Both participants can get a cash payout.
   const report = await settleWallet(wallet, activity, market, auctions, rewards, reader);
-  return { from, to, ...report, collections: row.collections, collectionsError: null, indexedThrough: row.block, asOf: row.as_of };
+  return { from, to: row.through, ...report, collections: row.collections, collectionsError: null, indexedThrough: row.block, asOf: row.as_of };
 }

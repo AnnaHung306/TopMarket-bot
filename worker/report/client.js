@@ -168,18 +168,22 @@ $('form').onsubmit = async event => {
       updateScanStatus('scanning', (init.indexed ? '正在讀取 Neon 歷史索引 ' : '正在讀取區塊 ') + span, blockProgress());
       let batch;
       try {
-        batch = await get('/api/scan?wallet=' + wallet + '&from=' + from + '&to=' + to);
+        batch = await get('/api/scan?wallet=' + wallet + '&from=' + from + '&to=' + to + (init.indexed ? '&paged=1' : ''));
       } catch (error) {
         if (init.indexed || size <= 2000) throw error;
         size = Math.max(2000, Math.floor(size / 5));
         continue;
       }
+      const through = batch.to;
+      if (!Number.isSafeInteger(through) || through < from || through > to) {
+        throw Error('報表分頁區塊無效');
+      }
       state.events.push(...batch.events);
       state.warnings.push(...(batch.warnings || []));
       state.started = true;
-      state.through = to;
-      from = to + 1;
-      render();
+      state.through = through;
+      from = through + 1;
+      if (!init.indexed) render();
     }
 
     state.complete = state.through === state.head;
@@ -225,8 +229,8 @@ $('cancel').onclick = () => {
 $('example').onclick = () => {
   if (running) return;
   $('wallet').value = '0x394d3f699e0082fe9c4970f0e3c2de248ea21eed';
-  $('range').value = 'all';
-  updateScanStatus('idle', '已載入公開質押收益範例。按「分析錢包」讀取鏈上資料。');
+  $('range').value = '50000';
+  updateScanStatus('idle', '已載入公開質押收益範例，範圍為最近 50,000 個區塊。');
   $('wallet').focus();
 };
 function save(content,name,type){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
