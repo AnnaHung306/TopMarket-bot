@@ -14,8 +14,9 @@ ctx.input=[draw,won,kept,receipt('refund','refund-confirmed','1000000'),receipt(
 vm.runInContext("save=(text)=>{globalThis.exported=text;};state={events:input,wallet:'0xabc',started:true,from:1,through:4,complete:true,asOf:'test'};render();$('csv').onclick();",ctx);
 assert.equal(nodes.get('cash').textContent,'15.00','confirmed buyback added once, nominal/pending excluded');
 assert.equal(nodes.get('posterCash').textContent,'15.00');
-assert(nodes.get('metrics').innerHTML.includes('已核實回購實收'));
+assert(nodes.get('metrics').innerHTML.includes('回購收入（已核實）'));
 assert(nodes.get('warning').textContent.includes('回購待核對 1 筆'));
+assert(nodes.get('posterMetrics').innerHTML.includes('待確認（未計入）'));
 assert(html.includes('收入小計：已核實退款 + 市場銷售實收 + WinRecycled 質押分潤實收 + 得獎者回購實收'));
 assert(!html.includes('收入小計：退款 + 市場銷售的實際 USDC 入帳。'));
 function parse(line){const out=[];let text='',quoted=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){if(quoted&&line[i+1]==='"'){text+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){out.push(text);text='';}else text+=c;}out.push(text);return out;}

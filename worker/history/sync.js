@@ -1,4 +1,5 @@
 import { boxes, hex, MARKET, STAKE } from '../index.js';
+import { readHistoricalCalls } from './multicall.js';
 import { alchemy, callRecord, callRecordKey, evidencePlan, getSourceLogs, receiptRecord, walletLog } from './chain.js';
 import { callRows, initialize, listSources, publishedHead, publish, receiptKeys, rememberSources, saveChunk } from './store.js';
 
@@ -45,9 +46,12 @@ async function prepareEvidence(sql, reader, logs) {
   const evidence = new Map(knownCalls.map(record => [callRecordKey(record), record.result]));
   const missingTxs = plan.receipts.filter(tx => !receiptSet.has(tx));
   const missingCalls = plan.calls.filter(call => !evidence.has(callRecordKey(callRecord(call))));
-  const responses = await reader.batch([...missingTxs.map(tx => ['eth_getTransactionReceipt', [tx]]), ...missingCalls], true);
-  const receipts = missingTxs.map((tx, i) => receiptRecord(tx, responses[i]));
-  const calls = missingCalls.map((call, i) => callRecord(call, responses[missingTxs.length + i]));
+  const [receiptResponses, callResponses] = await Promise.all([
+    reader.batch(missingTxs.map(tx => ['eth_getTransactionReceipt', [tx]])),
+    readHistoricalCalls(reader, missingCalls),
+  ]);
+  const receipts = missingTxs.map((tx, i) => receiptRecord(tx, receiptResponses[i]));
+  const calls = missingCalls.map((call, i) => callRecord(call, callResponses[i]));
   for (const record of calls) evidence.set(callRecordKey(record), record.result);
   return { receipts, calls, evidence };
 }
