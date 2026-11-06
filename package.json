@@ -6,6 +6,10 @@
     "dev": "node dev.mjs",
     "test": "node test.mjs && node integration-test.mjs && node refund-test.mjs && node treasury-integration-test.mjs && node export-test.mjs && node rewards-cost-test.mjs && node acquisition-integration-test.mjs && node output-consistency-test.mjs",
     "build": "bash scripts/build.sh",
-    "validate": "node scripts/validate-artifact.mjs"
+    "validate": "node scripts/validate-artifact.mjs",
+    "sync:history": "node scripts/sync-history.mjs"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.2.0"
   }
 }

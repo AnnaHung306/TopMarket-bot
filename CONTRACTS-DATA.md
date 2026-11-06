@@ -9,8 +9,7 @@ worker/index.js 包含完整 Worker、HTML、CSS、瀏覽器 JavaScript；dev.mj
 
 ## 合約與來源
 Base mainnet，chainId 8453；USDC 使用 6 decimals，不假設等同美元。
-Vercel 使用 Alchemy Base Mainnet RPC，並從伺服器端 `ALCHEMY_API_KEY` 讀取憑證。未設定 key 的本機預覽使用 https://base-rpc.publicnode.com 。錢包與查詢資料會傳給所使用的 Base RPC。
-呼叫 eth_blockNumber、eth_getLogs、eth_call、eth_getTransactionReceipt。
+Vercel 與本機報表從 Neon 讀取歷史。同步與持倉核對使用 Alchemy Base Mainnet RPC，伺服器從 `ALCHEMY_API_KEY` 讀取憑證。持倉查詢會把合約、卡片編號與區塊送到 Alchemy。
 研究曾核對官方前端、DeFiLlama factory 定義、BaseScan verified source；執行時只讀 RPC，BaseScan 是交易／合約證據連結。
 
 | 用途 | 地址 |
@@ -42,10 +41,11 @@ Vercel 使用 Alchemy Base Mainnet RPC，並從伺服器端 `ALCHEMY_API_KEY` �
 oracle 地址讀 selector 0x2630c12f，再讀 decimals() 0x05300b28。僅 decimals=6 且價格有效才顯示。
 
 ## API 與掃描
-GET / 是前端；GET /api/init 回傳鏈頭減 20 blocks、起點及 registry。
-GET /api/scan?wallet=0x…&from=…&to=…&refund=0x… 回傳事件與證據。refund 選填，不因使用者指定就視為已證明退款。
-POST /api/holdings 接受 JSON {wallet,block,assets:[{collection,tokenId}]}，最多 40 筆。
-硬編碼起點 50636771，不是錢包創世歷史。每次 API 最多 50,000 blocks；前端從 10,000 分段，失敗縮至 2,000。RPC 每批 25 呼叫，HTTP timeout 20 秒。
+GET / 是前端。GET /api/init 回傳已發佈的 Base 最終確認區塊、起點及合約。GET /api/scan?wallet=0x…&from=…&to=… 依錢包從 Neon 取回事件與證據。POST /api/holdings 接受 JSON {wallet,block,assets:[{collection,tokenId}]}，最多 40 筆。
+
+抽卡盒各從部署區塊起算，StakingPool 從 50,634,768、Marketplace 從 50,635,450 起算。同步只查已識別地址的事件 topic 和對應收據，再將可核對的金庫、結算幣種與費用收款方資料寫入 Neon。錢包查詢按參與方與區塊範圍讀取，並按交易雜湊與 log index 去重。收款方歷史證據由每筆已識別交易的 USDC Transfer 提供。自訂發款地址、無對應事件的轉帳，以及完整的延期提款歸屬暫未索引。
+
+可攜式 Worker 保留原先分段 RPC 路由供其獨立使用，Vercel 與本機入口使用索引路由。讀不到已發佈區間時回傳錯誤。
 
 ## 事件
 完整 topic0 常數在 worker/index.js 的 SIG。
