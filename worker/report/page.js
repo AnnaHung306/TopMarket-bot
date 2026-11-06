@@ -48,13 +48,6 @@ export function renderWalletReport(linkAcquisitionCosts) {
           <button class="quiet" type="button" id="cancel" hidden>停止掃描</button>
         </div>
       </form>
-      <details class="options-disclosure">
-        <summary>分析範圍</summary>
-        <div class="options">
-          <label>掃描範圍<select id="range"><option value="all">完整可追溯期間（從合約部署起）</option><option value="50000">最近 50,000 blocks · 快速查核</option><option value="500000">最近 500,000 blocks</option></select></label>
-        </div>
-        <p class="caption">抽卡退款會自動核對合約事件、當時的金庫地址與同筆 USDC 入帳。活動補償另列，須有可核對的發放證據。</p>
-      </details>
       ${scanStatusMarkup}
     </section>
 

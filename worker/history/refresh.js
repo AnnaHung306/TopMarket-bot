@@ -1,7 +1,4 @@
 import { Client } from '@neondatabase/serverless';
-import { alchemy } from './chain.js';
-import { publishedHead } from './store.js';
-import { synchronize } from './sync.js';
 
 export async function withHistoryLock(run) {
   const url = new URL(process.env.DATABASE_URL);
@@ -26,26 +23,4 @@ export async function withHistoryLock(run) {
     clearInterval(heartbeat);
     await client.end().catch(markLost);
   }
-}
-
-export async function refreshHistory(sql, through) {
-  const published = await publishedHead(sql);
-  if (!published) return null;
-  const finalized = await alchemy({ maxUnits: 500 }).rpc('eth_getBlockByNumber', ['finalized', false]);
-  const finalizedBlock = Number(finalized?.number);
-  if (!finalized?.hash || !Number.isSafeInteger(finalizedBlock) || finalizedBlock < published.block) {
-    throw Error('Cannot verify the finalized Base block for this report');
-  }
-  const target = Math.min(through ?? finalizedBlock, finalizedBlock);
-  const result = head => ({ ready: head >= target, target, head });
-  if (published.block >= target) return result(published.block);
-
-  const refreshed = await withHistoryLock(async assertLock => {
-    const latest = await publishedHead(sql);
-    if (latest.block >= target) return result(latest.block);
-    const reader = alchemy({ maxUnits: 1_250_000, maxMs: 245_000, beforeRequest: assertLock });
-    const stats = await synchronize(sql, { reader, maxMs: 220_000, range: 5_000, through: target, assertLock });
-    return { ...result(stats.through), blocks: stats.through - latest.block, seconds: stats.seconds };
-  });
-  return refreshed ?? result(published.block);
 }

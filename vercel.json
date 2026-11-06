@@ -4,7 +4,7 @@
   "buildCommand": "node scripts/build-vercel.mjs",
   "outputDirectory": "dist/vercel-static",
   "functions": {
-    "api/refresh.js": { "maxDuration": 300 }
+    "api/scan.js": { "maxDuration": 300 }
   },
   "headers": [
     {

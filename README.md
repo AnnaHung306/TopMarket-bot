@@ -9,15 +9,10 @@ npm run dev
 # http://127.0.0.1:3000
 ```
 
-Vercel Production 及本機伺服器需要 Neon 的 `DATABASE_URL`。歷史同步和持倉核對另外需要 Base Mainnet 的 `ALCHEMY_API_KEY`。兩個值都由伺服器環境提供。使用 Vercel 託管的 Neon 時，由 Storage 連接專案並注入 `DATABASE_URL`。現有 Neon 帳戶也可手動將資料庫連線加入 Vercel Secret。
+Vercel Production 與本機報表需要伺服器環境變數 `ALCHEMY_API_KEY`，使用已啟用 Base Mainnet 的 Alchemy App key。
 
-```sh
-# 傳入 DATABASE_URL 與 ALCHEMY_API_KEY 後執行
-npm run sync:history -- --progress
-```
+每次查詢從最早相關合約的部署區塊讀到 Base 最新的最終確認區塊。報表按指定地址查 Top.Market 合約的事件、該錢包的 USDC 轉入及 ERC-721 轉出，從關聯交易收據核對實收與已付款支出。較活躍的地址會按區塊分頁。歷史收支匯出會附上每次查詢估算的 Alchemy CU，持倉／估值核對另計。
 
-初次同步用同一份設定執行到 `through === target`。同步會將 Base 已最終確認的區塊固定為本輪目標，依合約部署區塊查指定事件。同一歷史區塊的金庫、結算幣種與費用收款方 getter 透過 Base Multicall3 合併讀取。每段在單一 Postgres transaction 寫入事件、收據、證據及進度。交易密集的區間會在送出前切成較小的區塊範圍，避免超過 Neon 的 HTTP 請求上限。失敗或中斷後用同一指令續跑。預設每次最多送出估算 800 萬 Alchemy CU 的請求，達上限前已儲存的區段可接續。CLI 可用 `HISTORY_RPC_MAX_CU` 和 `HISTORY_RPC_CU_PER_SECOND` 調整請求預算及速率。
+Neon 歷史回補已停止。既有的資料及同步工具仍保留，網站查詢直接走 Alchemy。維護用的 `npm run sync:history` 需要另提供 `DATABASE_URL`，執行時會寫入 Neon。
 
-初次發佈後，錢包查詢先檢查 Base 的最終確認區塊，必要時補尚未處理的區塊。所有同步共用 Neon 的 Postgres advisory lock，一次只由一個執行者補資料。其他查詢等到自己的目標區塊已發佈，再查 Neon。新登記的抽卡盒從部署區塊補起。持倉／估值仍以同一區塊透過 Alchemy 核對。
-
-`npm run build` 和 `npm run validate` 驗證原可攜式 Worker 工件。Vercel 與 `npm run dev` 則使用有 Neon 索引的伺服器路由。網站只讀 Base，收入為已識別款項。
+`npm run build` 和 `npm run validate` 驗證原可攜式 Worker 工件。網站只讀 Base，收入為已識別款項。

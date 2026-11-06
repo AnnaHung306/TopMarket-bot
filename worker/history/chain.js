@@ -9,7 +9,7 @@ const signatures = {
   stake: [SIG.staked, SIG.unstaked],
 };
 
-const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_chainId: 0, eth_getBlockByNumber: 16, alchemy_getAssetTransfers: 120 };
+const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_chainId: 0, eth_getBlockByNumber: 20, alchemy_getAssetTransfers: 120 };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infinity, beforeRequest = () => {} } = {}) {
@@ -70,24 +70,27 @@ export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infin
   return { rpc, batch, stats };
 }
 
-export async function getSourceLogs(reader, sources, from, to) {
-  const filters = new Map(sources.map(source => [source.address, signatures[source.kind]]));
-  const topics = [...new Set([...filters.values()].flat())];
+export async function getFilteredLogs(reader, filter, from, to) {
   try {
-    const logs = await reader.rpc('eth_getLogs', [{
-      address: [...filters.keys()], topics: [topics], fromBlock: hex(from), toBlock: hex(to),
-    }]);
+    const logs = await reader.rpc('eth_getLogs', [{ ...filter, fromBlock: hex(from), toBlock: hex(to) }]);
     if (!Array.isArray(logs) || logs.some(log => log.removed)) throw Error('Invalid finalized log response');
-    return logs.filter(log => filters.get(log.address.toLowerCase())?.includes(log.topics[0])).map(compactLog);
+    return logs.map(compactLog);
   } catch (error) {
     if (from === to || !/log response size|more than [0-9,]+ (?:results|logs)|block range should work|response (?:is too large|size exceeded)|exceed(?:s|ed) (?:the )?max(?:imum)? (?:block|log)/i.test(error.message)) throw error;
     reader.stats.splits++;
     const mid = Math.floor((from + to) / 2);
-    return [...await getSourceLogs(reader, sources, from, mid), ...await getSourceLogs(reader, sources, mid + 1, to)];
+    return [...await getFilteredLogs(reader, filter, from, mid), ...await getFilteredLogs(reader, filter, mid + 1, to)];
   }
 }
 
-function compactLog({ address, topics, data, transactionHash, blockNumber, logIndex }) {
+export async function getSourceLogs(reader, sources, from, to) {
+  const filters = new Map(sources.map(source => [source.address, signatures[source.kind]]));
+  const topics = [...new Set([...filters.values()].flat())];
+  const logs = await getFilteredLogs(reader, { address: [...filters.keys()], topics: [topics] }, from, to);
+  return logs.filter(log => filters.get(log.address)?.includes(log.topics[0]));
+}
+
+export function compactLog({ address, topics, data, transactionHash, blockNumber, logIndex }) {
   return { address: address.toLowerCase(), topics, data, transactionHash, blockNumber, logIndex };
 }
 

@@ -47,15 +47,19 @@ export async function walletReport(sql, wallet, from, to) {
   WHERE ${to} <= h.block AND ${from} >= (SELECT min(deployment) FROM wallet_index_sources WHERE published)`;
   if (!row) return null;
 
-  const logs = row.logs || [];
-  const receipts = new Map((row.receipts || []).map(({ tx, receipt }) => [tx, receipt]));
-  const calls = new Map((row.calls || []).map(record => [callRecordKey(record), record.result]));
+  const report = await settleRecordedWallet(wallet, row.logs || [], row.receipts || [], row.calls || [], row.updates || []);
+  return { from, to: row.through, ...report, collections: row.collections, collectionsError: null, indexedThrough: row.block, asOf: row.as_of };
+}
+
+export async function settleRecordedWallet(wallet, logs, receiptRecords, callRecords, updateRecords) {
+  const receipts = new Map(receiptRecords.map(({ tx, receipt }) => [tx, receipt]));
+  const calls = new Map(callRecords.map(record => [callRecordKey(record), record.result]));
   const expected = evidencePlan(logs);
   if (expected.receipts.some(tx => !receipts.has(tx)) || expected.calls.some(call => !calls.has(callRecordKey(callRecord(call))))) {
-    throw Error('Indexed wallet data is missing settlement evidence');
+    throw Error('Wallet data is missing settlement evidence');
   }
   const updates = new Map();
-  for (const log of row.updates || []) {
+  for (const log of updateRecords) {
     const key = log.address + ':' + Number(log.blockNumber);
     const group = updates.get(key) || [];
     group.push(log);
@@ -80,6 +84,5 @@ export async function walletReport(sql, wallet, from, to) {
     log.topics[0] !== SIG.buyback || log.topics[2] === word(wallet)
   ));
   // Only the winner gets the nominal buyback line. Both participants can get a cash payout.
-  const report = await settleWallet(wallet, activity, market, auctions, rewards, reader);
-  return { from, to: row.through, ...report, collections: row.collections, collectionsError: null, indexedThrough: row.block, asOf: row.as_of };
+  return settleWallet(wallet, activity, market, auctions, rewards, reader);
 }

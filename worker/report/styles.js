@@ -188,11 +188,8 @@ button.text-button {
 .text-button:hover { text-decoration: underline; text-underline-offset: 3px; }
 #cancel[hidden] { display: none; }
 button.text-button:disabled { opacity: .55; }
-.options-disclosure { margin-top: 11px; }
 summary { cursor: pointer; color: #dce7ef; font-size: 13px; font-weight: 650; }
 summary::marker { color: #83d7e8; }
-.options { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 11px 0 8px; }
-.options input, .options select { width: 100%; min-width: 0; margin-top: 5px; font-size: 13px; }
 .scan-status { position: relative; margin-top: 16px; }
 .scan-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .scan-phase { color: var(--ink); font-size: 13px; font-weight: 700; }
@@ -313,8 +310,6 @@ footer { padding: 3px 0 22px; color: #9aa7b3; font-size: 11px; line-height: 1.7;
   .form input { flex-basis: 100%; font-size: 16px; }
   .form-controls button { flex: 1; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .options { grid-template-columns: 1fr; }
-  .options input, .options select { font-size: 16px; }
   .metric b { font-size: 19px; }
   .ambient { top: 57px; }
 }

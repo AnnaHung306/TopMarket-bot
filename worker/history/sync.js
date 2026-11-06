@@ -1,4 +1,4 @@
-import { boxes, hex, MARKET, STAKE } from '../index.js';
+import { boxes, FACTORY_DEPLOYMENTS, hex, MARKET, STAKE } from '../index.js';
 import { readHistoricalCalls } from './multicall.js';
 import { alchemy, callRecord, callRecordKey, evidencePlan, getSourceLogs, receiptRecord, walletLog } from './chain.js';
 import { callRows, HistoryChunkTooLarge, initialize, listSources, publishedHead, publish, receiptKeys, rememberSources, saveChunk } from './store.js';
@@ -7,7 +7,8 @@ const initialSources = [
   { address: STAKE, kind: 'stake', deployment: 50634768 },
   { address: MARKET, kind: 'market', deployment: 50635450 },
 ];
-const factoryDeployments = { card: 50636771, token: 52098220 };
+const [card, token] = FACTORY_DEPLOYMENTS;
+const factoryDeployments = { card, token };
 
 async function deployments(reader, contracts, head) {
   const candidates = contracts.map(({ address, type }) => ({
