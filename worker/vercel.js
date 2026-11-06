@@ -31,9 +31,11 @@ export default {
           || body.assets.some(asset => !asset || !valid(asset.collection) || typeof asset.tokenId !== 'string' || !/^\d{1,78}$/.test(asset.tokenId))) {
           return json({ error: '持倉查詢參數無效' }, 400);
         }
-        const head = await finalizedWalletBlock(alchemy({ maxUnits: 500 }));
+        const reader = alchemy({ maxUnits: 15_000, maxMs: 20_000 });
+        const head = await finalizedWalletBlock(reader);
         if (body.block < WALLET_HISTORY_START || body.block > Number(head.number)) return json({ error: '持倉區塊超出已最終確認的範圍' }, 409);
-        return json({ assets: await holdings(body.wallet.toLowerCase(), body.assets, body.block) });
+        const assets = await holdings(body.wallet.toLowerCase(), body.assets, body.block, reader);
+        return json({ assets, usage: reader.stats });
       }
       return json({ error: 'Method not allowed' }, 405);
     } catch (error) {
