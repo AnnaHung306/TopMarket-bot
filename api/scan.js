@@ -1,1 +1,1 @@
-export { default } from '../worker/index.js';
+export { default } from '../worker/vercel.js';

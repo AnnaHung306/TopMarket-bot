@@ -9,7 +9,7 @@ worker/index.js 包含完整 Worker、HTML、CSS、瀏覽器 JavaScript；dev.mj
 
 ## 合約與來源
 Base mainnet，chainId 8453；USDC 使用 6 decimals，不假設等同美元。
-RPC：https://base-rpc.publicnode.com 。錢包與查詢資料會傳給這個公開 RPC。
+Vercel 使用 Alchemy Base Mainnet RPC，並從伺服器端 `ALCHEMY_API_KEY` 讀取憑證。未設定 key 的本機預覽使用 https://base-rpc.publicnode.com 。錢包與查詢資料會傳給所使用的 Base RPC。
 呼叫 eth_blockNumber、eth_getLogs、eth_call、eth_getTransactionReceipt。
 研究曾核對官方前端、DeFiLlama factory 定義、BaseScan verified source；執行時只讀 RPC，BaseScan 是交易／合約證據連結。
 
