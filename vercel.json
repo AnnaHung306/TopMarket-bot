@@ -3,8 +3,9 @@
   "framework": null,
   "buildCommand": "node scripts/build-vercel.mjs",
   "outputDirectory": "dist/vercel-static",
-  "functions": { "api/sync-history.js": { "maxDuration": 300 } },
-  "crons": [{ "path": "/api/sync-history", "schedule": "15 * * * *" }],
+  "functions": {
+    "api/refresh.js": { "maxDuration": 300 }
+  },
   "headers": [
     {
       "source": "/(index\\.html|)",

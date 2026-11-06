@@ -48,6 +48,16 @@ ctx.input=[receipt('small-stake','staking-confirmed','1000')];
 vm.runInContext("state.events=input;render();$('example').onclick();",ctx);
 assert(nodes.get('posterMetrics').innerHTML.includes('<span>質押收益（已核實）</span><b>0.001</b>'));
 assert.equal(nodes.get('wallet').value,'0x394d3f699e0082fe9c4970f0e3c2de248ea21eed');
+const refreshRequests=[];
+ctx.setTimeout=callback=>callback();
+ctx.fetch=async (path, options)=>{
+  refreshRequests.push({path, through: options ? JSON.parse(options.body).through : undefined});
+  if(path==='/api/init')return {ok:true,json:async()=>({head:12,indexed:true})};
+  const ready=refreshRequests.length>1;
+  return {ok:true,json:async()=>({ready,target:12,head:ready?12:10})};
+};
+assert.equal((await vm.runInContext('prepareIndexedReport({head:10})',ctx)).head,12);
+assert.deepEqual(refreshRequests,[{path:'/api/refresh',through:undefined},{path:'/api/refresh',through:12},{path:'/api/init',through:undefined}]);
 ctx.input=[{...draw,sourceStatus:'adapter-source-unresolved',randomnessSource:box},won,kept];
 vm.runInContext("state.events=input;$('csv').onclick();",ctx);
 const pendingRows=ctx.exported.trimEnd().split('\n').slice(1).map(parse).map(obj);

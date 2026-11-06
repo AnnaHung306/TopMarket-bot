@@ -12,7 +12,7 @@ const signatures = {
 const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_chainId: 0, eth_getBlockByNumber: 16, alchemy_getAssetTransfers: 120 };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infinity } = {}) {
+export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infinity, beforeRequest = () => {} } = {}) {
   if (!process.env.ALCHEMY_API_KEY?.trim()) throw Error('Alchemy Base RPC is not configured');
   const stats = { units: 0, requests: 0, retries: 0, splits: 0, methods: {} };
   const deadline = performance.now() + maxMs;
@@ -20,6 +20,7 @@ export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infin
   async function request(payload, methods) {
     const cost = methods.reduce((sum, method) => sum + (units[method] ?? 80), 0);
     for (let attempt = 0; ; attempt++) {
+      beforeRequest();
       if (Math.max(nextTime, performance.now()) >= deadline) throw Error('Alchemy sync time limit reached; saved chunks can resume');
       if (stats.units + cost > maxUnits) throw Error('Alchemy sync budget reached; saved chunks can resume');
       stats.units += cost;
@@ -28,6 +29,7 @@ export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infin
       const start = Math.max(nextTime, performance.now());
       nextTime = start + cost * 1_000 / perSecond;
       if (start > performance.now()) await delay(start - performance.now());
+      beforeRequest();
       try {
         return await rpcRequest(payload);
       } catch (error) {

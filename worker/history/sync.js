@@ -57,18 +57,21 @@ async function prepareEvidence(sql, reader, logs) {
 }
 
 export async function synchronize(sql, {
-  reader = alchemy(), onProgress = () => {}, maxMs = Infinity, range = 25_000, parallelChunks = 1,
+  reader = alchemy(), onProgress = () => {}, maxMs = Infinity, range = 25_000, parallelChunks = 1, through, assertLock = () => {},
 } = {}) {
   if (!Number.isSafeInteger(range) || range < 1) throw Error('Invalid index chunk size');
   if (!Number.isSafeInteger(parallelChunks) || parallelChunks < 1 || parallelChunks > 3) throw Error('Invalid index chunk concurrency');
   const started = performance.now();
   const totals = { chunks: 0, logs: 0, receipts: 0, evidence: 0 };
   await initialize(sql);
-  const [chain, head, previous] = await Promise.all([
+  const [chain, finalized, previous] = await Promise.all([
     reader.rpc('eth_chainId', []), reader.rpc('eth_getBlockByNumber', ['finalized', false]), publishedHead(sql),
   ]);
-  if (Number(chain) !== 8453 || !head?.hash) throw Error('Cannot verify finalized Base Mainnet head');
-  const target = Number(head.number);
+  if (Number(chain) !== 8453 || !finalized?.hash) throw Error('Cannot verify finalized Base Mainnet head');
+  const finalizedBlock = Number(finalized.number);
+  const target = Math.min(through ?? finalizedBlock, finalizedBlock);
+  const head = target === finalizedBlock ? finalized : await reader.rpc('eth_getBlockByNumber', [hex(target), false]);
+  if (!head?.hash || Number(head.number) !== target) throw Error('Cannot verify the Base synchronization target');
   if (previous) {
     const checked = previous.block === target ? head : await reader.rpc('eth_getBlockByNumber', [hex(previous.block), false]);
     if (target < previous.block || checked?.hash !== previous.hash) throw Error('Published Base checkpoint no longer matches the chain');
@@ -77,6 +80,7 @@ export async function synchronize(sql, {
   const registered = await boxes(hex(target), reader.batch);
   if (!registered.length) throw Error('No factory contracts available at finalized head');
   const known = new Set((await listSources(sql)).map(source => source.address));
+  assertLock();
   await rememberSources(sql, [
     ...initialSources.filter(source => !known.has(source.address)),
     ...await deployments(reader, registered.filter(source => !known.has(source.address)), target),
@@ -108,6 +112,7 @@ export async function synchronize(sql, {
         throw result.error;
       }
       const { from, to, logs, receipts, calls, evidence } = result;
+      assertLock();
       await saveChunk(sql, group, from, to, logs.map(log => walletLog(log, evidence)), receipts, calls);
       for (const source of group) source.through = to;
       totals.chunks++;
@@ -123,6 +128,7 @@ export async function synchronize(sql, {
     const snapshot = block === target ? head : await reader.rpc('eth_getBlockByNumber', [hex(block), false]);
     if (!snapshot?.hash || Number(snapshot.number) !== block) throw Error('Cannot verify finalized index snapshot');
     const collections = await reader.rpc('eth_call', [{ to: STAKE, data: '0xd57f966b' }, hex(block)]);
+    assertLock();
     await publish(sql, snapshot, Number(BigInt(collections)));
   }
   return {

@@ -82,6 +82,31 @@ const cash=known?(t.net>0n?'+':'')+money(Number(t.net)/1e6):'—';$('cash').text
 async function checkHoldings(){const candidates=totals().events.filter(x=>x.collection&&x.tokenId&&['won','kept','staked','purchaseGross','nftReceived'].includes(x.category));const unique=[...new Map(candidates.map(x=>[x.collection+':'+x.tokenId,{collection:x.collection,tokenId:x.tokenId}])).values()];state.assets=[];for(let i=0;i<unique.length;i+=40){updateScanStatus('holdings', '正在核實卡片持有權 '+(i+1)+' / '+unique.length, blockProgress());const r=await fetch('/api/holdings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({wallet:state.wallet,assets:unique.slice(i,i+40),block:state.head})});const d=await r.json();if(!r.ok)throw Error(d.error||'Holdings lookup failed');state.assets.push(...d.assets);}const costs=linkAcquisitionCosts(totals().events);state.assets=state.assets.map(asset=>{const matches=costs.filter(c=>c.collection===asset.collection&&c.tokenId===asset.tokenId);return {...asset,drawAcquisitionCost:matches.length===1?matches[0].acquisitionCost:null,costNote:'Observed draw acquisition expenditure only; current lot basis unknown'};});state.holdingsChecked=true;}
 function clearPosterDownload(){const file=$('posterFile');if(file){URL.revokeObjectURL(file.href);file.remove();}$('posterImage')?.remove();}
 async function get(path){const r=await fetch(path);const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'資料讀取失敗');return d;}
+async function prepareIndexedReport(init) {
+  let through, lastHead = init.head;
+  let deadline = Date.now() + 5 * 60_000;
+  updateScanStatus('refreshing', '正在確認是否有新區塊…');
+  while (!stopped && Date.now() < deadline) {
+    const response = await fetch('/api/refresh', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ through }),
+    });
+    const sync = await response.json();
+    if (!response.ok) throw Error(sync.error || '增量同步失敗');
+    if (stopped) return null;
+    if (sync.ready) return sync.head === init.head ? init : get('/api/init');
+    through = sync.target;
+    if (sync.head > lastHead) {
+      lastHead = sync.head;
+      deadline = Date.now() + 5 * 60_000;
+    }
+    updateScanStatus('refreshing', '全站正在同步新區塊，完成後會自動查詢錢包。');
+    await new Promise(resolve => setTimeout(resolve, 2_000));
+  }
+  if (stopped) return null;
+  throw Error('增量同步尚未完成，請稍後再查');
+}
 function blockProgress() {
   if (state.through === undefined) return null;
   return (state.through - state.from + 1) / (state.head - state.from + 1) * 100;
@@ -110,7 +135,12 @@ $('form').onsubmit = async event => {
   updateScanStatus('preparing', '正在讀取 Base 區塊與工廠合約…');
   render();
   try {
-    const init = await get('/api/init');
+    let init = await get('/api/init');
+    if (init.refreshOnRequest) init = await prepareIndexedReport(init);
+    if (stopped) {
+      updateScanStatus('stopped', '已停止錢包查詢。');
+      return;
+    }
     Object.assign(state, {
       from: range === 'all' ? init.start : Math.max(init.start, init.head - Number(range) + 1),
       head: init.head, contracts: init.contracts, asOf: init.asOf, rpc: init.rpc,
