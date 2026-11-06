@@ -5,7 +5,7 @@ Node.js 22+（已測 Node.js 24）、npm；build 需 bash。無第三方套件�
 執行 npm run dev，開啟 http://127.0.0.1:3000。自訂埠：npm run dev -- --port 3099。
 npm test 跑全部測試；npm run build 產生 dist/server/index.js；npm run validate 檢查 Worker。
 ZIP 是本機可攜版本，排除 .git、.openai、託管專案識別、憑證及生成物；不會部署或更動既有網站。本機 server 僅綁 127.0.0.1。
-worker/index.js 包含完整 Worker、HTML、CSS、瀏覽器 JavaScript；dev.mjs 是本機 HTTP 包裝器。
+worker/index.js 提供 Worker 路由與鏈上查詢；worker/report/ 分別管理 HTML、CSS、瀏覽器 JavaScript 與玻璃效果。Build 仍會輸出單檔 Worker；dev.mjs 是本機 HTTP 包裝器。
 
 ## 合約與來源
 Base mainnet，chainId 8453；USDC 使用 6 decimals，不假設等同美元。
@@ -62,7 +62,7 @@ GET / 是前端。GET /api/init 回傳已發佈的 Base 最終確認區塊、起
 - Withdrawn：可混合延期用途，目前不做完整用途歸屬，不納入小計。
 
 ## 計算與限制
-收入小計＝已核實退款＋市場銷售實收＋WinRecycled 質押分潤實收＋得獎者回購實收。不是損益，只是已覆蓋證據下限。
+收入小計＝已核實退款＋市場銷售實收＋WinRecycled 質押分潤實收＋得獎者回購實收。報表與海報主數字是「已識別淨收支」＝收入小計－已核對的 USDC 抽卡付款－USDC 市場買卡事件金額。買卡採用成交事件名目額，拍賣付款可能早於成交。此數字僅涵蓋所選區塊與已辨識事件，與完整損益的口徑不同。
 退款、分潤、回購要求成功收據；事件區塊前後 treasury 相同、settlementToken 均 USDC、整個區塊無 TreasuryUpdated；同交易／payer／recipient／raw amount 雙向唯一且無匹配 PayoutDeferred。payer 是 treasury，不是 box。先改再改回也拒絕。
 缺 archive data、同額多筆、跨類別歧義全部待核對。以 transfer log identity 跨退款／質押／回購去重；已算銷售的收據不能再算回購。TokenBlindBox 回購及完整 WinKept NFT 處分收入尚未實作。
 抽卡付款必須守恆於同交易同 box 全部 paid+fee，核對歷史 treasury／feeRecipient。多 box、自付給自己的收款方、缺資料或不明 token 不推定。
@@ -71,7 +71,7 @@ GET / 是前端。GET /api/init 回傳已發佈的 Base 最終確認區塊、起
 從事件發現持倉候選，再於固定 snapshot 用 ownerOf／stakerOf 核實；外部轉入及更早部位可能缺漏。cachedPriceOf 是附時間協議參考價，不是可成交報價。未知不填零。
 
 ## 匯出與測試
-JSON 包含事件、警告、持倉、acquisitionCosts 及方法。CSV 共 22 欄，含 collection、token_id、win_id、linked_draw_id、acquisition_cost_raw／usdc、狀態原因、payment_verified、randomness_source／source_status、nft_receipt_id；未知成本 UNKNOWN，標準引號轉義。PNG 同步四類收入與 pending 提示；逐筆成本請看 CSV／JSON。列印可存 PDF。
+JSON 包含事件、警告、持倉、acquisitionCosts 及方法。CSV 共 22 欄，含 collection、token_id、win_id、linked_draw_id、acquisition_cost_raw／usdc、狀態原因、payment_verified、randomness_source／source_status、nft_receipt_id；未知成本 UNKNOWN，標準引號轉義。PNG 同步報表卡片的淨收支與已識別收支項目；逐筆成本請看 CSV／JSON。列印可存 PDF。
 npm test 執行八份合成測試，不需網路：
 1. test.mjs：decoder、參數、HTML／JS 語法。
 2. integration-test.mjs：gross/net、無效拍賣、snapshot。
