@@ -7,7 +7,7 @@ export function reportClientScript(linkAcquisitionCosts) {
 ${renderWalletPoster.toString()}
 ${updateScanStatus.toString()}
 const glassRefractionTools = (${createGlassRefractionTools.toString()})();
-const $=id=>document.getElementById(id);const labels={pack:'抽卡花費（已核實）',refund:'已確認退款實收',buyback:'回購名目額',buybackConfirmed:'回購收入（已核實）',kept:'保留卡片',sales:'銷售實收',staking:'質押收益（已核實）', 'staking-confirmed':'質押收益實收', 'staking-pending':'質押收益待核對', 'staking-evidence':'質押收益事件（不加總）', 'buyback-claim-confirmed':'回購實收證據', 'buyback-claim-pending':'回購待核對', 'buyback-claim-evidence':'回購事件（不加總）',holdings:'持倉卡片估值（參考）',subsidy:'補貼','refund-transfer':'指定地址退款',won:'抽中卡片',staked:'質押存入',unstaked:'質押取回',saleGross:'銷售名目額',purchaseGross:'市場買卡（事件金額）',selfTrade:'自成交（排除）',nftReceived:'NFT 轉入'};let state={events:[],wallet:'',complete:false,started:false},running=false,stopped=false;const money=(n,digits=2)=>n==null?'—':n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:digits});
+const $=id=>document.getElementById(id);const labels={pack:'抽卡花費（已核實）',refund:'抽卡退款（已核實）',buyback:'回購名目額',buybackConfirmed:'回購收入（已核實）',kept:'保留卡片',sales:'銷售實收',staking:'質押收益（已核實）', 'staking-confirmed':'質押收益實收', 'staking-pending':'質押收益待核對', 'staking-evidence':'質押收益事件（不加總）', 'buyback-claim-confirmed':'回購實收證據', 'buyback-claim-pending':'回購待核對', 'buyback-claim-evidence':'回購事件（不加總）',holdings:'持倉卡片估值（參考）',subsidy:'補償','refund-transfer':'指定地址退款',won:'抽中卡片',staked:'質押存入',unstaked:'質押取回',saleGross:'銷售名目額',purchaseGross:'市場買卡（事件金額）',selfTrade:'自成交（排除）',nftReceived:'NFT 轉入'};let state={events:[],wallet:'',complete:false,started:false},running=false,stopped=false;const money=(n,digits=2)=>n==null?'—':n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:digits});
 function totals() {
   const events = [...new Map(state.events.map(event => [event.id, event])).values()];
   const sum = (category, include = () => true) => events.filter(event => event.category === category && event.raw !== null && include(event))
@@ -132,9 +132,8 @@ $('form').onsubmit = async event => {
   event.preventDefault();
   if (running) return;
   const wallet = $('wallet').value.trim();
-  const refund = $('refund').value.trim();
   const range = $('range').value;
-  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet) || refund && !/^0x[0-9a-fA-F]{40}$/.test(refund)) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
     updateScanStatus('error', '請輸入正確的 42 字元 Base 地址。');
     return;
   }
@@ -147,7 +146,7 @@ $('form').onsubmit = async event => {
   $('example').disabled = true;
   $('cancel').hidden = false;
   $('cancel').disabled = false;
-  state = {wallet, refund, events:[], warnings:[], complete:false, started:false};
+  state = {wallet, events:[], warnings:[], complete:false, started:false};
   updateScanStatus('preparing', '正在讀取 Base 區塊與工廠合約…');
   render();
   try {
@@ -169,7 +168,7 @@ $('form').onsubmit = async event => {
       updateScanStatus('scanning', (init.indexed ? '正在讀取 Neon 歷史索引 ' : '正在讀取區塊 ') + span, blockProgress());
       let batch;
       try {
-        batch = await get('/api/scan?wallet=' + wallet + '&from=' + from + '&to=' + to + '&refund=' + refund);
+        batch = await get('/api/scan?wallet=' + wallet + '&from=' + from + '&to=' + to);
       } catch (error) {
         if (init.indexed || size <= 2000) throw error;
         size = Math.max(2000, Math.floor(size / 5));

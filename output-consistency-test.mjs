@@ -18,7 +18,7 @@ vm.runInContext("save=(text)=>{globalThis.exported=text;};state={events:input,wa
 assert.equal(nodes.get('cash').textContent,'-2.00','15.00 confirmed inflows less 11.00 for draws and 6.00 for a single USDC market purchase');
 assert.equal(nodes.get('posterCash').textContent,'-2.00');
 assert(nodes.get('metrics').innerHTML.includes('回購收入（已核實）'));
-assert(nodes.get('posterMetrics').innerHTML.includes('<span>補貼</span><b>待確認（未計入）</b>'));
+assert(nodes.get('posterMetrics').innerHTML.includes('<span>補償</span><b>待確認（未計入）</b>'));
 assert(nodes.get('warning').textContent.includes('回購待核對 1 筆'));
 assert(nodes.get('warning').textContent.includes('抽卡付款待核對 1 筆'));
 assert(html.includes('收入小計：已核實退款 + 市場銷售實收 + WinRecycled 質押分潤實收 + 得獎者回購實收'));

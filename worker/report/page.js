@@ -49,12 +49,11 @@ export function renderWalletReport(linkAcquisitionCosts) {
         </div>
       </form>
       <details class="options-disclosure">
-        <summary>分析範圍與退款來源</summary>
+        <summary>分析範圍</summary>
         <div class="options">
-          <label>掃描範圍<select id="range"><option value="all">完整可追溯期間（可中途停止）</option><option value="50000">最近 50,000 blocks · 快速查核</option><option value="500000">最近 500,000 blocks</option></select></label>
-          <label>額外退款發放地址（選填）<input id="refund" placeholder="0x…；由你確認的 USDC 發款地址" spellcheck="false"></label>
+          <label>掃描範圍<select id="range"><option value="all">完整可追溯期間（從合約部署起）</option><option value="50000">最近 50,000 blocks · 快速查核</option><option value="500000">最近 500,000 blocks</option></select></label>
         </div>
-        <p class="caption">退款須逐筆匹配同筆交易、歷史 treasury 付款方、同金額的 USDC 收據，且雙向唯一才列已確認收入。多個可能對應、收據缺失及額外地址未證實用途的轉帳，一律待核對，不列收入。</p>
+        <p class="caption">抽卡退款會自動核對合約事件、當時的金庫地址與同筆 USDC 入帳。活動補償另列，須有可核對的發放證據。</p>
       </details>
       ${scanStatusMarkup}
     </section>

@@ -54,7 +54,8 @@ GET / 是前端。GET /api/init 回傳已發佈的 Base 最終確認區塊、起
 - Won：requestId／winId／NFT 關聯；price 不是玩家成本。
 - WinKept：仍須 wins getter 與真正 ERC-721 Transfer 證明取得。付原質押人的款是 NFT 處分收入，不是質押利息。
 - WinRecycled：winner recyclePrice 與非 indexed stakerShare 是不同款項；同一人可兼具角色。
-- DrawRefunded／RequestRescued：退款請求證據，不直接當現金。
+- DrawRefunded／RequestRescued：抽卡退款的請求證據，不直接當現金。
+- 活動補償（例如 Genesis Pack Lucky Airdrop）與抽卡退款分列，須有可核對的發放紀錄和實際入帳，才能認列。
 - TreasuryUpdated／FeeRecipientUpdated：歷史變更保護；PayoutDeferred 是延期款。
 - Sold／OfferAccepted／拍賣結算：辨識買賣方，再核對 USDC；自成交排除。
 - Staked／Unstaked：持倉候選，不是收益。
