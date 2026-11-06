@@ -57,9 +57,10 @@ async function prepareEvidence(sql, reader, logs) {
 }
 
 export async function synchronize(sql, {
-  reader = alchemy(), onProgress = () => {}, maxMs = Infinity, range = 25_000,
+  reader = alchemy(), onProgress = () => {}, maxMs = Infinity, range = 25_000, parallelChunks = 1,
 } = {}) {
   if (!Number.isSafeInteger(range) || range < 1) throw Error('Invalid index chunk size');
+  if (!Number.isSafeInteger(parallelChunks) || parallelChunks < 1 || parallelChunks > 3) throw Error('Invalid index chunk concurrency');
   const started = performance.now();
   const totals = { chunks: 0, logs: 0, receipts: 0, evidence: 0 };
   await initialize(sql);
@@ -86,17 +87,36 @@ export async function synchronize(sql, {
   while (cursor < target && performance.now() - started < maxMs) {
     const group = sources.filter(source => source.through === cursor);
     const next = Math.min(...sources.filter(source => source.through > cursor).map(source => source.through));
-    const from = cursor + 1, to = Math.min(target, next, cursor + range);
-    const logs = await getSourceLogs(reader, group, from, to);
-    const { receipts, calls, evidence } = await prepareEvidence(sql, reader, logs);
-    await saveChunk(sql, group, from, to, logs.map(log => walletLog(log, evidence)), receipts, calls);
-    for (const source of group) source.through = to;
+    const windows = [];
+    const boundary = Math.min(target, next);
+    for (let from = cursor + 1; from <= boundary && windows.length < parallelChunks; from += range) {
+      windows.push({ from, to: Math.min(boundary, from + range - 1) });
+    }
+    const work = windows.map(async ({ from, to }) => {
+      try {
+        const logs = await getSourceLogs(reader, group, from, to);
+        return { from, to, logs, ...await prepareEvidence(sql, reader, logs) };
+      } catch (error) {
+        return { error };
+      }
+    });
+    // Fetch independent ranges concurrently, but commit a contiguous prefix in order.
+    for (const job of work) {
+      const result = await job;
+      if (result.error) {
+        await Promise.all(work);
+        throw result.error;
+      }
+      const { from, to, logs, receipts, calls, evidence } = result;
+      await saveChunk(sql, group, from, to, logs.map(log => walletLog(log, evidence)), receipts, calls);
+      for (const source of group) source.through = to;
+      totals.chunks++;
+      totals.logs += logs.length;
+      totals.receipts += receipts.length;
+      totals.evidence += calls.length;
+      onProgress({ from, to, logs: logs.length, receipts: receipts.length, ...reader.stats });
+    }
     cursor = Math.min(...sources.map(source => source.through));
-    totals.chunks++;
-    totals.logs += logs.length;
-    totals.receipts += receipts.length;
-    totals.evidence += calls.length;
-    onProgress({ from, to, logs: logs.length, receipts: receipts.length, ...reader.stats });
   }
   if (cursor >= target || (previous && cursor > previous.block)) {
     const block = Math.min(cursor, target);
