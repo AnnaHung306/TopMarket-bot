@@ -175,17 +175,7 @@ button:not(:disabled):hover { border-color: #83e8ff; }
 #analyze span, #download span { margin-left: 4px; }
 .quiet:not(:disabled) { background: #1c323b72; }
 .quiet:not(:disabled):hover { background: #27444f; }
-button.text-button {
-  border: 0;
-  background: transparent;
-  color: #8cecff;
-  font-size: 12px;
-  min-height: 32px;
-  padding: 2px 0 2px 6px;
-}
-.text-button:hover { text-decoration: underline; text-underline-offset: 3px; }
 #cancel[hidden] { display: none; }
-button.text-button:disabled { opacity: .55; }
 .scan-status { position: relative; margin-top: 16px; }
 .scan-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .scan-phase { color: var(--ink); font-size: 13px; font-weight: 700; }
