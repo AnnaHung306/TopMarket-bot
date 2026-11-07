@@ -3,6 +3,10 @@ import vm from 'node:vm';
 import worker from './worker/index.js';
 const html=await(await worker.fetch(new Request('https://local/'))).text(),script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const nodes=new Map(),ctx={document:{getElementById:id=>{if(!nodes.has(id))nodes.set(id,{style:{setProperty(){}},dataset:{},focus(){}});return nodes.get(id);}}};vm.createContext(ctx);vm.runInContext(script,ctx);
+for (const label of ['奪寶參與', '奪寶收入']) {
+  assert(nodes.get('metrics').innerHTML.includes('<label>'+label+'</label><b>尚未查詢</b>'));
+  assert(nodes.get('posterMetrics').innerHTML.includes('<span>'+label+'</span><b>尚未查詢</b>'));
+}
 const box='0x'+'1'.repeat(40),nft='0x'+'2'.repeat(40);
 const common={contract:box,tx:'0xabc',logIndex:1,block:1,amount:null,raw:null};
 const draw={...common,id:'draw',category:'pack',packKind:'card',requestId:'7',paidRaw:'10000000',feeRaw:'1000000',raw:'11000000',amount:11,paymentVerified:true,sourceStatus:'legacy-receipt'};
@@ -51,9 +55,19 @@ assert.equal(nodes.get('cash').textContent,'-191.50');
 assert(nodes.get('posterMetrics').innerHTML.includes('<span>空投</span><b>160.10</b>'));
 assert(!nodes.get('metrics').innerHTML.includes('抽卡退款'));
 assert(!nodes.get('posterMetrics').innerHTML.includes('抽卡退款'));
-assert(!nodes.get('posterMetrics').innerHTML.includes('奪寶參與'));
+for (const label of ['奪寶參與', '奪寶收入']) {
+  assert(nodes.get('metrics').innerHTML.includes('<label>'+label+'</label><b>待更新</b><small>按「更新到最新區塊」</small>'));
+  assert(nodes.get('posterMetrics').innerHTML.includes('<span>'+label+'</span><b>待更新</b>'));
+}
+assert.equal(JSON.parse(ctx.exported).cashFlow.raffleParticipationRaw,null);
+assert.equal(JSON.parse(ctx.exported).cashFlow.raffleIncomeRaw,null);
 assert(!nodes.get('metrics').innerHTML.includes('另有待核對'));
 assert.equal(JSON.parse(ctx.exported).cashFlow.netRaw,'-191500000');
+vm.runInContext("state.summary={totals:{...snapshotTotals,raffleParticipation:'0',raffleIncome:'0'}};render();$('json').onclick();delete state.summary;",ctx);
+for (const label of ['奪寶參與', '奪寶收入']) {
+  assert(nodes.get('posterMetrics').innerHTML.includes('<span>'+label+'</span><b>0.00</b>'));
+}
+assert.equal(JSON.parse(ctx.exported).cashFlow.raffleIncomeRaw,'0');
 vm.runInContext("state.summary={totals:{...snapshotTotals,raffleParticipation:'3437000000',raffleIncome:'3415500000',raffleCards:'1'}};render();$('json').onclick();delete state.summary;",ctx);
 assert.equal(nodes.get('posterCash').textContent,'-213.00');
 assert(nodes.get('posterMetrics').innerHTML.includes('<span>奪寶參與</span><b>3,437.00</b>'));

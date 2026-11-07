@@ -58,6 +58,7 @@ export function displayWalletTotals(record, events) {
     events, pack, marketPurchases, refund, sales, stakingInflow, buybackReceived, keptDisposal,
     compensation, campaignPrizes, campaignOther, raffleParticipation, raffleIncome, raffleRefund, raffleCards,
     inflows, outflows, net: inflows - outflows,
+    raffleKnown: Object.hasOwn(record, 'raffleParticipation'),
     stakingInflowKnown: BigInt(record.stakingCount) + BigInt(record.keptDisposalCount ?? '0') > 0n,
     buybackKnown: BigInt(record.buybackCount) > 0n,
     pendingPacks: Number(record.pendingPacks),

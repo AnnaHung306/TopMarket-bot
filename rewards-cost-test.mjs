@@ -79,6 +79,10 @@ assert.deepEqual(campaignPayoutEvents(firstWallet, [{ ...fifthUnitemized,
 const oldTotals = Object.fromEntries(Object.entries(summarizeWalletEvents([])).filter(([field]) => !field.startsWith('raffle')));
 const stored = { version: 3, start: 50_634_768, through: 53_268_066, totals: oldTotals };
 const cacheRead = snapshot => walletCachePage(async () => [{ revision: 1, snapshot }], fifthWallet);
+const legacy = { ...stored, version: 2, totals: { ...oldTotals, pendingBuybacks: '123' } };
+assert.deepEqual(await cacheRead(legacy), {
+  ready: true, cached: true, snapshot: { ...legacy, rebuildRequired: true }, usage: { units: 0 },
+});
 const restored = await cacheRead(stored);
 assert.equal(restored.usage.units, 0);
 assert.equal(restored.snapshot.totals.raffleParticipation, undefined);

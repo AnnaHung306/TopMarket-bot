@@ -48,13 +48,15 @@ function reportMetrics(totals, holdings) {
     value: value === null ? noResult() : money(value),
     note: value === null ? '' : unit,
   });
-  const raffleIncome = metric('raffleIncome', amount(totals.raffleIncome));
+  const raffleMetric = (key, raw) => started && !totals.raffleKnown
+    ? { label: labels[key], value: '待更新', note: state.summary?.rebuildRequired ? '按「重新核對舊版報表」' : '按「更新到最新區塊」' }
+    : metric(key, started ? amount(raw) : null);
+  const raffleIncome = raffleMetric('raffleIncome', totals.raffleIncome);
   if (totals.raffleCards > 0n) {
     const cards = totals.raffleCards + ' 張卡';
     raffleIncome.value = totals.raffleIncome > 0n ? raffleIncome.value + ' USDC ＋ ' + cards : cards;
     raffleIncome.note = '';
   }
-  const hasRaffle = totals.raffleParticipation > 0n || totals.raffleRefund > 0n || totals.raffleIncome > 0n || totals.raffleCards > 0n;
   return [
     started && totals.pendingPacks && totals.pack === 0n
       ? { label: labels.pack, value: '付款待核對', note: '' }
@@ -62,7 +64,8 @@ function reportMetrics(totals, holdings) {
     metric('purchaseGross', started ? amount(totals.marketPurchases) : null),
     receipt('buybackConfirmed', totals.buybackReceived, totals.buybackKnown, totals.pendingBuybacks),
     receipt('airdrop', airdrop, airdrop > 0n, false, '查無已核實入帳'),
-    ...(hasRaffle ? [metric('raffleParticipation', amount(totals.raffleParticipation - totals.raffleRefund)), raffleIncome] : []),
+    raffleMetric('raffleParticipation', totals.raffleParticipation - totals.raffleRefund),
+    raffleIncome,
     receipt('staking', totals.stakingInflow, totals.stakingInflowKnown, totals.pendingStakingInflow),
     ...(holdings === null ? [] : [{ label: labels.holdings, value: money(holdings), note: '已查卡片 · 協議參考值' }]),
     ...(totals.refund > 0n ? [receipt('refund', totals.refund, true, false)] : []),
@@ -82,6 +85,7 @@ $('holdingCountMetric').hidden=!verified;
 $('holdingCount').textContent=verified?held.length+' 張（已查卡片）':'';
 $('holdingsSection').hidden=!state.holdingsChecked||Boolean(state.holdingsError)||!held.length;
 $('update').hidden=!state.summary;
+$('update').textContent=state.summary?.rebuildRequired?'重新核對舊版報表（會查鏈）':'更新到最新區塊';
 $('fullEvidence').hidden=!state.summary||state.fullEvidence;
 $('json').textContent=state.summary&&!state.fullEvidence?'匯出收支摘要 JSON':'匯出完整 JSON';
 const metrics=reportMetrics(t,value);
@@ -101,7 +105,7 @@ for(const id of ['cash','posterCash']){
 const timestamp=Number.isFinite(Date.parse(state.asOf))
   ? ' · 資料截至台灣時間 ' + new Date(state.asOf).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false})
   : '';
-$('posterWallet').textContent=(['0xe618f35dfbf4ab79b02b315fd60c69cd289ef75d','0x394d3f699e0082fe9c4970f0e3c2de248ea21eed','0xf867fa8db27a7d0f0eb72a46ea4cf6c6ead32b56'].includes(state.wallet)?'公開範例 · 非你的錢包 / ':'')+(state.wallet||'YOUR BASE WALLET');$('coverage').textContent=known?'區塊 '+state.from.toLocaleString()+'–'+state.through.toLocaleString()+' / '+(state.complete?(state.cacheHit?'已存收支摘要':'完整收支已核對'):'掃描未完成')+' · USDC'+timestamp:'輸入錢包以讀取 Base 鏈上紀錄';$('posterDate').textContent=known?state.asOf+' · blocks '+state.from+'–'+state.through:'BASE / EVIDENCE FIRST';$('rows').innerHTML=t.events.length?t.events.slice().sort((a,b)=>b.block-a.block||b.logIndex-a.logIndex).slice(0,300).map(e=>'<tr><td>'+evidenceLabel(e)+'</td><td>'+money(e.amount)+'</td><td>'+e.block+'</td><td><a target="_blank" rel="noopener" href="https://basescan.org/tx/'+e.tx+'">'+e.tx.slice(0,10)+'… ↗</a></td></tr>').join(''):'<tr><td colspan="4" class="empty">'+(state.summary&&!state.fullEvidence?'目前顯示已存收支。需要完整逐筆證據時，可另行核對。':known?'已掃描區間未找到匹配事件；不代表沒有其他活動':'鏈上證據將顯示於此')+'</td></tr>';$('assets').innerHTML=state.holdingsChecked?(held.length?'<div class="table-wrap"><table><thead><tr><th>資產</th><th>狀態</th><th>協議參考價</th><th>關聯抽卡支出</th><th>價格時間</th></tr></thead><tbody>'+held.map(x=>'<tr><td><a target="_blank" rel="noopener" href="https://basescan.org/token/'+x.collection+'?a='+x.tokenId+'">'+x.collection.slice(0,8)+'… #'+x.tokenId+'</a></td><td>'+(x.status==='staked'?'質押中':'錢包持有')+'</td><td>'+money(x.referenceValue)+'</td><td>'+money(x.drawAcquisitionCost)+'</td><td>'+(x.oracleTimestamp?new Date(x.oracleTimestamp*1000).toISOString().slice(0,10):'無報價時間')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="caption">所選事件候選中未確認持倉；不代表整個錢包持倉為零。</p>'):'<p class="caption">'+(state.holdingsError?'持倉查核失敗：'+String(state.holdingsError).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])):state.summary?'本次只讀取收支摘要，持倉未重新查核。':'持倉尚未查核')+'</p>';for(const id of ['csv','json','download','print'])$(id).disabled=!known;
+$('posterWallet').textContent=(['0xe618f35dfbf4ab79b02b315fd60c69cd289ef75d','0x394d3f699e0082fe9c4970f0e3c2de248ea21eed','0xf867fa8db27a7d0f0eb72a46ea4cf6c6ead32b56'].includes(state.wallet)?'公開範例 · 非你的錢包 / ':'')+(state.wallet||'YOUR BASE WALLET');$('coverage').textContent=known?'區塊 '+state.from.toLocaleString()+'–'+state.through.toLocaleString()+' / '+(state.complete?(state.summary?.rebuildRequired?'已存舊版收支摘要':state.cacheHit?'已存收支摘要':'完整收支已核對'):'掃描未完成')+' · USDC'+timestamp:'輸入錢包以讀取 Base 鏈上紀錄';$('posterDate').textContent=known?state.asOf+' · blocks '+state.from+'–'+state.through:'BASE / EVIDENCE FIRST';$('rows').innerHTML=t.events.length?t.events.slice().sort((a,b)=>b.block-a.block||b.logIndex-a.logIndex).slice(0,300).map(e=>'<tr><td>'+evidenceLabel(e)+'</td><td>'+money(e.amount)+'</td><td>'+e.block+'</td><td><a target="_blank" rel="noopener" href="https://basescan.org/tx/'+e.tx+'">'+e.tx.slice(0,10)+'… ↗</a></td></tr>').join(''):'<tr><td colspan="4" class="empty">'+(state.summary&&!state.fullEvidence?'目前顯示已存收支。需要完整逐筆證據時，可另行核對。':known?'已掃描區間未找到匹配事件；不代表沒有其他活動':'鏈上證據將顯示於此')+'</td></tr>';$('assets').innerHTML=state.holdingsChecked?(held.length?'<div class="table-wrap"><table><thead><tr><th>資產</th><th>狀態</th><th>協議參考價</th><th>關聯抽卡支出</th><th>價格時間</th></tr></thead><tbody>'+held.map(x=>'<tr><td><a target="_blank" rel="noopener" href="https://basescan.org/token/'+x.collection+'?a='+x.tokenId+'">'+x.collection.slice(0,8)+'… #'+x.tokenId+'</a></td><td>'+(x.status==='staked'?'質押中':'錢包持有')+'</td><td>'+money(x.referenceValue)+'</td><td>'+money(x.drawAcquisitionCost)+'</td><td>'+(x.oracleTimestamp?new Date(x.oracleTimestamp*1000).toISOString().slice(0,10):'無報價時間')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="caption">所選事件候選中未確認持倉；不代表整個錢包持倉為零。</p>'):'<p class="caption">'+(state.holdingsError?'持倉查核失敗：'+String(state.holdingsError).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])):state.summary?'本次只讀取收支摘要，持倉未重新查核。':'持倉尚未查核')+'</p>';for(const id of ['csv','json','download','print'])$(id).disabled=!known;
 if(state.summary&&!state.fullEvidence)$('csv').disabled=true;}
 async function checkHoldings(){
   const events=totals().events;
@@ -181,8 +185,9 @@ async function readWalletCache(wallet, afterBlock, previous) {
     if (data.progress) Object.assign(state, {
       from: data.progress.from, head: data.progress.target, through: data.progress.through, asOf: data.progress.asOf,
     });
+    const scanningHistory = afterBlock === undefined || previous.summary?.rebuildRequired;
     updateScanStatus('scanning', data.waiting ? '此錢包正在核對，等待共用結果。'
-      : afterBlock === undefined ? '正在核對完整錢包活動…' : '正在核對檢查點之後的錢包活動…', blockProgress());
+      : scanningHistory ? '正在核對完整錢包活動…' : '正在核對檢查點之後的錢包活動…', blockProgress());
     if (data.waiting) await new Promise(resolve => setTimeout(resolve, 1_500));
   }
 }
@@ -262,7 +267,8 @@ async function analyzeWallet(event, afterBlock, evidenceOnly = false) {
       }
     }
     if (state.complete) {
-      const message = state.cacheHit
+      const message = state.summary?.rebuildRequired ? '已讀取舊版收支摘要。重新核對後可更新交易分類。'
+        : state.cacheHit
         ? state.alchemyUnits ? '已核對最新區塊，沒有需要更新的範圍。' : '已讀取上次收支摘要，這次未向 Alchemy 查詢。'
         : state.summary && state.evidenceFrom === undefined ? '已更新累計收支。'
         : state.summary && !state.fullEvidence ? '已更新累計收支。逐筆證據僅含本次讀取的區塊。'
@@ -301,8 +307,10 @@ function save(content,name,type){const url=URL.createObjectURL(new Blob([content
 $('json').onclick=()=>{
 const t=totals();
 const cashFlow=state.started?{inflowsRaw:t.inflows.toString(),outflowsRaw:t.outflows.toString(),netRaw:t.net.toString(),stakingInflowRaw:t.stakingInflow.toString(),keptDisposalRaw:t.keptDisposal.toString(),compensationRaw:t.compensation.toString(),campaignPrizesRaw:t.campaignPrizes.toString(),campaignOtherRaw:t.campaignOther.toString(),
-  raffleParticipationRaw:t.raffleParticipation.toString(),raffleIncomeRaw:t.raffleIncome.toString(),
-  raffleRefundRaw:t.raffleRefund.toString(),raffleCards:t.raffleCards.toString(),unit:'USDC base units (6 decimals)'}:null;
+  raffleParticipationRaw:t.raffleKnown?t.raffleParticipation.toString():null,
+  raffleIncomeRaw:t.raffleKnown?t.raffleIncome.toString():null,
+  raffleRefundRaw:t.raffleKnown?t.raffleRefund.toString():null,
+  raffleCards:t.raffleKnown?t.raffleCards.toString():null,unit:'USDC base units (6 decimals)'}:null;
 save(JSON.stringify({...state,events:t.events,cashFlow,acquisitionCosts:linkAcquisitionCosts(t.events),methodology:{currency:'USDC',identifiedInflows:'uniquely receipt-matched refunds plus receipt-confirmed direct marketplace sale receipts, staking income, winner buybacks, verified campaign payouts and raffle buybacks or refunds; unique transfer identities counted once; excludes nominal events and delayed withdrawals',identifiedOutflows:'Receipt-verified USDC draw payments and nominal USDC marketplace purchase amounts and confirmed raffle entries in the scanned blocks; excludes gas, other markets and unobserved expenses',realizedPnl:null,unrealizedPnl:null,holdingsValue:null,limitations:['delayed marketplace withdrawals not reconciled','unpaid staking payouts are not included','linked draw acquisition expenditure is not current tax-lot basis','holdings candidates may be incomplete','protocol oracle references are not executable prices','gas excluded','unmatched buybacks excluded; NFT disposal proceeds incomplete']}},null,2),'top-market-report.json','application/json');
 };$('csv').onclick=()=>{const e=totals().events,costs=new Map(linkAcquisitionCosts(e).map(c=>[c.keptId,c]));const header='category,amount_usdc,raw_amount,block,transaction,log_index,contract,request_or_win_id,receipt_or_claim_id,reason,collection,token_id,win_id,linked_draw_id,acquisition_cost_raw,acquisition_cost_usdc,acquisition_cost_status,acquisition_cost_note,payment_verified,randomness_source,source_status,nft_receipt_id';const rows=e.map(x=>{const c=costs.get(x.id);return [x.category,x.amount==null?'UNKNOWN':x.amount,x.raw??'UNKNOWN',x.block,x.tx,x.logIndex,x.contract,x.requestId||x.winId||'',x.receiptId||x.claimId||'',x.reason||'',x.collection||c?.collection||'',x.tokenId||c?.tokenId||'',x.winId||'',c?.drawId||'',c?(c.acquisitionCostRaw??'UNKNOWN'):'',c?(c.acquisitionCost??'UNKNOWN'):'',c?.costStatus||'',c?.reason||'',x.category==='pack'?(x.paymentVerified?'true':'UNKNOWN'):'',x.randomnessSource||'',x.sourceStatus||'',x.nftReceiptId||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',');});save(header+'\n'+rows.join('\n'),'top-market-evidence.csv','text/csv;charset=utf-8');};$('print').onclick=()=>window.print();
 const posterFilename = 'top-market-wallet-poster.png';
