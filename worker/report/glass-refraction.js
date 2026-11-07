@@ -87,9 +87,12 @@ export function createGlassRefractionTools() {
     return svg;
   }
 
+  const reportPanel = { edgeWidth: 33, strength: 39, dispersion: 0 };
   const profiles = {
     query: { edgeWidth: 37, strength: 43, dispersion: 0.09 },
-    overview: { edgeWidth: 33, strength: 39, dispersion: 0 },
+    overview: reportPanel,
+    evidence: reportPanel,
+    holdings: reportPanel,
     poster: { edgeWidth: 40, strength: 46, dispersion: 0.13 },
   };
   return { makeMap, makeFilter, profiles };

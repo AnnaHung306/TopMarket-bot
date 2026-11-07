@@ -3,7 +3,7 @@ import { reportBackgroundScript } from './background.js';
 import { topMarketLogo } from './brand.js';
 import { reportClientScript } from './client.js';
 import { installGlassRefraction } from './glass-refraction.js';
-import { disclosure, methodology } from './methodology.js';
+import { disclosure } from './methodology.js';
 import { reportStyles } from './styles.js';
 
 export function renderWalletReport(linkAcquisitionCosts) {
@@ -66,7 +66,7 @@ export function renderWalletReport(linkAcquisitionCosts) {
       <div class="warning" id="warning">尚未分析。現金流不等於損益。成本、銷售、質押與持倉估值尚未完整覆蓋，查詢完成後會顯示核實狀態。</div>
     </section>
 
-    <section class="glass evidence" aria-labelledby="evidence-title">
+    <section class="glass evidence" data-lens="evidence" aria-labelledby="evidence-title">
       <div class="section-heading"><h2 id="evidence-title">交易證據</h2><span class="section-index">02 / TRANSACTIONS</span></div>
       <div class="table-wrap" role="region" aria-label="交易證據表格" tabindex="0">
         <table><thead><tr><th scope="col">類型</th><th scope="col">USDC</th><th scope="col">區塊</th><th scope="col">交易證據</th></tr></thead><tbody id="rows"><tr><td colspan="4" class="empty">鏈上證據將顯示於此</td></tr></tbody></table>
@@ -74,7 +74,7 @@ export function renderWalletReport(linkAcquisitionCosts) {
       <div class="actions"><button class="quiet" id="csv" disabled>匯出 CSV</button><button class="quiet" id="json" disabled>匯出完整 JSON</button><button class="quiet" id="fullEvidence" type="button" hidden>重新核對完整逐筆（會查鏈）</button></div>
     </section>
 
-    <section class="glass holdings" aria-labelledby="holdings-title">
+    <section class="glass holdings" data-lens="holdings" aria-labelledby="holdings-title">
       <div class="section-heading"><h2 id="holdings-title">持倉與質押</h2><span class="section-index">03 / HOLDINGS</span></div>
       <p class="caption">由選定期間的抽卡、購買與質押事件發現候選卡片，再以 ownerOf / stakerOf 在固定快照區塊核實。外部轉入與更早部位可能缺漏。</p>
       <div id="assets"><p class="caption">尚未查核持倉</p></div>
@@ -98,10 +98,6 @@ export function renderWalletReport(linkAcquisitionCosts) {
       <p class="caption" id="posterStatus" role="status"></p>
     </aside>
 
-    <details class="glass methodology">
-      <summary>資料覆蓋與計算方法</summary>
-      ${methodology}
-    </details>
     <footer>${disclosure}</footer>
   </main>
   <script>${reportClientScript(linkAcquisitionCosts)}</script>

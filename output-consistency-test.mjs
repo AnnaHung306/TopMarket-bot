@@ -23,7 +23,7 @@ assert(nodes.get('metrics').innerHTML.includes('回購收入（已核實）'));
 assert(nodes.get('posterMetrics').innerHTML.includes('<span>補償</span><b>待確認（未計入）</b>'));
 assert(nodes.get('warning').textContent.includes('回購待核對 1 筆'));
 assert(nodes.get('warning').textContent.includes('抽卡付款待核對 1 筆'));
-assert(html.includes('收入小計：已核實退款 + 市場銷售實收 + 已核實質押入帳 + 得獎者回購實收'));
+assert(nodes.get('warning').textContent.includes('已確認退款 + 銷售實收 + 已核實質押入帳 + 已核實回購收入'));
 assert(!html.includes('收入小計：退款 + 市場銷售的實際 USDC 入帳。'));
 function parse(line){const out=[];let text='',quoted=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){if(quoted&&line[i+1]==='"'){text+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){out.push(text);text='';}else text+=c;}out.push(text);return out;}
 const rows=ctx.exported.trimEnd().split('\n').map(parse),header=rows.shift();

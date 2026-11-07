@@ -71,7 +71,7 @@ fn lobe(distance: f32, width: f32) -> f32 {
   let surface = lobe(distance + 0.010, 0.071 + 0.027 * uv.x) * reveal;
   let shoulder = distance + 0.065 + 0.025 * sin(4.7 * uv.x + time * 0.8);
   let fold = lobe(shoulder, 0.022) * smoothstep(0.33, 0.86, uv.x);
-  let edge = lobe(shoulder + 0.012, 0.0048 + 0.005 * (1.0 - uv.x));
+  let edge = lobe(shoulder + 0.012, 0.007 + 0.005 * (1.0 - uv.x));
   let glint = edge * smoothstep(0.40, 0.77, uv.x) * (0.66 + 0.34 * sin(3.2 * uv.x + time));
   let turn = distance - 0.053 - 0.031 * sin(5.2 * uv.x - time);
   let reflected = lobe(turn, 0.019) * smoothstep(0.40, 0.76, uv.x)
@@ -81,9 +81,12 @@ fn lobe(distance: f32, width: f32) -> f32 {
   let blue = vec3f(0.012, 0.040, 0.148) * underlight
     + vec3f(0.016, 0.074, 0.198) * surface
     + vec3f(0.018, 0.115, 0.221) * fold
-    + vec3f(0.046, 0.235, 0.346) * glint
+    + vec3f(0.038, 0.188, 0.278) * glint
     + vec3f(0.011, 0.058, 0.129) * reflected;
-  let dither = (hash(position.xy) - 0.5) / 255.0;
-  return vec4f(base + blue * falloff + vec3f(dither), 1.0);
+  let light = blue * falloff;
+  // Screen-space grain stays still as the light moves and recedes into the shadows.
+  let grainStrength = mix(2.0, 11.0, smoothstep(0.01, 0.32, light.b));
+  let grain = (hash(position.xy) - 0.5) * grainStrength / 255.0;
+  return vec4f(base + light + vec3f(grain), 1.0);
 }
 `;
