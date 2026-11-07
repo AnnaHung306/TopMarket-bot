@@ -2,6 +2,7 @@ import { addr, boxes, decode, decodeReward, hex, MARKET, SIG, STAKE, USDC, word 
 import { activeAuction, alchemy, callKey, callRecord, evidencePlan, getFilteredLogs } from './history/chain.js';
 import { settleRecordedWallet } from './history/report.js';
 import { campaignPayoutEvents } from './history/campaign-payouts.js';
+import { raffleEvents, readRaffleLogs } from './history/raffle.js';
 import { treasuryStaking } from './history/treasury-staking.js';
 import { walletEvidence } from './history/wallet-evidence.js';
 import { readWalletHistoricalCalls, walletStateHistory } from './history/wallet-state.js';
@@ -133,19 +134,20 @@ async function discoverWallet(reader, wallet, from, to, contracts, key) {
   }
   const recipient = word(wallet);
   const cashLogs = topics => getFilteredLogs(reader, { address: USDC, topics }, from, to);
-  const [activity, incoming, outgoing] = await Promise.all([
+  const [activity, incoming, outgoing, raffles] = await Promise.all([
     walletActivity(reader, wallet, from, to, contracts),
     cashLogs([SIG.transfer, null, recipient]),
     cashLogs([SIG.transfer, recipient]),
+    readRaffleLogs(reader, wallet, from, to),
   ]);
-  return { from, activity, incoming, outgoing, expires: performance.now() + DISCOVERY_CACHE_TTL };
+  return { from, activity, incoming, outgoing, raffles, expires: performance.now() + DISCOVERY_CACHE_TTL };
 }
 
 export async function directWalletReport(wallet, from, to, reader = alchemy({ maxUnits: 120_000, maxMs: 240_000 }), contracts) {
   const started = performance.now();
   const key = JSON.stringify([wallet, to, contracts]);
   const discovery = await discoverWallet(reader, wallet, from, to, contracts, key);
-  const { activity, incoming, outgoing } = discovery;
+  const { activity, incoming, outgoing, raffles } = discovery;
   const { addresses, cardAddresses, history, outgoingCards } = activity;
   const direct = activity.direct.filter(log => Number(log.blockNumber) >= from);
   let { through } = activity;
@@ -155,7 +157,7 @@ export async function directWalletReport(wallet, from, to, reader = alchemy({ ma
     return block >= from && block <= through && (history.isTreasury(payer, block) || payer === MARKET);
   });
   through = Math.min(selectPage(direct, from, through), selectPage(relevantIncoming, from, through, 800));
-  if (through < activity.through && activity.direct.length + incoming.length + outgoing.length <= DISCOVERY_CACHE_LOGS) {
+  if (through < activity.through && activity.direct.length + incoming.length + outgoing.length + raffles.length <= DISCOVERY_CACHE_LOGS) {
     discoveryCache.delete(key);
     if (discoveryCache.size >= DISCOVERY_CACHE_ENTRIES) discoveryCache.delete(discoveryCache.keys().next().value);
     discoveryCache.set(key, discovery);
@@ -181,7 +183,12 @@ export async function directWalletReport(wallet, from, to, reader = alchemy({ ma
   const calls = plan.calls.map(call => callRecord(call, historical.get(callKey(call[1])) ?? null));
   const { events, warnings } = await settleRecordedWallet(wallet, related, receipts, calls, updates, true);
   const used = new Set(events.map(event => event.id));
-  events.push(...campaignPayoutEvents(wallet, cash).filter(event => !used.has(event.id)));
+  const raffleLogs = raffles.filter(log => Number(log.blockNumber) >= from && Number(log.blockNumber) <= through);
+  for (const event of [...raffleEvents(wallet, raffleLogs, cash), ...campaignPayoutEvents(wallet, cash)]) {
+    if (used.has(event.id)) continue;
+    events.push(event);
+    used.add(event.id);
+  }
   events.push(...treasuryStaking(wallet, cash, events, deferred, history.isTreasury));
   return { from, to: through, events, warnings, seconds: (performance.now() - started) / 1_000 };
 }

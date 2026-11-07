@@ -6,6 +6,7 @@ import {treasuryStaking} from './worker/history/treasury-staking.js';
 import {walletEvidence} from './worker/history/wallet-evidence.js';
 import {walletStateHistory} from './worker/history/wallet-state.js';
 import {auditedCampaignWallet,campaignPayoutEvents} from './worker/history/campaign-payouts.js';
+import {raffleEvents,readRaffleLogs} from './worker/history/raffle.js';
 import {addWalletTotals, displayWalletTotals, summarizeWalletEvents} from './worker/report/accounting.js';
 import { walletCachePage } from './worker/wallet-cache.js';
 const wallet='0x'+'1'.repeat(40),box='0x'+'2'.repeat(40),treasury='0x'+'3'.repeat(40),other='0x'+'4'.repeat(40),nft='0x'+'5'.repeat(40),usdc='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',tx='0x'+'a'.repeat(64);
@@ -13,6 +14,32 @@ const w=n=>BigInt(n).toString(16).padStart(64,'0'),a=s=>'0x'+s.slice(2).padStart
 const base={address:box,transactionHash:tx,logIndex:'0x1',blockNumber:'0x3030303'};
 const recycled={...base,topics:[SIG.buyback,'0x'+w(1),a(other)],data:'0x'+w(9000000)+a(wallet).slice(2)+w(1000000)};
 const transfers=(from,to,raw,index=2)=>({...base,address:usdc,logIndex:'0x'+index.toString(16),topics:[SIG.transfer,a(from),a(to)],data:'0x'+w(raw)});
+const raffle = '0xcbc5aa58084aaae6a283101011e6001d7ba7783a';
+const raffleLog = (signature, round, index, raw = 0) => ({ ...base, address: raffle,
+  topics: [signature, '0x' + w(round), a(wallet)], logIndex: '0x' + index.toString(16), data: '0x' + w(raw) });
+const shares = '0x846b419737e4796baa1e2f5ea7b76571d256eac56d566c44767ee2c49ad7f292';
+const raffleIncome = raffleLog('0xd04674a07f53a70d82fa6f13a59443dcc4ccd58f8b504604dd61e5982c91f9e3', 6, 7, 6_000_000);
+const raffleRefund = raffleLog('0xf3f402280ef0a7905e124aa621b65eaeb2725c343e8b36d398ed78c29daf285c', 2, 9, 3_000_000);
+const prizeCard = raffleLog('0xbfb36529287d5a1dcbfbbc958f0a7337a1f5bca269edc737da0be1be702f2251', 1, 10);
+const raffleCash = [transfers(wallet, raffle, 4_000_000, 2), transfers(wallet, raffle, 3_000_000, 4),
+  transfers(raffle, wallet, 6_000_000, 6), transfers(raffle, wallet, 3_000_000, 8)];
+const raffleSettled = raffleEvents(wallet, [prizeCard, raffleIncome, raffleRefund, raffleLog(shares, 1, 3), raffleLog(shares, 2, 5)], raffleCash);
+assert.deepEqual(raffleSettled.map(event => [event.requestId, event.category]), [
+  ['1', 'raffle-participation'], ['2', 'raffle-participation'], ['6', 'raffle-income'], ['2', 'raffle-refund'], ['1', 'raffle-card'],
+]);
+const raffleTotals = summarizeWalletEvents(raffleSettled);
+assert.equal(raffleTotals.raffleParticipation, '7000000');
+assert.equal(raffleTotals.raffleRefund, '3000000');
+assert.equal(raffleTotals.raffleCards, '1');
+assert.equal(displayWalletTotals(raffleTotals, raffleSettled).net, 2_000_000n);
+assert.equal(summarizeWalletEvents(raffleSettled).buybackReceived, '0');
+assert.deepEqual(treasuryStaking(wallet, raffleCash, raffleSettled, [], () => true), []);
+assert.deepEqual(raffleEvents(wallet, [raffleIncome], [transfers(raffle, wallet, 6_000_001, 6)]), []);
+assert.deepEqual(raffleEvents(wallet, [raffleLog(shares, 1, 3)], [transfers(wallet, raffle, 4_000_000, 1)]), []);
+const filters = [];
+await readRaffleLogs({rpc: async (method, args) => { filters.push([method, args[0]]); return []; }}, wallet, 50_634_768, 54_190_942);
+assert.deepEqual(filters.map(([method, filter]) => [method, Number(filter.fromBlock), filter.topics.slice(1)]),
+  [['eth_getLogs', 51_472_799, [null, a(wallet)]]], 'raffle history starts at deployment and does not filter by round');
 const campaignTransfer = { ...transfers('0xb7ef47bf545c62337ca239f202ca88cf05d14065', auditedCampaignWallet, 45_100_000, 0x2d7),
   transactionHash: '0xbb9ac4f14bee2b9158ecae70735ab7ae099e8a232766b43377232d4aed7aaba6',
   blockNumber: '0x' + (53_530_400).toString(16) };
@@ -49,10 +76,12 @@ assert.deepEqual(campaignPayoutEvents(fifthWallet, [{ ...fifthUnitemized, blockN
 assert.deepEqual(campaignPayoutEvents(firstWallet, [{ ...fifthUnitemized,
   topics: [SIG.transfer, fifthUnitemized.topics[1], a(firstWallet)] }]), []);
 
-const stored = { version: 3, start: 50_634_768, through: 53_268_066, totals: summarizeWalletEvents([]) };
+const oldTotals = Object.fromEntries(Object.entries(summarizeWalletEvents([])).filter(([field]) => !field.startsWith('raffle')));
+const stored = { version: 3, start: 50_634_768, through: 53_268_066, totals: oldTotals };
 const cacheRead = snapshot => walletCachePage(async () => [{ revision: 1, snapshot }], fifthWallet);
 const restored = await cacheRead(stored);
 assert.equal(restored.usage.units, 0);
+assert.equal(restored.snapshot.totals.raffleParticipation, undefined);
 assert.equal(restored.snapshot.totals.campaignOther, '544100000');
 assert.equal(restored.snapshot.campaignPayouts.length, 2);
 assert.deepEqual((await cacheRead(restored.snapshot)).snapshot, restored.snapshot);

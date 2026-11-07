@@ -1,6 +1,6 @@
 import { addr, MARKET, SIG, USDC, word } from '../index.js';
 
-const attributed = new Set(['refund-confirmed', 'buyback-claim-confirmed', 'sales', 'staking-confirmed', 'kept-disposal-confirmed', 'campaign-payout']);
+const attributed = new Set(['refund-confirmed', 'buyback-claim-confirmed', 'sales', 'staking-confirmed', 'kept-disposal-confirmed', 'campaign-payout', 'raffle-income', 'raffle-refund']);
 const unresolved = new Set(['refund-pending', 'buyback-claim-pending', 'staking-pending', 'kept-disposal-pending']);
 
 export function treasuryStaking(wallet, cash, events, deferred, isTreasury) {

@@ -17,6 +17,10 @@ export function summarizeWalletEvents(input) {
     staking: sum(staking),
     keptDisposal: sumCategory('kept-disposal-confirmed'),
     buybackReceived: sumCategory('buyback-claim-confirmed'),
+    raffleParticipation: sumCategory('raffle-participation'),
+    raffleIncome: sumCategory('raffle-income'),
+    raffleRefund: sumCategory('raffle-refund'),
+    raffleCards: count('raffle-card'),
     compensation: payouts.reduce((total, event) => total + BigInt(event.compensationRaw), 0n).toString(),
     campaignPrizes: payouts.reduce((total, event) => total + BigInt(event.prizeRaw), 0n).toString(),
     campaignOther: payouts.reduce((total, event) => total + BigInt(event.otherRaw ?? '0'), 0n).toString(),
@@ -43,12 +47,17 @@ export function displayWalletTotals(record, events) {
   const keptDisposal = BigInt(record.keptDisposal ?? '0');
   const compensation = BigInt(record.compensation ?? '0'), campaignPrizes = BigInt(record.campaignPrizes ?? '0');
   const campaignOther = BigInt(record.campaignOther ?? '0');
+  const raffleParticipation = BigInt(record.raffleParticipation ?? '0');
+  const raffleIncome = BigInt(record.raffleIncome ?? '0');
+  const raffleRefund = BigInt(record.raffleRefund ?? '0');
+  const raffleCards = BigInt(record.raffleCards ?? '0');
   const stakingInflow = staking + keptDisposal;
-  const inflows = refund + sales + buybackReceived + stakingInflow + compensation + campaignPrizes + campaignOther;
-  const outflows = pack + marketPurchases;
+  const inflows = refund + sales + buybackReceived + stakingInflow + compensation + campaignPrizes + campaignOther + raffleIncome + raffleRefund;
+  const outflows = pack + marketPurchases + raffleParticipation;
   return {
     events, pack, marketPurchases, refund, sales, stakingInflow, buybackReceived, keptDisposal,
-    compensation, campaignPrizes, campaignOther, inflows, outflows, net: inflows - outflows,
+    compensation, campaignPrizes, campaignOther, raffleParticipation, raffleIncome, raffleRefund, raffleCards,
+    inflows, outflows, net: inflows - outflows,
     stakingInflowKnown: BigInt(record.stakingCount) + BigInt(record.keptDisposalCount ?? '0') > 0n,
     buybackKnown: BigInt(record.buybackCount) > 0n,
     pendingPacks: Number(record.pendingPacks),

@@ -51,8 +51,14 @@ assert.equal(nodes.get('cash').textContent,'-191.50');
 assert(nodes.get('posterMetrics').innerHTML.includes('<span>空投</span><b>160.10</b>'));
 assert(!nodes.get('metrics').innerHTML.includes('抽卡退款'));
 assert(!nodes.get('posterMetrics').innerHTML.includes('抽卡退款'));
+assert(!nodes.get('posterMetrics').innerHTML.includes('奪寶參與'));
 assert(!nodes.get('metrics').innerHTML.includes('另有待核對'));
 assert.equal(JSON.parse(ctx.exported).cashFlow.netRaw,'-191500000');
+vm.runInContext("state.summary={totals:{...snapshotTotals,raffleParticipation:'3437000000',raffleIncome:'3415500000',raffleCards:'1'}};render();$('json').onclick();delete state.summary;",ctx);
+assert.equal(nodes.get('posterCash').textContent,'-213.00');
+assert(nodes.get('posterMetrics').innerHTML.includes('<span>奪寶參與</span><b>3,437.00</b>'));
+assert(nodes.get('posterMetrics').innerHTML.includes('<span>奪寶收入</span><b>3,415.50 USDC ＋ 1 張卡</b>'));
+assert.equal(JSON.parse(ctx.exported).cashFlow.raffleIncomeRaw,'3415500000');
 ctx.cachedCampaign = { ...receipt('cached-campaign', 'campaign-payout', '517000000'),
   tx: '0xdc8ef68a54b213b6e9f17e3bbf147921b73277c100af6f5c2d071676da999f22' };
 vm.runInContext("state.summary={totals:{...snapshotTotals,campaignOther:'517000000'},campaignPayouts:[cachedCampaign]};render();$('json').onclick();delete state.summary;",ctx);

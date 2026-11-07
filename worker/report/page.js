@@ -90,6 +90,7 @@ export function renderWalletReport(linkAcquisitionCosts) {
       <div id="posterMetrics"></div>
       <p class="caption poster-date" id="posterDate">BASE / EVIDENCE FIRST</p>
       <div class="poster-actions">
+        <button class="quiet" id="sharePoster" type="button" hidden disabled>儲存到相簿／分享</button>
         <button id="download" disabled>下載海報 PNG <span aria-hidden="true">↓</span></button>
         <button class="quiet" id="print" disabled>列印 / 儲存 PDF</button>
       </div>

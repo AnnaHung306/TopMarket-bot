@@ -1,6 +1,7 @@
 import { hex } from './index.js';
 import { alchemy } from './history/chain.js';
 import { campaignPayoutsInRange } from './history/campaign-payouts.js';
+import { readRaffleHistory } from './history/raffle.js';
 import { withWalletLock } from './history/refresh.js';
 import { addWalletTotals, summarizeWalletEvents } from './report/accounting.js';
 import { directWalletReport, finalizedWalletBlock, WALLET_HISTORY_START } from './wallet-direct.js';
@@ -51,6 +52,13 @@ function fromCache(saved, wallet, usage = { units: 0 }) {
   return { ready: true, cached: true, snapshot: { ...snapshot, campaignPayouts }, usage };
 }
 
+async function fillRaffleTotals(snapshot, wallet, reader) {
+  if (Object.hasOwn(snapshot.totals, 'raffleParticipation')) return snapshot;
+  const events = await readRaffleHistory(reader, wallet, snapshot.start, snapshot.through);
+  const { raffleParticipation, raffleIncome, raffleRefund, raffleCards } = summarizeWalletEvents(events);
+  return { ...snapshot, totals: { ...snapshot.totals, raffleParticipation, raffleIncome, raffleRefund, raffleCards } };
+}
+
 async function begin(reader, previous) {
   const head = await finalizedWalletBlock(reader);
   const target = Number(head.number);
@@ -86,13 +94,21 @@ export async function walletCachePage(sql, wallet, afterBlock) {
     }
     const reader = alchemy({ maxUnits: 120_000, maxMs: 240_000, beforeRequest: assertLock });
     const draft = usable(current.draft) || await begin(reader, saved);
-    if (!draft) return fromCache(saved, wallet, reader.stats);
-    const page = await directWalletReport(wallet, draft.through + 1, draft.target, reader);
+    if (!draft) {
+      const updated = await fillRaffleTotals(saved, wallet, reader);
+      if (updated !== saved) {
+        assertLock();
+        await save(sql, wallet, current, updated, null);
+      }
+      return { ...fromCache(updated, wallet, reader.stats), cached: updated === saved };
+    }
+    const covered = await fillRaffleTotals(draft, wallet, reader);
+    const page = await directWalletReport(wallet, covered.through + 1, covered.target, reader);
     const { snapshot: next, campaignPayouts } = reconcileCampaign({
-      ...draft, through: page.to,
-      totals: addWalletTotals(draft.totals, summarizeWalletEvents(page.events)),
+      ...covered, through: page.to,
+      totals: addWalletTotals(covered.totals, summarizeWalletEvents(page.events)),
     }, wallet);
-    const ready = page.to === draft.target;
+    const ready = page.to === covered.target;
     assertLock();
     await save(sql, wallet, current, ready ? next : saved, ready ? null : next);
     return {

@@ -33,14 +33,17 @@ export async function renderWalletPoster(card, background, complete, tools) {
   source.remove();
   source.style.removeProperty('visibility');
   const viewHeight = height + 2 * margin;
+  const pngWidth = 2160;
+  const pngHeight = Math.round(pngWidth * viewHeight / viewWidth);
+  const scale = pngWidth / viewWidth;
 
   const baseColor = getComputedStyle(document.documentElement).getPropertyValue('--background').trim();
-  const backdrop = document.createElement('canvas');
-  backdrop.width = viewWidth;
-  backdrop.height = viewHeight;
-  const context = backdrop.getContext('2d');
+  const canvas = document.createElement('canvas');
+  canvas.width = pngWidth;
+  canvas.height = pngHeight;
+  const context = canvas.getContext('2d');
   context.fillStyle = baseColor;
-  context.fillRect(0, 0, viewWidth, viewHeight);
+  context.fillRect(0, 0, pngWidth, pngHeight);
   const frame = background.captureReportBackground?.();
   if (frame) {
     const bgRect = background.getBoundingClientRect();
@@ -49,18 +52,17 @@ export async function renderWalletPoster(card, background, complete, tools) {
     const top = cardStyle.position === 'sticky'
       ? document.querySelector('.query').getBoundingClientRect().top
       : cardRect.top;
-    context.drawImage(frame, bgRect.left - cardRect.left + margin, bgRect.top - top + margin,
-      bgRect.width, bgRect.height);
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(frame, (bgRect.left - cardRect.left + margin) * scale,
+      (bgRect.top - top + margin) * scale, bgRect.width * scale, bgRect.height * scale);
   }
 
   const svgNamespace = 'http://www.w3.org/2000/svg';
   const htmlNamespace = 'http://www.w3.org/1999/xhtml';
   const svg = document.createElementNS(svgNamespace, 'svg');
-  const pngWidth = 1080;
-  const pngHeight = Math.round(pngWidth * viewHeight / viewWidth);
   svg.setAttribute('width', pngWidth);
   svg.setAttribute('height', pngHeight);
-  svg.setAttribute('viewBox', '0 0 ' + viewWidth + ' ' + viewHeight);
+  svg.setAttribute('viewBox', '0 0 ' + pngWidth + ' ' + pngHeight);
 
   function shape(name, attributes, parent = svg) {
     const element = document.createElementNS(svgNamespace, name);
@@ -69,7 +71,6 @@ export async function renderWalletPoster(card, background, complete, tools) {
     return element;
   }
 
-  shape('image', { href: backdrop.toDataURL('image/png'), width: viewWidth, height: viewHeight });
   if (frame && card.dataset.glassRefraction === 'active') {
     const { edgeWidth, strength, dispersion } = tools.profiles.poster;
     const rim = tools.makeMap(document, width, height, Array(4).fill(radius), edgeWidth);
@@ -81,8 +82,9 @@ export async function renderWalletPoster(card, background, complete, tools) {
     const crop = document.createElement('canvas');
     crop.width = width;
     crop.height = height;
-    crop.getContext('2d').drawImage(backdrop, -margin, -margin);
-    const inside = shape('g', { transform: 'translate(' + margin + ' ' + margin + ')' });
+    crop.getContext('2d').drawImage(canvas, margin * scale, margin * scale,
+      width * scale, height * scale, 0, 0, width, height);
+    const inside = shape('g', { transform: 'scale(' + scale + ') translate(' + margin + ' ' + margin + ')' });
     shape('image', {
       href: crop.toDataURL('image/png'),
       width,
@@ -92,8 +94,12 @@ export async function renderWalletPoster(card, background, complete, tools) {
     }, inside);
   }
 
-  const content = shape('foreignObject', { x: margin, y: margin, width, height });
+  // WebKit paints the HTML at CSS pixel size even when an SVG viewBox scales it.
+  const content = shape('foreignObject', {
+    x: margin * scale, y: margin * scale, width: width * scale, height: height * scale,
+  });
   const wrapper = document.createElementNS(htmlNamespace, 'div');
+  wrapper.style.zoom = scale;
   const style = document.createElementNS(htmlNamespace, 'style');
   style.textContent = css + '\n:root { background: transparent; }';
   wrapper.append(style, source);
@@ -102,9 +108,6 @@ export async function renderWalletPoster(card, background, complete, tools) {
   const image = new Image();
   image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
   await image.decode();
-  const canvas = document.createElement('canvas');
-  canvas.width = pngWidth;
-  canvas.height = pngHeight;
-  canvas.getContext('2d').drawImage(image, 0, 0);
+  context.drawImage(image, 0, 0);
   return canvas;
 }
