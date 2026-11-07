@@ -216,6 +216,8 @@ button:not(:disabled):hover { border-color: #83e8ff; }
 .overview h3 { font-size: 13px; color: #c1d1db; font-weight: 550; }
 .total { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 10px; }
 .total .big { min-width: 0; overflow-wrap: anywhere; font-size: clamp(2.4rem, 5vw, 3.6rem); font-weight: 760; font-variant-numeric: tabular-nums; letter-spacing: -.06em; line-height: 1.08; }
+.total .big[data-balance="profit"] { color: #66e5a3; --amount-glint: #a6f5cf; }
+.total .big[data-balance="loss"] { color: #ff8288; --amount-glint: #ffc0ae; }
 .total > span { color: #71e8ff; }
 .metrics {
   display: grid;
@@ -258,6 +260,19 @@ td:nth-child(2), td:nth-child(3) { font-variant-numeric: tabular-nums; }
 .poster-row { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding: 7px 0; font-size: 12px; }
 .poster-row span { color: #b9c8d1; }
 .poster-row b { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: right; }
+.metric[data-metric="staking"] :is(label, b), .poster-row[data-metric="staking"] :is(span, b) {
+  color: #72b7ff;
+  --amount-glint: #b0e4ff;
+}
+@media (forced-colors: none) {
+  @supports (background-clip: text) and (-webkit-text-fill-color: transparent) {
+    .total .big:is([data-balance="profit"], [data-balance="loss"]), [data-metric="staking"] b {
+      background-image: linear-gradient(153deg, var(--amount-glint) 5%, currentColor 43%, currentColor 67%, var(--amount-glint) 103%);
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+  }
+}
 .poster-date { margin-top: 8px; font: 10px/1.5 var(--mono); overflow-wrap: anywhere; }
 .poster-actions { display: grid; gap: 7px; margin-top: 13px; }
 .poster-actions button { width: 100%; min-height: 37px; font-size: 12px; }
