@@ -111,7 +111,7 @@ export function evidencePlan(logs, includeTokenBuyback = false) {
     if ([SIG.draw, SIG.tokenDraw, SIG.refund, SIG.rescue, SIG.buyback, SIG.kept, SIG.sold, SIG.offer].includes(signature) || tokenBuyback || activeAuction(log)) {
       receipts.add(log.transactionHash);
     }
-    if ([SIG.draw, SIG.refund, SIG.rescue, SIG.buyback].includes(signature) || tokenBuyback || log.dispositionCandidate) {
+    if ([SIG.draw, SIG.tokenDraw, SIG.refund, SIG.rescue, SIG.buyback].includes(signature) || tokenBuyback || log.dispositionCandidate) {
       const selectors = ['0x61d027b3', '0x7b9e618d'];
       if (signature === SIG.draw) selectors.push('0x46904840');
       for (const data of selectors) {

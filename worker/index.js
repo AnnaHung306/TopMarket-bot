@@ -128,19 +128,22 @@ function reconcileRefunds(input,receiptMap,wallet){
   if(!claimsByKey.has(key))claimsByKey.set(key,[]);
   claimsByKey.get(key).push(claim);
  }
- const batchBuybacks=new Map();
+ const batchPayouts=new Map();
  for(const [key,group] of claimsByKey){
   const candidates=transfersByKey.get(key)||[];
   const first=group[0];
   if(group.length<2||group.length!==candidates.length)continue;
-  if(group.some(claim=>claim.category!=='buyback-claim'||claim.buybackKind!=='card'||claim.contract!==first.contract))continue;
+  const offset=first.category==='staking'?2
+   :first.category==='kept-disposal'||first.category==='buyback-claim'&&first.buybackKind==='card'?3:0;
+  if(!offset||group.some(claim=>claim.category!==first.category||claim.buybackKind!==first.buybackKind||claim.contract!==first.contract))continue;
   if(new Set(group.map(claim=>claim.winId)).size!==group.length)continue;
+  if(first.category==='kept-disposal'&&(group.some(claim=>!claim.releaseId)||new Set(group.map(claim=>claim.releaseId)).size!==group.length))continue;
   if(deferred.has(matchKey(first.tx,first.contract.toLowerCase(),first.raw)))continue;
-  // In the card batch sequence the winner's USDC transfer is three logs before WinRecycled.
+  // Card settlements emit the relevant transfer at a fixed offset from the outcome log.
   const byPosition=new Map(candidates.map(transfer=>[transfer.logIndex,transfer]));
-  const matches=group.map(claim=>byPosition.get(claim.logIndex-3));
+  const matches=group.map(claim=>byPosition.get(claim.logIndex-offset));
   if(matches.every(Boolean)&&new Set(matches).size===group.length){
-   group.forEach((claim,index)=>batchBuybacks.set(claim.id,matches[index]));
+   group.forEach((claim,index)=>batchPayouts.set(claim.id,matches[index]));
   }
  }
  const confirmed=new Map();
@@ -150,7 +153,7 @@ function reconcileRefunds(input,receiptMap,wallet){
   const key=event.payer&&matchKey(event.tx,event.payer.toLowerCase(),event.raw);
   const candidates=transfersByKey.get(key)||[];
   const payoutDeferred=deferred.has(matchKey(event.tx,event.contract.toLowerCase(),event.raw));
-  const transfer=candidates.length===1&&claimsByKey.get(key)?.length===1?candidates[0]:batchBuybacks.get(event.id);
+  const transfer=candidates.length===1&&claimsByKey.get(key)?.length===1?candidates[0]:batchPayouts.get(event.id);
   if(!payoutDeferred&&transfer){
    const disposition=event.category==='kept-disposal'?{collection:event.collection,tokenId:event.tokenId,winId:event.winId}:{};
    confirmed.set(transfer.id,{...transfer,...disposition,category:event.category+'-confirmed',requestId:event.requestId,claimId:event.id,reconciled:true});
@@ -177,8 +180,15 @@ function decodeReward(log,wallet){
  return out;
 }
 function verifyDrawPayments(packs,receipt,wallet,payer,feeRecipient){
- if(!receipt||receipt.status!=='0x1'||!payer||!feeRecipient||payer===wallet||feeRecipient===wallet||!packs.length)return false;
- const expected=new Map();for(const p of packs){if(p.packKind!=='card')return false;for(const [to,raw] of [[payer,p.paidRaw],[feeRecipient,p.feeRaw]])expected.set(to,(expected.get(to)||0n)+BigInt(raw));}
+ if(!receipt||receipt.status!=='0x1'||!payer||payer===wallet||!packs.length)return false;
+ const kind=packs[0].packKind;
+ if(!['card','token'].includes(kind)||packs.some(p=>p.packKind!==kind))return false;
+ if(kind==='card'&&(!feeRecipient||feeRecipient===wallet))return false;
+ const expected=new Map();
+ for(const pack of packs){
+  const transfers=kind==='token'?[[payer,pack.raw]]:[[payer,pack.paidRaw],[feeRecipient,pack.feeRaw]];
+  for(const [to,raw] of transfers)expected.set(to,(expected.get(to)||0n)+BigInt(raw));
+ }
  const actual=new Map();for(const l of receipt.logs||[]){if(l.address.toLowerCase()!==USDC||l.topics[0]!==SIG.transfer||l.topics.length!==3||addr(l.topics[1])!==wallet)continue;const to=addr(l.topics[2]);actual.set(to,(actual.get(to)||0n)+BigInt(l.data));}
  return [...expected].every(([to,n])=>(actual.get(to)||0n)===n)&&[...actual].every(([to,n])=>(expected.get(to)||0n)===n);
 }
@@ -204,12 +214,15 @@ async function keptDisposals(logs,receipts,wallet,readRpc){
 }
 async function enrichAcquisitions(events,receiptMap,wallet,{rpc:readRpc=rpc,batch:readBatch=batch}={}){
  const out=events.map(e=>({...e}));
- const packs=out.filter(e=>e.category==='pack'&&e.packKind==='card');
- for(const p of packs){const r=receiptMap.get(p.tx);if(r?.status!=='0x1')continue;const via=(r.logs||[]).filter(l=>l.address.toLowerCase()===p.contract.toLowerCase()&&l.topics[0]===SIG.requestVia&&l.topics.length>=3&&BigInt(l.topics[1]).toString()===p.requestId);p.sourceStatus=via.length?'adapter-source-unresolved':'legacy-receipt';if(via.length===1)p.randomnessSource=addr(via[0].topics[2]);}
+ const packs=out.filter(e=>e.category==='pack');
+ for(const p of packs.filter(pack=>pack.packKind==='card')){const r=receiptMap.get(p.tx);if(r?.status!=='0x1')continue;const via=(r.logs||[]).filter(l=>l.address.toLowerCase()===p.contract.toLowerCase()&&l.topics[0]===SIG.requestVia&&l.topics.length>=3&&BigInt(l.topics[1]).toString()===p.requestId);p.sourceStatus=via.length?'adapter-source-unresolved':'legacy-receipt';if(via.length===1)p.randomnessSource=addr(via[0].topics[2]);}
  for(const tx of new Set(packs.map(e=>e.tx))){const group=packs.filter(e=>e.tx===tx),e=group[0];
   if(new Set(group.map(e=>e.contract.toLowerCase())).size!==1)continue;
   try{const call=(selector,block)=>['eth_call',[{to:e.contract,data:selector},hex(block)]];
-   const v=await readBatch([call('0x61d027b3',e.block-1),call('0x61d027b3',e.block),call('0x7b9e618d',e.block-1),call('0x7b9e618d',e.block),['eth_getLogs',[{address:e.contract,fromBlock:hex(e.block),toBlock:hex(e.block),topics:[[SIG.treasuryUpdated,SIG.feeRecipientUpdated]]}]],call('0x46904840',e.block-1),call('0x46904840',e.block)],true);
+   const isCard=e.packKind==='card';
+   const updateSignatures=isCard?[SIG.treasuryUpdated,SIG.feeRecipientUpdated]:[SIG.treasuryUpdated];
+   const feeCalls=isCard?[call('0x46904840',e.block-1),call('0x46904840',e.block)]:[];
+   const v=await readBatch([call('0x61d027b3',e.block-1),call('0x61d027b3',e.block),call('0x7b9e618d',e.block-1),call('0x7b9e618d',e.block),['eth_getLogs',[{address:e.contract,fromBlock:hex(e.block),toBlock:hex(e.block),topics:[updateSignatures]}]],...feeCalls],true);
    const proof=historicalPayerEvidence(...v.slice(0,5));
    const validWord=x=>typeof x==='string'&&/^0x0{24}[0-9a-fA-F]{40}$/.test(x);
    const fee=validWord(v[5])&&v[5]===v[6]?addr(v[5]):null;

@@ -7,13 +7,15 @@ import {walletEvidence} from './worker/history/wallet-evidence.js';
 import {walletStateHistory} from './worker/history/wallet-state.js';
 import {auditedCampaignWallet,campaignPayoutEvents} from './worker/history/campaign-payouts.js';
 import {addWalletTotals, displayWalletTotals, summarizeWalletEvents} from './worker/report/accounting.js';
+import { walletCachePage } from './worker/wallet-cache.js';
 const wallet='0x'+'1'.repeat(40),box='0x'+'2'.repeat(40),treasury='0x'+'3'.repeat(40),other='0x'+'4'.repeat(40),nft='0x'+'5'.repeat(40),usdc='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',tx='0x'+'a'.repeat(64);
 const w=n=>BigInt(n).toString(16).padStart(64,'0'),a=s=>'0x'+s.slice(2).padStart(64,'0');
 const base={address:box,transactionHash:tx,logIndex:'0x1',blockNumber:'0x3030303'};
 const recycled={...base,topics:[SIG.buyback,'0x'+w(1),a(other)],data:'0x'+w(9000000)+a(wallet).slice(2)+w(1000000)};
 const transfers=(from,to,raw,index=2)=>({...base,address:usdc,logIndex:'0x'+index.toString(16),topics:[SIG.transfer,a(from),a(to)],data:'0x'+w(raw)});
 const campaignTransfer = { ...transfers('0xb7ef47bf545c62337ca239f202ca88cf05d14065', auditedCampaignWallet, 45_100_000, 0x2d7),
-  transactionHash: '0xbb9ac4f14bee2b9158ecae70735ab7ae099e8a232766b43377232d4aed7aaba6' };
+  transactionHash: '0xbb9ac4f14bee2b9158ecae70735ab7ae099e8a232766b43377232d4aed7aaba6',
+  blockNumber: '0x' + (53_530_400).toString(16) };
 const campaignEvents = campaignPayoutEvents(auditedCampaignWallet, [campaignTransfer, campaignTransfer]);
 const campaignTotals = summarizeWalletEvents(campaignEvents);
 assert.equal(campaignTotals.compensation, '44400000');
@@ -21,6 +23,40 @@ assert.equal(campaignTotals.campaignPrizes, '700000');
 assert.equal(displayWalletTotals(campaignTotals, campaignEvents).net, 45_100_000n);
 assert.deepEqual(campaignPayoutEvents(auditedCampaignWallet, [{ ...campaignTransfer, data: '0x' + w(45_100_001) }]), []);
 assert.deepEqual(treasuryStaking(auditedCampaignWallet, [campaignTransfer], campaignEvents, [], () => true), []);
+const firstWallet = '0xe618f35dfbf4ab79b02b315fd60c69cd289ef75d';
+const firstPrize = { ...transfers('0xb7ef47bf545c62337ca239f202ca88cf05d14065', firstWallet, 150_000_000, 0xcf),
+  transactionHash: '0x1841d88fac47f5218e07fee8d8db9b127fca4cd7c7ba455b408e6f02b15d4573',
+  blockNumber: '0x' + (53_550_004).toString(16) };
+assert.equal(summarizeWalletEvents(campaignPayoutEvents(firstWallet, [firstPrize])).campaignPrizes, '150000000');
+assert.deepEqual(campaignPayoutEvents(firstWallet, [{ ...firstPrize, logIndex: '0xd0' }]), []);
+const fifthWallet = '0xd0983ef1dfbc0d413da6f458ae1524767627967b';
+const fifthAirdrop = { ...transfers('0xb7ef47bf545c62337ca239f202ca88cf05d14065', fifthWallet, 21_300_000, 0x16a),
+  transactionHash: '0xf4b4b05901850feec4cbc5e361745b5fb0f0b2940910b53405455f9c502fa75f',
+  blockNumber: '0x' + (53_530_412).toString(16) };
+const fifthAirdropTotals = summarizeWalletEvents(campaignPayoutEvents(fifthWallet, [fifthAirdrop]));
+assert.equal(fifthAirdropTotals.compensation, '18300000');
+assert.equal(fifthAirdropTotals.campaignPrizes, '3000000');
+const fifthUnitemized = { ...transfers('0xb7ef47bf545c62337ca239f202ca88cf05d14065', fifthWallet, 517_000_000, 0x141),
+  transactionHash: '0xdc8ef68a54b213b6e9f17e3bbf147921b73277c100af6f5c2d071676da999f22',
+  blockNumber: '0x' + (53_268_066).toString(16) };
+const fifthUnitemizedEvents = campaignPayoutEvents(fifthWallet, [fifthUnitemized, fifthUnitemized]);
+const fifthUnitemizedTotals = summarizeWalletEvents(fifthUnitemizedEvents);
+assert.equal(fifthUnitemizedTotals.campaignOther, '517000000');
+assert.equal(fifthUnitemizedTotals.compensation, '0');
+assert.equal(fifthUnitemizedTotals.campaignPrizes, '0');
+assert.equal(displayWalletTotals(fifthUnitemizedTotals, fifthUnitemizedEvents).net, 517_000_000n);
+assert.deepEqual(campaignPayoutEvents(fifthWallet, [{ ...fifthUnitemized, blockNumber: '0x1' }]), []);
+assert.deepEqual(campaignPayoutEvents(firstWallet, [{ ...fifthUnitemized,
+  topics: [SIG.transfer, fifthUnitemized.topics[1], a(firstWallet)] }]), []);
+
+const stored = { version: 3, start: 50_634_768, through: 53_268_066, totals: summarizeWalletEvents([]) };
+const cacheRead = snapshot => walletCachePage(async () => [{ revision: 1, snapshot }], fifthWallet);
+const restored = await cacheRead(stored);
+assert.equal(restored.usage.units, 0);
+assert.equal(restored.snapshot.totals.campaignOther, '544100000');
+assert.equal(restored.snapshot.campaignPayouts.length, 2);
+assert.deepEqual((await cacheRead(restored.snapshot)).snapshot, restored.snapshot);
+assert.equal((await cacheRead({ ...stored, through: stored.through - 1 })).snapshot.totals.campaignOther, '27100000');
 let claims=decodeReward(recycled,wallet).map(e=>({...e,payer:treasury}));
 assert.equal(claims.length,1);assert.equal(claims[0].raw,'1000000');
 const run=(c,logs,status='0x1')=>reconcileRefunds(c,new Map([[tx,{status,logs}]]),wallet);
@@ -32,12 +68,25 @@ assert.equal(run(claims,[transfers(treasury,wallet,1000000),deferred]).filter(e=
 const self={...recycled,topics:[SIG.buyback,'0x'+w(1),a(wallet)],data:'0x'+w(1000000)+a(wallet).slice(2)+w(1000000)};
 assert.equal(run(decodeReward(self,wallet).map(e=>({...e,payer:treasury})),[transfers(treasury,wallet,1000000)]).filter(e=>e.category.endsWith('-confirmed')).length,0,'winner/staker equal payout stays ambiguous');
 assert.equal(run([...claims,{...claims[0],id:'refund',category:'refund'}],[transfers(treasury,wallet,1000000)]).filter(e=>e.category.endsWith('-confirmed')).length,0,'cross-category receipt cannot count twice');
+const stakingBatch = [5, 9].flatMap((index, i) => decodeReward({ ...recycled,
+  logIndex: '0x' + index.toString(16), topics: [SIG.buyback, '0x' + w(i + 1), a(other)],
+}, wallet)).map(event => ({ ...event, payer: treasury }));
+const batchStake = logs => run(stakingBatch, logs).filter(e => e.category === 'staking-confirmed');
+const stakerPayments = [3, 7].map(index => transfers(treasury, wallet, 1_000_000, index));
+assert.deepEqual(batchStake(stakerPayments).map(e => e.logIndex), [3, 7]);
+assert.equal(batchStake([stakerPayments[0], transfers(treasury, wallet, 1_000_000, 6)]).length, 0);
+assert.equal(batchStake([...stakerPayments, deferred]).length, 0);
 assert.deepEqual(decodeReward({...recycled,topics:[SIG.kept]},wallet),[],'NFT disposal is not staking yield');
 const draw={id:'draw',contract:box,tx,category:'pack',packKind:'card',requestId:'7',raw:'11000000',paidRaw:'10000000',feeRaw:'1000000',paymentVerified:true,sourceStatus:'legacy-receipt',block:1};
 assert(verifyDrawPayments([draw],{status:'0x1',logs:[transfers(wallet,treasury,10000000),transfers(wallet,other,1000000,3)]},wallet,treasury,other));
 assert(!verifyDrawPayments([draw],{status:'0x1',logs:[transfers(other,treasury,10000000),transfers(wallet,other,1000000,3)]},wallet,treasury,other),'payer must be wallet');
 assert(!verifyDrawPayments([draw],{status:'0x1',logs:[transfers(wallet,treasury,9999999),transfers(wallet,other,1000000,3)]},wallet,treasury,other));
 assert(verifyDrawPayments([draw,{...draw,id:'draw2'}],{status:'0x1',logs:[transfers(wallet,treasury,20000000),transfers(wallet,other,2000000,3)]},wallet,treasury,other),'batch draw expenditures conserved');
+const tokenDraws = Array.from({ length: 5 }, (_, i) => ({ packKind: 'token', raw: '200000000', requestId: String(i + 1) }));
+const tokenReceipt = { status: '0x1', logs: [transfers(wallet, treasury, 1_000_000_000)] };
+assert(verifyDrawPayments(tokenDraws, tokenReceipt, wallet, treasury));
+assert(!verifyDrawPayments(tokenDraws.slice(1), tokenReceipt, wallet, treasury));
+assert(!verifyDrawPayments(tokenDraws, tokenReceipt, wallet, other));
 const won={id:'won',contract:box,category:'won',requestId:'7',winId:'8',collection:nft,tokenId:'9',block:2};
 const kept={id:'kept',contract:box,category:'kept',winId:'8',collection:nft,tokenId:'9',block:3,acquisitionVerified:true};
 const cost=e=>linkAcquisitionCosts(e)[0]?.acquisitionCostRaw;
@@ -62,6 +111,12 @@ assert.equal(run(batchClaims, [batchTransfers[0], transfers(treasury, wallet, 90
   .filter(event => event.category.endsWith('-confirmed')).length, 0);
 assert.equal(run(batchClaims, [...batchTransfers, {...deferred, data: '0x' + w(9000000)}])
   .filter(event => event.category.endsWith('-confirmed')).length, 0);
+const keptBatch = batchClaims.map((event, i) => ({ ...event, category: 'kept-disposal', buybackKind: undefined,
+  releaseId: `release-${i}`, raw: '4000000' }));
+const keptTransfers = [2, 6].map(index => transfers(treasury, wallet, 4_000_000, index));
+const confirmedKept = (claims, logs) => run(claims, logs).filter(event => event.category === 'kept-disposal-confirmed');
+assert.deepEqual(confirmedKept(keptBatch, keptTransfers).map(event => event.logIndex), [2, 6]);
+assert.equal(confirmedKept(keptBatch.map(event => ({ ...event, releaseId: 'duplicate' })), keptTransfers).length, 0);
 const selfUnequal={...winnerLog,data:'0x'+w(9000000)+a(wallet).slice(2)+w(1000000)};
 const dualPaid=run(decodeReward(selfUnequal,wallet).map(e=>({...e,payer:treasury})),[transfers(treasury,wallet,9000000),transfers(treasury,wallet,1000000,3)]);
 assert.equal(dualPaid.filter(e=>e.category.endsWith('-confirmed')).length,2);
@@ -115,7 +170,8 @@ const reader = {
   },
 };
 const proof = await walletEvidence(reader, wallet, new Map(directLogs.map(log => [log.transactionHash, log])),
-  cash, [], [box], new Set([box]), { audited: () => false }, Number(base.blockNumber), Number(deposits.at(-1).blockNumber));
+  cash, [], [box], new Set([box]), { audited: () => false, isTreasury: payer => payer === treasury },
+  Number(base.blockNumber), Number(deposits.at(-1).blockNumber));
 const payoutCalls = evidencePlan(directLogs, true).calls.map(call =>
   callRecord(call, call[1][0].data === '0x61d027b3' ? a(treasury) : a(usdc)));
 const { events: paidEvents } = await settleRecordedWallet(wallet, directLogs, proof.receipts, payoutCalls, [], true);
@@ -130,6 +186,29 @@ assert.equal(coldTotals.buybackReceived, '2574000000');
 assert.equal(displayWalletTotals(addWalletTotals({ staking: '1000000', stakingCount: '1' }, coldTotals), []).stakingInflow, 169_800_000n);
 const unresolvedRefund = { tx: deposits[3].transactionHash, raw: '200000', category: 'refund-pending' };
 assert.equal(treasuryStaking(wallet, cash, [...paidEvents, unresolvedRefund], proof.deferred, isTreasury).length, 129);
+
+const indexedBatchHash = '0x' + w(300);
+const indexedBatch = [5, 9].map((index, i) => ({ ...winnerLog, transactionHash: indexedBatchHash,
+  logIndex: '0x' + index.toString(16), topics: [SIG.buyback, '0x' + w(i + 1), a(wallet)] }));
+const indexedPayments = batchTransfers.map(log => ({ ...log, transactionHash: indexedBatchHash }));
+const hiddenStakes = [5, 9].map((index, i) => ({ ...recycled, logIndex: '0x' + index.toString(16),
+  topics: [SIG.buyback, '0x' + w(i + 1), a(other)] }));
+const indexedLogs = new Map(indexedBatch.map(log => [log.transactionHash + ':' + log.logIndex, log]));
+const mixedEvidence = await walletEvidence({
+  batch: async calls => {
+    assert.deepEqual(calls, [['eth_getTransactionReceipt', [tx]]], 'only the unindexed same-amount settlement needs proof');
+    return [{ transactionHash: tx, status: '0x1', logs: [...hiddenStakes, ...stakerPayments] }];
+  },
+  rpc: async () => [],
+}, wallet, indexedLogs, [...indexedPayments, ...stakerPayments], [], [box], new Set([box]),
+{ audited: () => true, isTreasury }, Number(base.blockNumber), Number(base.blockNumber));
+const discovered = [...indexedLogs.values()];
+const discoveredCalls = evidencePlan(discovered, true).calls.map(call =>
+  callRecord(call, call[1][0].data === '0x61d027b3' ? a(treasury) : a(usdc)));
+const discoveredTotals = summarizeWalletEvents((await settleRecordedWallet(wallet, discovered,
+  mixedEvidence.receipts, discoveredCalls, [], true)).events);
+assert.equal(discoveredTotals.staking, '2000000');
+assert.equal(discoveredTotals.buybackReceived, '18000000');
 
 const treasuryChanged = { ...base, blockNumber: '0x64', topics: [SIG.treasuryUpdated, a(other)] };
 const history = await walletStateHistory({

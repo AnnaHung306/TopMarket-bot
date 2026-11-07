@@ -22,7 +22,9 @@ for (const id of ['cash', 'posterCash']) assert.equal(nodes.get(id).dataset.bala
 assert(nodes.get('metrics').innerHTML.includes('data-metric="staking"><label>質押收益</label><b>7.00</b>'));
 assert(nodes.get('posterMetrics').innerHTML.includes('data-metric="staking"><span>質押收益</span><b>7.00</b>'));
 assert(nodes.get('metrics').innerHTML.includes('回購收入（已核實）'));
-assert(nodes.get('posterMetrics').innerHTML.includes('<span>補償</span><b>查無已核實入帳</b>'));
+assert(nodes.get('posterMetrics').innerHTML.includes('<span>空投</span><b>查無已核實入帳</b>'));
+assert(nodes.get('metrics').innerHTML.includes('<label>抽卡退款（已核實）</label><b>1.00</b>'));
+assert(nodes.get('posterMetrics').innerHTML.includes('<span>抽卡退款</span><b>1.00</b>'));
 assert(!html.includes('id="warning"'));
 assert(!html.includes('收入小計：退款 + 市場銷售的實際 USDC 入帳。'));
 function parse(line){const out=[];let text='',quoted=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){if(quoted&&line[i+1]==='"'){text+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){out.push(text);text='';}else text+=c;}out.push(text);return out;}
@@ -46,10 +48,19 @@ ctx.snapshotTotals={pack:'75560000000',marketPurchases:'10000000',refund:'0',sal
   keptDisposalCount:'5',buybackCount:'3885',pendingPacks:'0',pendingBuybacks:'0',pendingStaking:'0',pendingKeptDisposal:'0',pendingRefunds:'0'};
 vm.runInContext("state.summary={totals:snapshotTotals};render();$('json').onclick();delete state.summary;",ctx);
 assert.equal(nodes.get('cash').textContent,'-191.50');
-assert(nodes.get('posterMetrics').innerHTML.includes('<span>補償</span><b>44.40</b>'));
-assert(nodes.get('posterMetrics').innerHTML.includes('<span>活動獎金</span><b>115.70</b>'));
+assert(nodes.get('posterMetrics').innerHTML.includes('<span>空投</span><b>160.10</b>'));
+assert(!nodes.get('metrics').innerHTML.includes('抽卡退款'));
+assert(!nodes.get('posterMetrics').innerHTML.includes('抽卡退款'));
 assert(!nodes.get('metrics').innerHTML.includes('另有待核對'));
 assert.equal(JSON.parse(ctx.exported).cashFlow.netRaw,'-191500000');
+ctx.cachedCampaign = { ...receipt('cached-campaign', 'campaign-payout', '517000000'),
+  tx: '0xdc8ef68a54b213b6e9f17e3bbf147921b73277c100af6f5c2d071676da999f22' };
+vm.runInContext("state.summary={totals:{...snapshotTotals,campaignOther:'517000000'},campaignPayouts:[cachedCampaign]};render();$('json').onclick();delete state.summary;",ctx);
+assert.equal(nodes.get('cash').textContent,'+325.50');
+assert(nodes.get('metrics').innerHTML.includes('<label>空投</label><b>677.10</b>'));
+assert(nodes.get('posterMetrics').innerHTML.includes('<span>空投</span><b>677.10</b>'));
+assert(nodes.get('rows').innerHTML.includes('https://basescan.org/tx/'+ctx.cachedCampaign.tx));
+assert.equal(JSON.parse(ctx.exported).cashFlow.campaignOtherRaw,'517000000');
 ctx.input=[draw];
 vm.runInContext("state.events=input;render();",ctx);
 for (const id of ['cash', 'posterCash']) assert.equal(nodes.get(id).dataset.balance, 'loss');

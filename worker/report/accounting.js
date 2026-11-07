@@ -19,6 +19,7 @@ export function summarizeWalletEvents(input) {
     buybackReceived: sumCategory('buyback-claim-confirmed'),
     compensation: payouts.reduce((total, event) => total + BigInt(event.compensationRaw), 0n).toString(),
     campaignPrizes: payouts.reduce((total, event) => total + BigInt(event.prizeRaw), 0n).toString(),
+    campaignOther: payouts.reduce((total, event) => total + BigInt(event.otherRaw ?? '0'), 0n).toString(),
     stakingCount: String(staking.length),
     keptDisposalCount: count('kept-disposal-confirmed'),
     buybackCount: count('buyback-claim-confirmed'),
@@ -41,12 +42,13 @@ export function displayWalletTotals(record, events) {
   const staking = BigInt(record.staking), buybackReceived = BigInt(record.buybackReceived);
   const keptDisposal = BigInt(record.keptDisposal ?? '0');
   const compensation = BigInt(record.compensation ?? '0'), campaignPrizes = BigInt(record.campaignPrizes ?? '0');
+  const campaignOther = BigInt(record.campaignOther ?? '0');
   const stakingInflow = staking + keptDisposal;
-  const inflows = refund + sales + buybackReceived + stakingInflow + compensation + campaignPrizes;
+  const inflows = refund + sales + buybackReceived + stakingInflow + compensation + campaignPrizes + campaignOther;
   const outflows = pack + marketPurchases;
   return {
     events, pack, marketPurchases, refund, sales, stakingInflow, buybackReceived, keptDisposal,
-    compensation, campaignPrizes, inflows, outflows, net: inflows - outflows,
+    compensation, campaignPrizes, campaignOther, inflows, outflows, net: inflows - outflows,
     stakingInflowKnown: BigInt(record.stakingCount) + BigInt(record.keptDisposalCount ?? '0') > 0n,
     buybackKnown: BigInt(record.buybackCount) > 0n,
     pendingPacks: Number(record.pendingPacks),

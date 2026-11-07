@@ -61,7 +61,7 @@ export function renderWalletReport(linkAcquisitionCosts) {
       <div class="split">
         <div><span>已實現損益</span><b>未計算</b></div>
         <div><span>未實現損益</span><b>未計算</b></div>
-        <div><span>已核實持倉</span><b id="holdingCount">—</b></div>
+        <div id="holdingCountMetric" hidden><span>已核實持倉</span><b id="holdingCount"></b></div>
       </div>
     </section>
 
@@ -73,7 +73,7 @@ export function renderWalletReport(linkAcquisitionCosts) {
       <div class="actions"><button class="quiet" id="csv" disabled>匯出 CSV</button><button class="quiet" id="json" disabled>匯出完整 JSON</button><button class="quiet" id="fullEvidence" type="button" hidden>重新核對完整逐筆（會查鏈）</button></div>
     </section>
 
-    <section class="glass holdings" data-lens="holdings" aria-labelledby="holdings-title">
+    <section class="glass holdings" id="holdingsSection" data-lens="holdings" aria-labelledby="holdings-title" hidden>
       <div class="section-heading"><h2 id="holdings-title">持倉與質押</h2><span class="section-index">03 / HOLDINGS</span></div>
       <p class="caption">由選定期間的抽卡、購買與質押事件發現候選卡片，再以 ownerOf / stakerOf 在固定快照區塊核實。外部轉入與更早部位可能缺漏。</p>
       <div id="assets"><p class="caption">尚未查核持倉</p></div>

@@ -1,4 +1,4 @@
-import { addr, MARKET, SIG, STAKE, USDC, word } from '../index.js';
+import { addr, decodeReward, MARKET, SIG, STAKE, USDC, word } from '../index.js';
 import { activeAuction, compactLog, evidencePlan, getFilteredLogs, receiptRecord } from './chain.js';
 
 const logId = log => log.transactionHash + ':' + log.logIndex;
@@ -22,6 +22,38 @@ function nearbyActivityWindows(candidates) {
   return windows;
 }
 
+function repeatedTreasuryPayouts(wallet, recipient, logs, cash, history) {
+  const indexedBuybacks = new Set();
+  for (const log of logs.values()) {
+    if (log.topics[0] !== SIG.buyback || log.topics[2] !== recipient) continue;
+    const claim = decodeReward(log, wallet).find(event => event.category === 'buyback-claim');
+    if (claim) indexedBuybacks.add(`${claim.tx}:${claim.logIndex - 3}:${claim.raw}`);
+  }
+
+  const groups = new Map();
+  for (const log of cash) {
+    if (log.address !== USDC || log.topics[0] !== SIG.transfer || log.topics[2] !== recipient) continue;
+    const block = Number(log.blockNumber);
+    const payer = addr(log.topics[1]);
+    const raw = BigInt(log.data);
+    if (raw <= 0n || payer === wallet || !history.isTreasury(payer, block) || !history.audited(block)) continue;
+    const groupKey = `${log.transactionHash}:${payer}:${raw}`;
+    const group = groups.get(groupKey) ?? new Map();
+    group.set(logId(log), log);
+    groups.set(groupKey, group);
+  }
+
+  const candidates = new Map();
+  for (const group of groups.values()) {
+    if (group.size < 2) continue;
+    for (const log of group.values()) {
+      const key = `${log.transactionHash}:${Number(log.logIndex)}:${BigInt(log.data)}`;
+      if (!indexedBuybacks.has(key)) candidates.set(log.transactionHash, Number(log.blockNumber));
+    }
+  }
+  return candidates;
+}
+
 export async function walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, to) {
   const recipient = word(wallet);
   const sources = new Set(addresses);
@@ -37,6 +69,10 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
   const lookup = new Set(soldCards.map(item => item.hash));
   const batchCandidates = new Map(soldCards.filter(item => history.audited(Number(item.blockNum)))
     .map(item => [item.hash, Number(item.blockNum)]));
+  for (const [tx, block] of repeatedTreasuryPayouts(wallet, recipient, logs, cash, history)) {
+    lookup.add(tx);
+    batchCandidates.set(tx, block);
+  }
   const kept = new Map();
   for (const log of logs.values()) {
     if (log.topics[0] === SIG.kept) {
@@ -46,8 +82,7 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
       if (history.audited(block)) batchCandidates.set(log.transactionHash, block);
     }
   }
-  // Treasury cash is reconciled against the wallet's indexed events. Only
-  // market payments can require discovery here of an unindexed seller.
+  // Market payments can identify sellers absent from wallet-indexed events.
   for (const log of cash) {
     if (log.address !== USDC || log.topics[0] !== SIG.transfer || log.topics[2] !== recipient ||
       addr(log.topics[1]) !== MARKET || BigInt(log.data) <= 0n) continue;

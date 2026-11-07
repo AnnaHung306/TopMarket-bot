@@ -1,5 +1,6 @@
 import { hex } from './index.js';
 import { alchemy } from './history/chain.js';
+import { campaignPayoutsInRange } from './history/campaign-payouts.js';
 import { withWalletLock } from './history/refresh.js';
 import { addWalletTotals, summarizeWalletEvents } from './report/accounting.js';
 import { directWalletReport, finalizedWalletBlock, WALLET_HISTORY_START } from './wallet-direct.js';
@@ -38,8 +39,16 @@ function canRead(snapshot, afterBlock) {
   return snapshot && (afterBlock === undefined || snapshot.through > afterBlock);
 }
 
-function fromCache(snapshot, usage = { units: 0 }) {
-  return { ready: true, cached: true, snapshot, usage };
+function reconcileCampaign(snapshot, wallet) {
+  const campaignPayouts = campaignPayoutsInRange(wallet, snapshot.start, snapshot.through);
+  const { compensation, campaignPrizes, campaignOther } = summarizeWalletEvents(campaignPayouts);
+  const totals = { ...snapshot.totals, compensation, campaignPrizes, campaignOther };
+  return { snapshot: { ...snapshot, totals }, campaignPayouts };
+}
+
+function fromCache(saved, wallet, usage = { units: 0 }) {
+  const { snapshot, campaignPayouts } = reconcileCampaign(saved, wallet);
+  return { ready: true, cached: true, snapshot: { ...snapshot, campaignPayouts }, usage };
 }
 
 async function begin(reader, previous) {
@@ -66,28 +75,28 @@ export async function walletCachePage(sql, wallet, afterBlock) {
     throw error;
   });
   const snapshot = usable(first?.snapshot);
-  if (canRead(snapshot, afterBlock)) return fromCache(snapshot);
+  if (canRead(snapshot, afterBlock)) return fromCache(snapshot, wallet);
   const result = await withWalletLock(wallet, async assertLock => {
     if (!first) await initialize(sql);
     const current = await stateFor(sql, wallet);
     const saved = usable(current.snapshot);
-    if (canRead(saved, afterBlock)) return fromCache(saved);
+    if (canRead(saved, afterBlock)) return fromCache(saved, wallet);
     if (afterBlock !== undefined && (!saved || afterBlock !== saved.through)) {
       throw Error('Wallet refresh must start from its current saved checkpoint');
     }
     const reader = alchemy({ maxUnits: 120_000, maxMs: 240_000, beforeRequest: assertLock });
     const draft = usable(current.draft) || await begin(reader, saved);
-    if (!draft) return fromCache(saved, reader.stats);
+    if (!draft) return fromCache(saved, wallet, reader.stats);
     const page = await directWalletReport(wallet, draft.through + 1, draft.target, reader);
-    const next = {
+    const { snapshot: next, campaignPayouts } = reconcileCampaign({
       ...draft, through: page.to,
       totals: addWalletTotals(draft.totals, summarizeWalletEvents(page.events)),
-    };
+    }, wallet);
     const ready = page.to === draft.target;
     assertLock();
     await save(sql, wallet, current, ready ? next : saved, ready ? null : next);
     return {
-      ready, cached: false, snapshot: ready ? next : null,
+      ready, cached: false, snapshot: ready ? { ...next, campaignPayouts } : null,
       progress: { from: WALLET_HISTORY_START, through: next.through, target: next.target, asOf: next.asOf },
       page, usage: reader.stats,
     };

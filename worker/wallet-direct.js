@@ -81,7 +81,7 @@ function logsWithPossibleProof(logs, receipts, wallet) {
   }
   return logs.filter(log => {
     const sig = log.topics[0], tx = log.transactionHash;
-    if (sig === SIG.draw) return cashOut.has(tx);
+    if (sig === SIG.draw || sig === SIG.tokenDraw) return cashOut.has(tx);
     if (sig === SIG.kept) return log.dispositionCandidate || cardsIn.has(tx);
     if (sig === SIG.buyback || sig === SIG.tokenBuyback) return decodeReward(log, wallet).some(event => cashIn.get(tx)?.has(event.raw));
     if (sig === SIG.refund || sig === SIG.rescue) return cashIn.get(tx)?.has(decode(log).raw);

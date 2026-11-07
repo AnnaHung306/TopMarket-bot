@@ -10,18 +10,26 @@ ${updateScanStatus.toString()}
 ${summarizeWalletEvents.toString()}
 ${displayWalletTotals.toString()}
 const glassRefractionTools = (${createGlassRefractionTools.toString()})();
-const $=id=>document.getElementById(id);const labels={pack:'抽卡花費（已核實）',refund:'抽卡退款（已核實）',buyback:'回購名目額',buybackConfirmed:'回購收入（已核實）',kept:'保留卡片','kept-disposal-confirmed':'留卡結算實收','kept-disposal-evidence':'留卡結算事件（不加總）','kept-disposal-pending':'留卡結算待核對',sales:'銷售實收',staking:'質押收益', 'staking-treasury':'質押收益', 'staking-confirmed':'質押收益實收', 'staking-pending':'質押收益待核對', 'staking-evidence':'質押收益事件（不加總）', 'buyback-claim-confirmed':'回購實收證據', 'buyback-claim-pending':'回購待核對', 'buyback-claim-evidence':'回購事件（不加總）',holdings:'持倉卡片估值（參考）',compensation:'補償',campaignPrizes:'活動獎金','campaign-payout':'活動入帳','refund-transfer':'指定地址退款',won:'抽中卡片',staked:'質押存入',unstaked:'質押取回',saleGross:'銷售名目額',purchaseGross:'市場買卡（事件金額）',selfTrade:'自成交（排除）',nftReceived:'NFT 轉入'};let state={events:[],wallet:'',complete:false,started:false},running=false,stopped=false;const money=(n,digits=2)=>n==null?'—':n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:digits});
+const $=id=>document.getElementById(id);const labels={pack:'抽卡花費（已核實）',refund:'抽卡退款（已核實）',buyback:'回購名目額',buybackConfirmed:'回購收入（已核實）',kept:'保留卡片','kept-disposal-confirmed':'留卡結算實收','kept-disposal-evidence':'留卡結算事件（不加總）','kept-disposal-pending':'留卡結算待核對',sales:'銷售實收',staking:'質押收益', 'staking-treasury':'質押收益', 'staking-confirmed':'質押收益實收', 'staking-pending':'質押收益待核對', 'staking-evidence':'質押收益事件（不加總）', 'buyback-claim-confirmed':'回購實收證據', 'buyback-claim-pending':'回購待核對', 'buyback-claim-evidence':'回購事件（不加總）',holdings:'持倉卡片估值（參考）',airdrop:'空投','campaign-payout':'活動入帳','refund-transfer':'指定地址退款',won:'抽中卡片',staked:'質押存入',unstaked:'質押取回',saleGross:'銷售名目額',purchaseGross:'市場買卡（事件金額）',selfTrade:'自成交（排除）',nftReceived:'NFT 轉入'};let state={events:[],wallet:'',complete:false,started:false},running=false,stopped=false;const money=(n,digits=2)=>n==null?'—':n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:digits});
 function totals() {
-  const events = [...new Map(state.events.map(event => [event.id, event])).values()];
+  const allEvents = [...state.events, ...(state.summary?.campaignPayouts || [])];
+  const events = [...new Map(allEvents.map(event => [event.id, event])).values()];
   return displayWalletTotals(state.summary?.totals || summarizeWalletEvents(events), events);
 }
-function reportMetrics(totals, held) {
-  const { started, complete, holdingsChecked } = state;
-  const amount = raw => Number(raw) / 1e6;
-  const priced = held.filter(asset => asset.referenceValue !== null);
-  const holdings = holdingsChecked && held.length && priced.length === held.length
-    ? priced.reduce((sum, asset) => sum + asset.referenceValue, 0)
+function holdingsSummary() {
+  const assets = state.assets || [];
+  const held = assets.filter(asset => ['wallet', 'staked'].includes(asset.status));
+  const verified = state.complete && state.holdingsChecked && !state.holdingsError &&
+    assets.length > 0 && assets.every(asset => ['wallet', 'staked', 'not-held'].includes(asset.status));
+  const value = verified && held.every(asset => Number.isFinite(asset.referenceValue))
+    ? held.reduce((sum, asset) => sum + asset.referenceValue, 0)
     : null;
+  return { held, verified, value };
+}
+function reportMetrics(totals, holdings) {
+  const { started, complete } = state;
+  const airdrop = totals.compensation + totals.campaignPrizes + totals.campaignOther;
+  const amount = raw => Number(raw) / 1e6;
   const unit = started && !complete ? 'USDC · 部分' : 'USDC';
   const noResult = () => state.scanError ? '查詢失敗' : started ? '查詢未完成' : '尚未查詢';
   const receipt = (key, raw, verified, pending, empty = '查無入帳') => ({
@@ -35,32 +43,28 @@ function reportMetrics(totals, held) {
     value: value === null ? noResult() : money(value),
     note: value === null ? '' : unit,
   });
-  const holdingsStatus = state.holdingsError ? '查詢失敗'
-    : !holdingsChecked ? state.summary ? '本次未重查' : noResult()
-    : held.length ? '部分卡片缺少報價'
-    : (state.assets || []).some(asset => asset.status === 'unknown') ? '持有狀態待核對'
-    : complete ? '查無符合的持倉' : '查詢未完成';
   return [
     started && totals.pendingPacks && totals.pack === 0n
       ? { label: labels.pack, value: '付款待核對', note: '' }
       : metric('pack', started ? amount(totals.pack) : null),
     metric('purchaseGross', started ? amount(totals.marketPurchases) : null),
     receipt('buybackConfirmed', totals.buybackReceived, totals.buybackKnown, totals.pendingBuybacks),
-    receipt('compensation', totals.compensation, totals.compensation > 0n, false, '查無已核實入帳'),
-    receipt('campaignPrizes', totals.campaignPrizes, totals.campaignPrizes > 0n, false, '查無已核實入帳'),
+    receipt('airdrop', airdrop, airdrop > 0n, false, '查無已核實入帳'),
     receipt('staking', totals.stakingInflow, totals.stakingInflowKnown, totals.pendingStakingInflow),
-    { label: labels.holdings, value: holdings === null ? holdingsStatus : money(holdings), note: holdings === null ? '' : '協議參考值 · 非報價' },
-    metric('refund', started ? amount(totals.refund) : null),
+    ...(holdings === null ? [] : [{ label: labels.holdings, value: money(holdings), note: '已查卡片 · 協議參考值' }]),
+    ...(totals.refund > 0n ? [receipt('refund', totals.refund, true, false)] : []),
     metric('sales', started ? amount(totals.sales) : null),
   ];
 }
 function render(){
-const t=totals(),known=state.started,held=(state.assets||[]).filter(x=>['wallet','staked'].includes(x.status));
-$('holdingCount').textContent=state.holdingsChecked?held.length+' 張（候選範圍）':'—';
+const t=totals(),known=state.started,{held,verified,value}=holdingsSummary();
+$('holdingCountMetric').hidden=!verified;
+$('holdingCount').textContent=verified?held.length+' 張（已查卡片）':'';
+$('holdingsSection').hidden=!state.holdingsChecked||Boolean(state.holdingsError)||!held.length;
 $('update').hidden=!state.summary;
 $('fullEvidence').hidden=!state.summary||state.fullEvidence;
 $('json').textContent=state.summary&&!state.fullEvidence?'匯出收支摘要 JSON':'匯出完整 JSON';
-const metrics=reportMetrics(t,held);
+const metrics=reportMetrics(t,value);
 const stakingAttribute=key=>key==='staking'?' data-metric="staking"':'';
 $('metrics').innerHTML=metrics.map(({key,label,value,note})=>'<div class="metric"'+stakingAttribute(key)+'><label>'+label+'</label><b>'+value+'</b><small>'+note+'</small></div>').join('');
 $('posterMetrics').innerHTML=metrics.map(({key,label,value})=>{
@@ -268,7 +272,7 @@ $('cancel').onclick = () => {
 function save(content,name,type){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 $('json').onclick=()=>{
 const t=totals();
-const cashFlow=state.started?{inflowsRaw:t.inflows.toString(),outflowsRaw:t.outflows.toString(),netRaw:t.net.toString(),stakingInflowRaw:t.stakingInflow.toString(),keptDisposalRaw:t.keptDisposal.toString(),compensationRaw:t.compensation.toString(),campaignPrizesRaw:t.campaignPrizes.toString(),unit:'USDC base units (6 decimals)'}:null;
+const cashFlow=state.started?{inflowsRaw:t.inflows.toString(),outflowsRaw:t.outflows.toString(),netRaw:t.net.toString(),stakingInflowRaw:t.stakingInflow.toString(),keptDisposalRaw:t.keptDisposal.toString(),compensationRaw:t.compensation.toString(),campaignPrizesRaw:t.campaignPrizes.toString(),campaignOtherRaw:t.campaignOther.toString(),unit:'USDC base units (6 decimals)'}:null;
 save(JSON.stringify({...state,events:t.events,cashFlow,acquisitionCosts:linkAcquisitionCosts(t.events),methodology:{currency:'USDC',identifiedInflows:'uniquely receipt-matched refunds plus receipt-confirmed direct marketplace sale receipts, staking income, winner buybacks and verified campaign payouts; unique transfer identities counted once; excludes nominal events and delayed withdrawals',identifiedOutflows:'Receipt-verified USDC draw payments and nominal USDC marketplace purchase amounts in the scanned blocks; excludes gas, other markets and unobserved expenses',realizedPnl:null,unrealizedPnl:null,holdingsValue:null,limitations:['delayed marketplace withdrawals not reconciled','unpaid staking payouts are not included','linked draw acquisition expenditure is not current tax-lot basis','holdings candidates may be incomplete','protocol oracle references are not executable prices','gas excluded','unmatched buybacks excluded; NFT disposal proceeds incomplete']}},null,2),'top-market-report.json','application/json');
 };$('csv').onclick=()=>{const e=totals().events,costs=new Map(linkAcquisitionCosts(e).map(c=>[c.keptId,c]));const header='category,amount_usdc,raw_amount,block,transaction,log_index,contract,request_or_win_id,receipt_or_claim_id,reason,collection,token_id,win_id,linked_draw_id,acquisition_cost_raw,acquisition_cost_usdc,acquisition_cost_status,acquisition_cost_note,payment_verified,randomness_source,source_status,nft_receipt_id';const rows=e.map(x=>{const c=costs.get(x.id);return [x.category,x.amount==null?'UNKNOWN':x.amount,x.raw??'UNKNOWN',x.block,x.tx,x.logIndex,x.contract,x.requestId||x.winId||'',x.receiptId||x.claimId||'',x.reason||'',x.collection||c?.collection||'',x.tokenId||c?.tokenId||'',x.winId||'',c?.drawId||'',c?(c.acquisitionCostRaw??'UNKNOWN'):'',c?(c.acquisitionCost??'UNKNOWN'):'',c?.costStatus||'',c?.reason||'',x.category==='pack'?(x.paymentVerified?'true':'UNKNOWN'):'',x.randomnessSource||'',x.sourceStatus||'',x.nftReceiptId||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',');});save(header+'\n'+rows.join('\n'),'top-market-evidence.csv','text/csv;charset=utf-8');};$('print').onclick=()=>window.print();
 let exportingPoster = false;
