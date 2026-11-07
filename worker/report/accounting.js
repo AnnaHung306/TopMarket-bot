@@ -2,19 +2,21 @@ export const WALLET_HOLDINGS_PAGE_SIZE = 240;
 
 export function summarizeWalletEvents(input) {
   const events = [...new Map(input.map(event => [event.id, event])).values()];
-  const sum = (category, include = () => true) => events
-    .filter(event => event.category === category && event.raw !== null && include(event))
+  const sum = selected => selected.filter(event => event.raw !== null)
     .reduce((total, event) => total + BigInt(event.raw), 0n).toString();
+  const categoryEvents = category => events.filter(event => event.category === category);
+  const sumCategory = category => sum(categoryEvents(category));
   const count = category => String(events.filter(event => event.category === category).length);
+  const staking = events.filter(event => ['staking-confirmed', 'staking-treasury'].includes(event.category));
   return {
-    pack: sum('pack', event => event.paymentVerified === true),
-    marketPurchases: sum('purchaseGross'),
-    refund: sum('refund-confirmed'),
-    sales: sum('sales'),
-    staking: sum('staking-confirmed'),
-    keptDisposal: sum('kept-disposal-confirmed'),
-    buybackReceived: sum('buyback-claim-confirmed'),
-    stakingCount: count('staking-confirmed'),
+    pack: sum(categoryEvents('pack').filter(event => event.paymentVerified === true)),
+    marketPurchases: sumCategory('purchaseGross'),
+    refund: sumCategory('refund-confirmed'),
+    sales: sumCategory('sales'),
+    staking: sum(staking),
+    keptDisposal: sumCategory('kept-disposal-confirmed'),
+    buybackReceived: sumCategory('buyback-claim-confirmed'),
+    stakingCount: String(staking.length),
     keptDisposalCount: count('kept-disposal-confirmed'),
     buybackCount: count('buyback-claim-confirmed'),
     pendingPacks: String(events.filter(event => event.category === 'pack' && event.paymentVerified !== true).length),

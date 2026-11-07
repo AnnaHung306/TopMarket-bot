@@ -89,7 +89,6 @@ export function renderWalletReport(linkAcquisitionCosts) {
         <div class="total"><div class="big" id="posterCash">—</div><span>USDC</span></div>
       </div>
       <div id="posterMetrics"></div>
-      <div class="warning" id="posterWarning">請先查詢錢包。</div>
       <p class="caption poster-date" id="posterDate">BASE / EVIDENCE FIRST</p>
       <div class="poster-actions">
         <button id="download" disabled>下載海報 PNG <span aria-hidden="true">↓</span></button>

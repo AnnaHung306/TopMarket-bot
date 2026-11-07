@@ -1,6 +1,7 @@
 import { addr, boxes, decode, decodeReward, hex, MARKET, SIG, STAKE, USDC, word } from './index.js';
 import { activeAuction, alchemy, callKey, callRecord, evidencePlan, getFilteredLogs } from './history/chain.js';
 import { settleRecordedWallet } from './history/report.js';
+import { treasuryStaking } from './history/treasury-staking.js';
 import { walletEvidence } from './history/wallet-evidence.js';
 import { readWalletHistoricalCalls, walletStateHistory } from './history/wallet-state.js';
 
@@ -149,8 +150,8 @@ export async function directWalletReport(wallet, from, to, reader = alchemy({ ma
   let { through } = activity;
   const relevantIncoming = incoming.filter(log => {
     const block = Number(log.blockNumber);
-    return block >= from && block <= through &&
-      (!history.audited(block) || history.payers.has(addr(log.topics[1])) || addr(log.topics[1]) === MARKET);
+    const payer = addr(log.topics[1]);
+    return block >= from && block <= through && (history.isTreasury(payer, block) || payer === MARKET);
   });
   through = Math.min(selectPage(direct, from, through), selectPage(relevantIncoming, from, through, 800));
   if (through < activity.through && activity.direct.length + incoming.length + outgoing.length <= DISCOVERY_CACHE_LOGS) {
@@ -170,13 +171,14 @@ export async function directWalletReport(wallet, from, to, reader = alchemy({ ma
   const logs = new Map(direct.filter(log => Number(log.blockNumber) <= through)
     .filter(log => log.topics[0] !== SIG.auction || activeAuction(log))
     .map(log => [log.transactionHash + ':' + log.logIndex, log]));
-  const receiptRecords = await walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, through);
+  const { receipts, deferred } = await walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, through);
   const related = [...logs.values()];
   const plan = evidencePlan(related, true);
-  const required = evidencePlan(logsWithPossibleProof(related, receiptRecords, wallet), true).calls;
+  const required = evidencePlan(logsWithPossibleProof(related, receipts, wallet), true).calls;
   const responses = await readWalletHistoricalCalls(reader, required, history);
   const historical = new Map(required.map((call, index) => [callKey(call[1]), responses[index]]));
   const calls = plan.calls.map(call => callRecord(call, historical.get(callKey(call[1])) ?? null));
-  const report = await settleRecordedWallet(wallet, related, receiptRecords, calls, updates, true);
-  return { from, to: through, ...report, seconds: (performance.now() - started) / 1_000 };
+  const { events, warnings } = await settleRecordedWallet(wallet, related, receipts, calls, updates, true);
+  events.push(...treasuryStaking(wallet, cash, events, deferred, history.isTreasury));
+  return { from, to: through, events, warnings, seconds: (performance.now() - started) / 1_000 };
 }

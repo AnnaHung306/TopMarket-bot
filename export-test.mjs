@@ -4,7 +4,7 @@ import worker from './worker/index.js';
 const html=await(await worker.fetch(new Request('https://local/'))).text();
 const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const nodes=new Map();
-const ctx={document:{getElementById:id=>{if(!nodes.has(id))nodes.set(id,{style:{}});return nodes.get(id);}}};
+const ctx={document:{getElementById:id=>{if(!nodes.has(id))nodes.set(id,{style:{},dataset:{}});return nodes.get(id);}}};
 vm.createContext(ctx);
 vm.runInContext(script+`\nsave=(text)=>{globalThis.exported=text;};state.events=[{id:'test',category:'refund-pending',amount:null,raw:null,block:1,tx:'0xabc',logIndex:2,contract:'0xdef',requestId:'3',receiptId:'0xabc:0x4',reason:'Ambiguous, "not counted"'}];$('csv').onclick();`,ctx);
 // RFC 4180 quoted fields: quotes are doubled, never backslash-escaped.

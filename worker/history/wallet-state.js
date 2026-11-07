@@ -49,6 +49,25 @@ export async function walletStateHistory(reader, addresses, from, to) {
     ['eth_call', [{ to: logs[0].address, data: TREASURY }, hex(Number(logs[0].blockNumber) - 1)]],
   ] : []), true);
   const payers = new Set([...current, ...initial, ...treasuryChanges.flat().map(log => log.topics[1])].map(addressWord).filter(Boolean));
+  const payerPeriods = new Map();
+  function addPayerPeriod(payer, start, end) {
+    if (!payer || start > end) return;
+    if (!payerPeriods.has(payer)) payerPeriods.set(payer, []);
+    payerPeriods.get(payer).push({ start, end });
+  }
+  let initialIndex = 0;
+  treasuryChanges.forEach((changes, index) => {
+    let payer = addressWord(changes.length ? initial[initialIndex++] : current[index]);
+    let start = from;
+    for (const change of changes) {
+      const block = Number(change.blockNumber);
+      addPayerPeriod(payer, start, block - 1);
+      payer = addressWord(change.topics[1]);
+      start = block + 1;
+    }
+    addPayerPeriod(payer, start, to);
+  });
+  const isTreasury = (payer, block) => payerPeriods.get(payer)?.some(({ start, end }) => start <= block && block <= end) ?? false;
 
   function epoch(box, block) {
     const beacon = beacons.get(box);
@@ -67,7 +86,7 @@ export async function walletStateHistory(reader, addresses, from, to) {
       return start !== null && start < block;
     });
   }
-  return { updates, payers, epoch, audited };
+  return { updates, payers, isTreasury, epoch, audited };
 }
 
 export async function readWalletHistoricalCalls(reader, calls, history) {
