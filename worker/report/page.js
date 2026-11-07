@@ -46,6 +46,7 @@ export function renderWalletReport(linkAcquisitionCosts) {
           <input id="wallet" placeholder="0x…" autocomplete="off" spellcheck="false" required pattern="0x[a-fA-F0-9]{40}">
           <button id="analyze">分析錢包 <span aria-hidden="true">→</span></button>
           <button class="quiet" type="button" id="cancel" hidden>停止掃描</button>
+          <button class="quiet" type="button" id="update" hidden>更新到最新區塊</button>
         </div>
       </form>
       ${scanStatusMarkup}
@@ -70,7 +71,7 @@ export function renderWalletReport(linkAcquisitionCosts) {
       <div class="table-wrap" role="region" aria-label="交易證據表格" tabindex="0">
         <table><thead><tr><th scope="col">類型</th><th scope="col">USDC</th><th scope="col">區塊</th><th scope="col">交易證據</th></tr></thead><tbody id="rows"><tr><td colspan="4" class="empty">鏈上證據將顯示於此</td></tr></tbody></table>
       </div>
-      <div class="actions"><button class="quiet" id="csv" disabled>匯出 CSV</button><button class="quiet" id="json" disabled>匯出完整 JSON</button></div>
+      <div class="actions"><button class="quiet" id="csv" disabled>匯出 CSV</button><button class="quiet" id="json" disabled>匯出完整 JSON</button><button class="quiet" id="fullEvidence" type="button" hidden>重新核對完整逐筆（會查鏈）</button></div>
     </section>
 
     <section class="glass holdings" aria-labelledby="holdings-title">

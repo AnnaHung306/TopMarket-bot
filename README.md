@@ -9,10 +9,12 @@ npm run dev
 # http://127.0.0.1:3000
 ```
 
-Vercel Production 與本機報表需要伺服器環境變數 `ALCHEMY_API_KEY`，使用已啟用 Base Mainnet 的 Alchemy App key。
+Vercel Production 與本機報表需要伺服器環境變數 `ALCHEMY_API_KEY`、`DATABASE_URL`。本機入口會讀取已被 Git 忽略的 `.env`。
 
-每次查詢從最早相關合約的部署區塊讀到 Base 最新的最終確認區塊。報表按指定地址查 Top.Market 合約的事件、該錢包的 USDC 轉入及 ERC-721 轉出，從關聯交易收據核對實收與已付款支出。較活躍的地址會按區塊分頁。報表 JSON 會附上該次查詢用到的估算 Alchemy CU，包括已完成的持倉核對。
+首次查詢從最早相關合約的部署區塊查到 Base 最新的最終確認區塊。按地址篩選 Top.Market 合約事件、已知付款方到錢包的 USDC 轉入及 ERC-721 轉出，並核對關聯收據。只有存在可配對的轉帳時才讀歷史金庫等合約狀態。
 
-Neon 歷史回補已停止。既有的資料及同步工具仍保留，網站查詢直接走 Alchemy。維護用的 `npm run sync:history` 需要另提供 `DATABASE_URL`，執行時會寫入 Neon。
+Neon 每個已查錢包保存一列收支累計、已完整處理的區塊與 block hash，分頁工作進度可接續。再次按「分析錢包」讀已存摘要；「更新到最新區塊」才讀檢查點之後的活動。摘要不儲存持倉、交易收據或完整逐筆明細，若需要這些資料，可明確點選重新核對。本機與 Vercel 的摘要讀取使用同一套路由。
+
+舊的全站回補已停止，既有資料保留。維護用的 `npm run sync:history` 是獨立工具，不會從網站啟動。
 
 `npm run build` 和 `npm run validate` 驗證原可攜式 Worker 工件。網站只讀 Base，收入為已識別款項。

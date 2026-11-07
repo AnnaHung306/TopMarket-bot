@@ -7,6 +7,8 @@ const FACTORY_DEPLOYMENTS=[50636771,52098220];
 const MARKET='0xf20658ec88403e9a26d77fb95e91c1248d9818ea',STAKE='0xde16e61171ca80c169ecb82e9328118ae5958369',USDC='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
 const SIG={requestVia:'0xba25fefcb40ae654f130e3be6b73de7f0ccf2b8441ec58a2ad8366d3be8d2e54',feeRecipientUpdated:'0x7a7b5a0a132f9e0581eb8527f66eae9ee89c2a3e79d4ac7e41a1f1f4d48a7fc2',treasuryUpdated:'0x7dae230f18360d76a040c81f050aa14eb9d6dc7901b20fc5d855e2a20fe814d1',payoutDeferred:'0x0e54be18cea4b7c02dcb455aa29944656f9f30fbb0ba328fe8a75d10e52511dd',draw:'0xdb439e6080e1209a20f9d35abe6f80219c3e5fd9d9bb0f07c8a784ee5c58055b',tokenDraw:'0xd93114e64a2d27c65b12cd13e827517eba84ef21832db9a365f3b745f13b522d',refund:'0xfefb3e5c0d062b34e87c5f8290c51731d2229099c7f000e7780d8b3fe44b45e0',rescue:'0x1828d2f3000b31d9ff70785eaf88e43ed44e8b732bda61ecad9e36f812511540',buyback:'0xaec8469c085e128de99c809d38f9c07e565663dfd29b128d537fd205ffa94c27',tokenBuyback:'0x55919353708fdaf1559aaa0cb60096e7885b0c3a4ef0bc3fcc7a83301963987a',kept:'0x6a06d823c45c17db1b2ce7efbcebfc5c0f82b756b3ce522fa4179a132448439a',transfer:'0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',won:'0xafa41f2c37f02935fa60ede2a9236a4d823678634694ff89b191000ce21a7ff7',sold:'0x0bfbe42bbfa7e9dbd4093c84bc4c056f76ae3392d4692bf3e798130e4398ff46',offer:'0xfe32bff8f34618a1622914ef3a11f01ef84838224733f36409e9b8731974a7c3',staked:'0x9f9e4044c5742cca66ca090b21552bac14645e68bad7a92364a9d9ff18111a1c',unstaked:'0xe85b7860587d17eba1b921a125cf25732cd9e64d1516f196df3c9c8fb8d513f3',auction:'0xc9f72b276a388619c6d185d146697036241880c36654b1a3ffdad07c24038d99'};
 const hex=n=>'0x'+Number(n).toString(16),word=a=>'0x'+a.slice(2).padStart(64,'0'),words=data=>data.slice(2).match(/.{64}/g)||[],addr=x=>'0x'+x.slice(-40).toLowerCase(),valid=a=>/^0x[0-9a-fA-F]{40}$/.test(a);
+SIG.tokenReleased='0x22c48950706d393b833ea45eaaa6128d8de712bd864d44b66a18982f7a09391d';
+const cashClaimCategories=new Set(['refund','staking','buyback-claim','kept-disposal']);
 function rpcError(message,defaultMessage){
   const text=typeof message==='string'&&message?message:defaultMessage;
   return Error(ALCHEMY_KEY?text.replaceAll(ALCHEMY_KEY,'[redacted]'):text);
@@ -80,7 +82,7 @@ function historicalPayerEvidence(before,after,tokenBefore,tokenAfter,updates){
  return {payer,payerEvidence:'treasury() and settlementToken() at block-1/block; no block TreasuryUpdated logs'};
 }
 async function resolveRefundPayers(events,readBatch=batch){
- const claims=events.filter(e=>['refund','staking','buyback-claim'].includes(e.category));
+ const claims=events.filter(e=>cashClaimCategories.has(e.category));
  const groups=[...new Map(claims.map(e=>[e.contract.toLowerCase()+':'+e.block,e])).values()];
  const proofs=new Map();
  for(const e of groups){const key=e.contract.toLowerCase()+':'+e.block;try{
@@ -88,21 +90,73 @@ async function resolveRefundPayers(events,readBatch=batch){
   const values=await readBatch([call('0x61d027b3',e.block-1),call('0x61d027b3',e.block),call('0x7b9e618d',e.block-1),call('0x7b9e618d',e.block),['eth_getLogs',[{address:e.contract,fromBlock:hex(e.block),toBlock:hex(e.block),topics:[SIG.treasuryUpdated]}]]],true);
   proofs.set(key,historicalPayerEvidence(...values));
  }catch{proofs.set(key,{payer:null,payerError:'Historical treasury/token lookup unavailable'});}}
- return events.map(e=>['refund','staking','buyback-claim'].includes(e.category)?{...e,...proofs.get(e.contract.toLowerCase()+':'+e.block)}:e);
+ return events.map(e=>cashClaimCategories.has(e.category)?{...e,...proofs.get(e.contract.toLowerCase()+':'+e.block)}:e);
 }
 function reconcileRefunds(input,receiptMap,wallet){
- const events=[...new Map(input.map(e=>[e.id,e])).values()],claims=events.filter(e=>['refund','staking','buyback-claim'].includes(e.category));
- const cash=new Map();for(const tx of new Set(claims.map(e=>e.tx))){const r=receiptMap.get(tx);if(!r||r.status!=='0x1')continue;for(const l of r.logs||[]){if(l.address.toLowerCase()!==USDC||l.topics[0]!==SIG.transfer||l.topics.length<3||addr(l.topics[2])!==wallet)continue;if(events.some(e=>e.id===base(l).id&&e.category==='sales'))continue;cash.set(base(l).id,{...base(l),payer:addr(l.topics[1]),raw:BigInt(l.data).toString(),amount:Number(BigInt(l.data))/1e6});}}
- const matches=new Map(claims.map(e=>[e.id,[...cash.values()].filter(t=>t.tx===e.tx&&e.payer&&t.payer===e.payer.toLowerCase()&&t.raw===e.raw)]));const confirmed=new Map();
- const out=events.map(e=>{if(e.category==='refund-transfer')return {...e,category:'refund-pending',reason:'User-supplied source transfer; refund purpose not uniquely verified'};if(!['refund','staking','buyback-claim'].includes(e.category))return e;const candidates=matches.get(e.id),t=candidates[0];const deferred=(receiptMap.get(e.tx)?.logs||[]).some(l=>l.address.toLowerCase()===e.contract.toLowerCase()&&l.topics[0]===SIG.payoutDeferred&&l.topics.length>=2&&addr(l.topics[1])===wallet&&BigInt(l.data).toString()===e.raw);const unique=!deferred&&!!e.payer&&candidates.length===1&&claims.filter(c=>matches.get(c.id).some(x=>x.id===t.id)).length===1;if(unique){confirmed.set(t.id,{...t,category:e.category+'-confirmed',requestId:e.requestId,claimId:e.id,reconciled:true});return {...e,category:e.category+'-evidence',receiptId:t.id};}return {...e,category:e.category+'-pending',reason:!e.payer?(e.payerError||'Historical treasury payer unknown'):deferred?'Matching payout deferred; cash attribution unresolved':!receiptMap.get(e.tx)?'Receipt unavailable':candidates.length?'Ambiguous event/transfer mapping; possible duplicate':'No unique same-payer, same-amount USDC receipt'};});
- // Never suppress a whole transaction: only exact matched transfer identities are replaced.
- return out.filter(e=>!confirmed.has(e.id)).concat([...confirmed.values()]);
+ const events=[...new Map(input.map(event=>[event.id,event])).values()];
+ const claims=events.filter(event=>cashClaimCategories.has(event.category));
+ const claimSources=new Set(claims.map(event=>event.tx+':'+event.contract.toLowerCase()));
+ const sales=new Set(events.filter(event=>event.category==='sales').map(event=>event.id));
+ const cash=new Map();
+ const deferred=new Set();
+ const matchKey=(tx,payer,raw)=>tx+':'+payer+':'+raw;
+ for(const tx of new Set(claims.map(event=>event.tx))){
+  const receipt=receiptMap.get(tx);
+  for(const log of receipt?.logs||[]){
+   const source=log.address.toLowerCase();
+   if(log.topics[0]===SIG.payoutDeferred&&log.topics.length>=2&&addr(log.topics[1])===wallet&&claimSources.has(tx+':'+source)){
+    deferred.add(matchKey(tx,source,BigInt(log.data).toString()));
+   }
+   if(receipt.status!=='0x1'||source!==USDC||log.topics[0]!==SIG.transfer||
+     log.topics.length<3||addr(log.topics[2])!==wallet)continue;
+   const transfer=base(log);
+   if(sales.has(transfer.id))continue;
+   const amount=BigInt(log.data);
+   cash.set(transfer.id,{...transfer,payer:addr(log.topics[1]),raw:amount.toString(),amount:Number(amount)/1e6});
+  }
+ }
+ const transfersByKey=new Map(), cashAmounts=new Set(), claimCounts=new Map();
+ for(const transfer of cash.values()){
+  const key=matchKey(transfer.tx,transfer.payer,transfer.raw);
+  if(!transfersByKey.has(key))transfersByKey.set(key,[]);
+  transfersByKey.get(key).push(transfer);
+  cashAmounts.add(transfer.tx+':'+transfer.raw);
+ }
+ for(const claim of claims){
+  if(!claim.payer)continue;
+  const key=matchKey(claim.tx,claim.payer.toLowerCase(),claim.raw);
+  claimCounts.set(key,(claimCounts.get(key)||0)+1);
+ }
+ const confirmed=new Map();
+ const out=events.map(event=>{
+  if(event.category==='refund-transfer')return {...event,category:'refund-pending',reason:'User-supplied source transfer; refund purpose not uniquely verified'};
+  if(!cashClaimCategories.has(event.category))return event;
+  const key=event.payer&&matchKey(event.tx,event.payer.toLowerCase(),event.raw);
+  const candidates=transfersByKey.get(key)||[];
+  const payoutDeferred=deferred.has(matchKey(event.tx,event.contract.toLowerCase(),event.raw));
+  if(!payoutDeferred&&candidates.length===1&&claimCounts.get(key)===1){
+   const transfer=candidates[0];
+   const disposition=event.category==='kept-disposal'?{collection:event.collection,tokenId:event.tokenId,winId:event.winId}:{};
+   confirmed.set(transfer.id,{...transfer,...disposition,category:event.category+'-confirmed',requestId:event.requestId,claimId:event.id,reconciled:true});
+   return {...event,category:event.category+'-evidence',receiptId:transfer.id};
+  }
+  const reason=payoutDeferred?'Matching payout deferred; cash attribution unresolved'
+   :!receiptMap.get(event.tx)?'Receipt unavailable'
+   :!cashAmounts.has(event.tx+':'+event.raw)?'No matching same-transaction USDC amount'
+   :!event.payer?(event.payerError||'Historical treasury payer unknown')
+   :candidates.length?'Ambiguous event/transfer mapping; possible duplicate'
+   :'No unique same-payer, same-amount USDC receipt';
+  return {...event,category:event.category+'-pending',reason};
+ });
+ // Replace only the exact matched transfer identity.
+ return out.filter(event=>!confirmed.has(event.id)).concat([...confirmed.values()]);
 }
 function decodeReward(log,wallet){
- if(log.topics[0]!==SIG.buyback)return [];
- const v=words(log.data);if(v.length!==3)return [];
- const winner=addr(log.topics[2]),staker=addr(v[1]),out=[];
- if(staker===wallet)out.push({...base(log),id:base(log).id+':staking',category:'staking',winId:BigInt(log.topics[1]).toString(),raw:BigInt('0x'+v[2]).toString(),amount:Number(BigInt('0x'+v[2]))/1e6});
+ const token=log.topics[0]===SIG.tokenBuyback;
+ if(!token&&log.topics[0]!==SIG.buyback)return [];
+ const v=words(log.data);if(v.length!==(token?2:3))return [];
+ const winner=addr(log.topics[2]),out=[];
+ if(!token&&addr(v[1])===wallet)out.push({...base(log),id:base(log).id+':staking',category:'staking',winId:BigInt(log.topics[1]).toString(),raw:BigInt('0x'+v[2]).toString(),amount:Number(BigInt('0x'+v[2]))/1e6});
  if(winner===wallet)out.push({...base(log),id:base(log).id+':buyback',category:'buyback-claim',winId:BigInt(log.topics[1]).toString(),raw:BigInt('0x'+v[0]).toString(),amount:Number(BigInt('0x'+v[0]))/1e6});
  return out;
 }
@@ -111,6 +165,26 @@ function verifyDrawPayments(packs,receipt,wallet,payer,feeRecipient){
  const expected=new Map();for(const p of packs){if(p.packKind!=='card')return false;for(const [to,raw] of [[payer,p.paidRaw],[feeRecipient,p.feeRaw]])expected.set(to,(expected.get(to)||0n)+BigInt(raw));}
  const actual=new Map();for(const l of receipt.logs||[]){if(l.address.toLowerCase()!==USDC||l.topics[0]!==SIG.transfer||l.topics.length!==3||addr(l.topics[1])!==wallet)continue;const to=addr(l.topics[2]);actual.set(to,(actual.get(to)||0n)+BigInt(l.data));}
  return [...expected].every(([to,n])=>(actual.get(to)||0n)===n)&&[...actual].every(([to,n])=>(expected.get(to)||0n)===n);
+}
+async function keptDisposals(logs,receipts,wallet,readRpc){
+ const claims=[];
+ for(const log of logs){
+  const receipt=receipts.get(log.transactionHash);
+  if(receipt?.status!=='0x1')continue;
+  const result=await readRpc('eth_call',[{to:log.address,data:'0x80bfe883'+log.topics[1].slice(2)},log.blockNumber]);
+  const win=result?words(result):[],winner=addr(log.topics[2]);
+  if(win.length<7||addr(win[0])!==winner||addr(win[4])!==wallet||BigInt('0x'+win[6])!==1n)continue;
+  const amount=BigInt('0x'+win[3]),collection=addr(win[1]),tokenId=BigInt('0x'+win[2]);
+  if(amount<=0n||BigInt(log.data)!==amount)continue;
+  const released=receipt.logs.filter(entry=>entry.address===STAKE&&entry.topics[0]===SIG.tokenReleased&&
+   entry.topics.length===4&&addr(entry.topics[1])===collection&&BigInt(entry.topics[2])===tokenId&&
+   addr(entry.topics[3])===winner&&Number(entry.logIndex)<Number(log.logIndex));
+  if(released.length!==1)continue;
+  const event=base(log);
+  claims.push({...event,id:event.id+':disposal',category:'kept-disposal',raw:amount.toString(),amount:Number(amount)/1e6,
+   winId:BigInt(log.topics[1]).toString(),collection,tokenId:tokenId.toString(),releaseId:base(released[0]).id});
+ }
+ return claims;
 }
 async function enrichAcquisitions(events,receiptMap,wallet,{rpc:readRpc=rpc,batch:readBatch=batch}={}){
  const out=events.map(e=>({...e}));
@@ -123,7 +197,7 @@ async function enrichAcquisitions(events,receiptMap,wallet,{rpc:readRpc=rpc,batc
    const proof=historicalPayerEvidence(...v.slice(0,5));
    const validWord=x=>typeof x==='string'&&/^0x0{24}[0-9a-fA-F]{40}$/.test(x);
    const fee=validWord(v[5])&&v[5]===v[6]?addr(v[5]):null;
-   if(verifyDrawPayments(group,receiptMap.get(tx),wallet,proof.payer,fee))for(const p of group){p.paymentVerified=true;p.paymentProof='successful USDC receipt; all transaction draws and outgoing payments conserved';}
+   if(verifyDrawPayments(group,receiptMap.get(tx),wallet,proof.payer,fee))for(const p of group){p.paymentVerified=true;p.paymentProof='finalized USDC transfers; all transaction draws and outgoing payments conserved';}
   }catch{}
  }
  for(const e of out.filter(e=>e.category==='kept')){try{
@@ -180,7 +254,9 @@ async function settleWallet(wallet,activity,market,auctionLogs,rewardLogs,reader
  });
  let events=activity.map(decode).filter(Boolean).concat(market,auctions,rewardLogs.flatMap(log=>decodeReward(log,wallet)));
  const saleTxs=[...new Set([...market,...auctions].filter(e=>e.category==='saleGross'&&e.currency===USDC).map(e=>e.tx))];
- const evidenceTxs=[...new Set(events.filter(e=>['refund','staking','buyback-claim','pack','kept'].includes(e.category)).map(e=>e.tx))];
+ const dispositions=reader.dispositionLogs??[];
+ const evidenceTxs=[...new Set([...events.filter(e=>['refund','staking','buyback-claim','pack','kept'].includes(e.category)).map(e=>e.tx),
+  ...dispositions.map(log=>log.transactionHash)])];
  if(limit&&saleTxs.length>40)throw Error('Too many sales to reconcile; narrow block range');
  if(limit&&evidenceTxs.length>80)throw Error('Too many payout/acquisition transactions to reconcile; narrow block range');
  const txs=[...new Set([...saleTxs,...evidenceTxs])];
@@ -194,6 +270,7 @@ async function settleWallet(wallet,activity,market,auctionLogs,rewardLogs,reader
   payments.forEach(l=>events.push({...base(l),category:'sales',raw:BigInt(l.data).toString(),amount:Number(BigInt(l.data))/1e6,reconciled:true,saleIds:sales.map(e=>e.id)}));
  }
  events=await enrichAcquisitions(events,receiptMap,wallet,reader);
+ events.push(...await keptDisposals(dispositions,receiptMap,wallet,reader.rpc));
  events=await resolveRefundPayers(events,reader.batch);
  events=reconcileRefunds(events,receiptMap,wallet);
  const pending=events.filter(e=>e.category==='refund-pending');
@@ -204,7 +281,33 @@ async function settleWallet(wallet,activity,market,auctionLogs,rewardLogs,reader
  if(pending.length)warnings.push(pending.length+' refund records pending unique receipt attribution; excluded from confirmed inflows');
  return {events,warnings};
 }
-async function holdings(wallet,assets,block,{rpc:readRpc=rpc,batch:readBatch=batch}={}){let oracleDecimals=null;try{const oracle=addr(await readRpc('eth_call',[{to:STAKE,data:'0x2630c12f'},hex(block)]));oracleDecimals=Number(BigInt(await readRpc('eth_call',[{to:oracle,data:'0x05300b28'},hex(block)])));}catch{}const unique=[...new Map(assets.map(x=>[x.collection.toLowerCase()+':'+x.tokenId,{collection:x.collection.toLowerCase(),tokenId:x.tokenId}])).values()];if(unique.length>40)throw Error('Maximum 40 assets per holdings page');if(unique.some(x=>!valid(x.collection)||!/^\d+$/.test(x.tokenId)))throw Error('Invalid NFT');const owner=await readBatch(unique.map(x=>['eth_call',[{to:x.collection,data:'0x6352211e'+BigInt(x.tokenId).toString(16).padStart(64,'0')},hex(block)]]),true),staker=await readBatch(unique.map(x=>['eth_call',[{to:STAKE,data:'0x56a0fd45'+x.collection.slice(2).padStart(64,'0')+BigInt(x.tokenId).toString(16).padStart(64,'0')},hex(block)]]),true);const collections=[...new Set(unique.map(x=>x.collection))];const prices=await readBatch(collections.map(collection=>['eth_call',[{to:STAKE,data:'0xee687063'+collection.slice(2).padStart(64,'0')},hex(block)]]),true);return unique.map((x,i)=>{const o=owner[i]?addr(owner[i]):null,s=staker[i]?addr(staker[i]):null;const owned=o===wallet,staked=s===wallet;const p=prices[collections.indexOf(x.collection)]?words(prices[collections.indexOf(x.collection)]):[];return {...x,owner:o,staker:s,status:owned?'wallet':staked?'staked':o&&s?'not-held':'unknown',referenceValue:oracleDecimals===6&&p.length>=2&&BigInt('0x'+p[0])>0n?Number(BigInt('0x'+p[0]))/1e6:null,oracleDecimals,oracleTimestamp:p.length>=2?Number(BigInt('0x'+p[1])):null,block};});}
+async function holdings(wallet,assets,block,{rpc:readRpc=rpc,batch:readBatch=batch}={},limit=40){
+ const unique=[...new Map(assets.map(x=>[x.collection.toLowerCase()+':'+x.tokenId,{collection:x.collection.toLowerCase(),tokenId:x.tokenId}])).values()];
+ if(unique.length>limit)throw Error('Maximum '+limit+' assets per holdings page');
+ if(unique.some(x=>!valid(x.collection)||!/^\d+$/.test(x.tokenId)))throw Error('Invalid NFT');
+ if(!unique.length)return [];
+ const at=hex(block),collections=[...new Set(unique.map(asset=>asset.collection))];
+ const call=(to,data)=>['eth_call',[{to,data},at]];
+ const owners=unique.map(asset=>call(asset.collection,'0x6352211e'+BigInt(asset.tokenId).toString(16).padStart(64,'0')));
+ const stakers=unique.map(asset=>call(STAKE,'0x56a0fd45'+word(asset.collection).slice(2)+BigInt(asset.tokenId).toString(16).padStart(64,'0')));
+ const prices=collections.map(collection=>call(STAKE,'0xee687063'+word(collection).slice(2)));
+ const oracleDecimals=async()=>{
+  try{
+   const oracle=addr(await readRpc(...call(STAKE,'0x2630c12f')));
+   return Number(BigInt(await readRpc(...call(oracle,'0x05300b28'))));
+  }catch{return null;}
+ };
+ const [results,decimals]=await Promise.all([readBatch([...owners,...stakers,...prices],true),oracleDecimals()]);
+ const count=unique.length;
+ const priceByCollection=new Map(collections.map((collection,index)=>[collection,results[count*2+index]]));
+ return unique.map((asset,i)=>{
+  const owner=results[i]?addr(results[i]):null,staker=results[count+i]?addr(results[count+i]):null;
+  const price=words(priceByCollection.get(asset.collection)??'0x');
+  const referenceValue=decimals===6&&price.length>=2&&BigInt('0x'+price[0])>0n?Number(BigInt('0x'+price[0]))/1e6:null;
+  return {...asset,owner,staker,status:owner===wallet?'wallet':staker===wallet?'staked':owner&&staker?'not-held':'unknown',
+   referenceValue,oracleDecimals:decimals,oracleTimestamp:price.length>=2?Number(BigInt('0x'+price[1])):null,block};
+ });
+}
 export default {async fetch(request){try{const u=new URL(request.url);if(u.pathname==='/api/init'){const [block,reg]=await Promise.all([rpc('eth_blockNumber',[]),registry()]);return Response.json({head:Number(BigInt(block))-20,start:50636771,contracts:reg.boxes,collections:reg.collectionCount,collectionsError:reg.collectionsError,rpc:RPC,chainId:8453,asOf:new Date().toISOString()});}if(u.pathname==='/api/holdings'&&request.method==='POST'){const body=await request.json();if(!valid(body.wallet)||!Number.isSafeInteger(body.block)||!Array.isArray(body.assets))return Response.json({error:'Invalid holdings request'},{status:400});return Response.json({assets:await holdings(body.wallet.toLowerCase(),body.assets,body.block)});}if(u.pathname==='/api/scan'){const a=(u.searchParams.get('wallet')||'').toLowerCase(),refund=(u.searchParams.get('refund')||'').toLowerCase();if(!valid(a)||refund&&!valid(refund))return Response.json({error:'Invalid wallet or refund address'},{status:400});const from=Number(u.searchParams.get('from')),to=Number(u.searchParams.get('to'));if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from<50636771||to<from||to-from>49999)return Response.json({error:'Invalid block range, maximum 50,000 blocks'},{status:400});return Response.json(await scan(a,refund,from,to));}if(u.pathname!=='/')return new Response('Not found',{status:404});return new Response(HTML,{headers:{'content-type':'text/html;charset=utf-8','content-security-policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"}});}catch(e){return Response.json({error:e.message||'Data source unavailable. No zero values substituted.'},{status:502});}}};
 const HTML=renderWalletReport(linkAcquisitionCosts);
 export {addr,auctionCall,auctionSeller,boxes,FACTORIES,FACTORY_DEPLOYMENTS,hex,holdings,MARKET,rpcRequest,settleWallet,STAKE,USDC,valid,word,words,decode,decodeMarket,SIG,reconcileRefunds,historicalPayerEvidence,decodeReward,verifyDrawPayments,linkAcquisitionCosts};

@@ -3,10 +3,16 @@ const STATE_GETTERS = new Set(['0x61d027b3', '0x7b9e618d', '0x46904840']);
 const word = n => BigInt(n).toString(16).padStart(64, '0');
 
 function aggregate3(targets) {
-  // Each tuple has a 3-word head and a 2-word ABI encoding of the 4-byte selector.
-  const offsets = targets.map((_, i) => word(targets.length * 32 + i * 160));
-  const tuples = targets.map(({ to, data }) =>
-    to.slice(2).padStart(64, '0') + word(1) + word(96) + word(4) + data.slice(2).padEnd(64, '0'));
+  let offset = targets.length * 32;
+  const offsets = [];
+  const tuples = targets.map(({ to, data }) => {
+    const calldata = data.slice(2);
+    const tuple = to.slice(2).padStart(64, '0') + word(1) + word(96) + word(calldata.length / 2) +
+      calldata.padEnd(Math.ceil(calldata.length / 64) * 64, '0');
+    offsets.push(word(offset));
+    offset += tuple.length / 2;
+    return tuple;
+  });
   return '0x82ad56cb' + word(32) + word(targets.length) + offsets.join('') + tuples.join('');
 }
 
@@ -68,4 +74,13 @@ export async function readHistoricalCalls(reader, calls) {
     indices.forEach((index, j) => { results[index] = values[j]; });
   });
   return results;
+}
+
+export async function readHoldingsCalls(reader, calls, block) {
+  const groups = [];
+  for (let i = 0; i < calls.length; i += 64) groups.push(calls.slice(i, i + 64));
+  const results = await reader.batch(groups.map(group => [
+    'eth_call', [{ to: MULTICALL, data: aggregate3(group.map(([, [target]]) => target)) }, block],
+  ]));
+  return results.flatMap((result, index) => unpack(result, groups[index].length));
 }

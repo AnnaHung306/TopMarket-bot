@@ -1,4 +1,4 @@
-import { addr, auctionCall, auctionSeller, hex, rpcRequest, SIG, USDC, words } from '../index.js';
+import { addr, auctionCall, auctionSeller, hex, rpcRequest, SIG, STAKE, USDC, words } from '../index.js';
 
 const boxSignatures = [SIG.draw, SIG.refund, SIG.rescue, SIG.kept, SIG.won, SIG.buyback, SIG.treasuryUpdated,
   SIG.feeRecipientUpdated, SIG.tokenDraw, SIG.tokenBuyback];
@@ -9,7 +9,7 @@ const signatures = {
   stake: [SIG.staked, SIG.unstaked],
 };
 
-const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_chainId: 0, eth_getBlockByNumber: 20, alchemy_getAssetTransfers: 120 };
+const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_getStorageAt: 20, eth_chainId: 0, eth_getBlockByNumber: 20, alchemy_getAssetTransfers: 120 };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infinity, beforeRequest = () => {} } = {}) {
@@ -102,15 +102,16 @@ export function callKey([target, block]) {
   return [target.to.toLowerCase(), Number(block), target.data].join(':');
 }
 
-export function evidencePlan(logs) {
+export function evidencePlan(logs, includeTokenBuyback = false) {
   const receipts = new Set(), calls = new Map();
   const add = call => calls.set(callKey(call[1]), call);
   for (const log of logs) {
     const signature = log.topics[0], block = Number(log.blockNumber);
-    if ([SIG.draw, SIG.tokenDraw, SIG.refund, SIG.rescue, SIG.buyback, SIG.kept, SIG.sold, SIG.offer].includes(signature) || activeAuction(log)) {
+    const tokenBuyback = includeTokenBuyback && signature === SIG.tokenBuyback;
+    if ([SIG.draw, SIG.tokenDraw, SIG.refund, SIG.rescue, SIG.buyback, SIG.kept, SIG.sold, SIG.offer].includes(signature) || tokenBuyback || activeAuction(log)) {
       receipts.add(log.transactionHash);
     }
-    if ([SIG.draw, SIG.refund, SIG.rescue, SIG.buyback].includes(signature)) {
+    if ([SIG.draw, SIG.refund, SIG.rescue, SIG.buyback].includes(signature) || tokenBuyback || log.dispositionCandidate) {
       const selectors = ['0x61d027b3', '0x7b9e618d'];
       if (signature === SIG.draw) selectors.push('0x46904840');
       for (const data of selectors) {
@@ -138,6 +139,7 @@ export function receiptRecord(tx, receipt) {
   const logs = receipt.logs.filter(log => {
     const signature = log.topics[0];
     return [SIG.requestVia, SIG.payoutDeferred].includes(signature)
+      || signature === SIG.tokenReleased && log.address.toLowerCase() === STAKE
       || signature === SIG.transfer && (log.address.toLowerCase() === USDC || log.topics.length === 4);
   });
   return { tx, receipt: { status: receipt.status, logs: logs.map(compactLog) } };

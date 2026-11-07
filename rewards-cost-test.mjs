@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import {decodeReward,reconcileRefunds,verifyDrawPayments,linkAcquisitionCosts,SIG} from './worker/index.js';
+import {decodeReward,reconcileRefunds,verifyDrawPayments,linkAcquisitionCosts,SIG,STAKE} from './worker/index.js';
+import {callRecord,evidencePlan} from './worker/history/chain.js';
+import {settleRecordedWallet} from './worker/history/report.js';
+import {summarizeWalletEvents} from './worker/report/accounting.js';
 const wallet='0x'+'1'.repeat(40),box='0x'+'2'.repeat(40),treasury='0x'+'3'.repeat(40),other='0x'+'4'.repeat(40),nft='0x'+'5'.repeat(40),usdc='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',tx='0x'+'a'.repeat(64);
 const w=n=>BigInt(n).toString(16).padStart(64,'0'),a=s=>'0x'+s.slice(2).padStart(64,'0');
 const base={address:box,transactionHash:tx,logIndex:'0x1',blockNumber:'0x3030303'};
@@ -42,5 +45,25 @@ assert.equal(dualPaid.filter(e=>e.category.endsWith('-confirmed')).length,2);
 assert.equal(new Set(dualPaid.filter(e=>e.category.endsWith('-confirmed')).map(e=>e.id)).size,2);
 const saleEvidence={...winnerClaims[0],id:tx+':0x2',category:'sales'};
 assert.equal(run([...winnerClaims,saleEvidence],[transfers(treasury,wallet,9000000)]).filter(e=>e.category==='buyback-claim-confirmed').length,0,'already counted sales receipt cannot be winner buyback');
-assert.deepEqual(decodeReward({...winnerLog,topics:[SIG.tokenBuyback,'0x'+w(1),a(wallet)]},wallet),[],'unverified token-box buyback is not confirmed');
+const tokenRecycle={...winnerLog,topics:[SIG.tokenBuyback,'0x'+w(1),a(wallet)],data:'0x'+w(1710000000)+w(95000000)};
+const tokenClaims=decodeReward(tokenRecycle,wallet).map(e=>({...e,payer:treasury}));
+assert.deepEqual(tokenClaims.map(e=>[e.category,e.raw]),[['buyback-claim','1710000000']]);
+assert.deepEqual(decodeReward(tokenRecycle,other),[],'TokenBlindBox does not identify the staker');
+assert.equal(run(tokenClaims,[transfers(treasury,wallet,1710000000)]).find(e=>e.category==='buyback-claim-confirmed')?.raw,'1710000000');
+assert.equal(run(tokenClaims,[transfers(other,wallet,1710000000)]).filter(e=>e.category==='buyback-claim-confirmed').length,0);
 console.log('PASS: winner buybacks confirmed only once, cross-refund/sale conflicts excluded, unequal dual payouts distinct');
+const keptSettlement={...base,logIndex:'0x4',topics:[SIG.kept,'0x'+w(8),a(other)],data:'0x'+w(4000000),dispositionCandidate:true};
+const release={...base,address:STAKE,logIndex:'0x3',topics:[SIG.tokenReleased,a(nft),'0x'+w(9),a(other)],data:'0x'};
+const payment=transfers(treasury,wallet,4000000);
+const winState='0x'+[a(other),a(nft),'0x'+w(9),'0x'+w(4000000),a(wallet),'0x'+w(0),'0x'+w(1)].map(x=>x.slice(2)).join('');
+const stateCalls=evidencePlan([keptSettlement],true).calls.map(call=>{
+ const selector=call[1][0].data.slice(0,10);
+ return callRecord(call,selector==='0x61d027b3'?a(treasury):selector==='0x7b9e618d'?a(usdc):winState);
+});
+const settleKeep=async (logs,calls=stateCalls)=>summarizeWalletEvents((await settleRecordedWallet(wallet,[keptSettlement],
+ [{tx,receipt:{status:'0x1',logs}}],calls,[],true)).events);
+const proceeds=await settleKeep([payment,release]);
+assert.equal(proceeds.keptDisposal,'4000000');
+assert.equal(proceeds.staking,'0');
+assert.equal((await settleKeep([payment])).keptDisposal,'0','pool release evidence is required');
+assert.equal((await settleKeep([payment,release,transfers(treasury,wallet,4000000,5)])).keptDisposal,'0','same-amount payments remain ambiguous');

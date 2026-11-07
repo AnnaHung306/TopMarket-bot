@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import worker from '../worker/index.js';
+import worker from '../worker/vercel.js';
 
 const output = new URL('../dist/vercel-static/', import.meta.url);
 const homepage = await worker.fetch(new Request('http://localhost/'));

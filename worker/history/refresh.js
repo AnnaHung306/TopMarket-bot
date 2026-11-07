@@ -1,6 +1,6 @@
 import { Client } from '@neondatabase/serverless';
 
-export async function withHistoryLock(run) {
+async function withAdvisoryLock(query, parameters, run) {
   const url = new URL(process.env.DATABASE_URL);
   // Advisory locks belong to a Postgres session, so connect directly even if SQL reads use a pooler.
   url.hostname = url.hostname.replace(/-pooler(?=\.)/, '');
@@ -8,13 +8,13 @@ export async function withHistoryLock(run) {
   let alive = true, heartbeat;
   const markLost = () => { alive = false; };
   const assertLock = () => {
-    if (!alive) throw Error('Lost the Neon history synchronization lock');
+    if (!alive) throw Error('Lost the Neon synchronization lock');
   };
   client.on('error', markLost);
   client.on('end', markLost);
   try {
     await client.connect();
-    const { rows } = await client.query('SELECT pg_try_advisory_lock(8453, 20261107) AS acquired');
+    const { rows } = await client.query(query, parameters);
     if (!rows[0].acquired) return null;
     heartbeat = setInterval(() => { void client.query('SELECT 1').catch(markLost); }, 25_000);
     heartbeat.unref();
@@ -23,4 +23,14 @@ export async function withHistoryLock(run) {
     clearInterval(heartbeat);
     await client.end().catch(markLost);
   }
+}
+
+
+export function withHistoryLock(run) {
+  return withAdvisoryLock('SELECT pg_try_advisory_lock(8453, 20261107) AS acquired', [], run);
+}
+
+export function withWalletLock(wallet, run) {
+  return withAdvisoryLock('SELECT pg_try_advisory_lock(hashtextextended($1, 8453)) AS acquired',
+    ['top-market-wallet-summary:' + wallet], run);
 }

@@ -51,10 +51,10 @@ export async function walletReport(sql, wallet, from, to) {
   return { from, to: row.through, ...report, collections: row.collections, collectionsError: null, indexedThrough: row.block, asOf: row.as_of };
 }
 
-export async function settleRecordedWallet(wallet, logs, receiptRecords, callRecords, updateRecords) {
+export async function settleRecordedWallet(wallet, logs, receiptRecords, callRecords, updateRecords, includeTokenBuyback = false) {
   const receipts = new Map(receiptRecords.map(({ tx, receipt }) => [tx, receipt]));
   const calls = new Map(callRecords.map(record => [callRecordKey(record), record.result]));
-  const expected = evidencePlan(logs);
+  const expected = evidencePlan(logs, includeTokenBuyback);
   if (expected.receipts.some(tx => !receipts.has(tx)) || expected.calls.some(call => !calls.has(callRecordKey(callRecord(call))))) {
     throw Error('Wallet data is missing settlement evidence');
   }
@@ -75,13 +75,14 @@ export async function settleRecordedWallet(wallet, logs, receiptRecords, callRec
     }
     throw Error('Unsupported indexed evidence method');
   };
-  const reader = { rpc, batch: batch => Promise.all(batch.map(([method, params]) => rpc(method, params))) };
+  const reader = { rpc, batch: batch => Promise.all(batch.map(([method, params]) => rpc(method, params))),
+    dispositionLogs: logs.filter(log => log.dispositionCandidate) };
   const market = logs.filter(log => log.address === MARKET && [SIG.sold, SIG.offer].includes(log.topics[0]))
     .map(log => decodeMarket(log, wallet)).filter(Boolean);
   const auctions = logs.filter(activeAuction);
-  const rewards = logs.filter(log => log.topics[0] === SIG.buyback);
+  const rewards = logs.filter(log => log.topics[0] === SIG.buyback || includeTokenBuyback && log.topics[0] === SIG.tokenBuyback);
   const activity = logs.filter(log => log.address !== MARKET && (
-    log.topics[0] !== SIG.buyback || log.topics[2] === word(wallet)
+    ![SIG.buyback, SIG.kept].includes(log.topics[0]) || log.topics[2] === word(wallet)
   ));
   // Only the winner gets the nominal buyback line. Both participants can get a cash payout.
   return settleWallet(wallet, activity, market, auctions, rewards, reader);

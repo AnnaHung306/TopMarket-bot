@@ -1,18 +1,21 @@
-import { boxes, hex, MARKET, SIG, STAKE, USDC, word } from './index.js';
-import { activeAuction, alchemy, callRecord, compactLog, evidencePlan, getFilteredLogs, receiptRecord } from './history/chain.js';
-import { readHistoricalCalls } from './history/multicall.js';
+import { addr, boxes, decode, decodeReward, hex, MARKET, SIG, STAKE, USDC, word } from './index.js';
+import { activeAuction, alchemy, callKey, callRecord, evidencePlan, getFilteredLogs } from './history/chain.js';
 import { settleRecordedWallet } from './history/report.js';
+import { walletEvidence } from './history/wallet-evidence.js';
+import { readWalletHistoricalCalls, walletStateHistory } from './history/wallet-state.js';
 
 export const WALLET_HISTORY_START = 50634768;
-const WALLET_PAGE_LOGS = 400;
-const TRANSFER_PAGE = '0x190';
-let registry;
+const WALLET_PAGE_LOGS = 2_000;
+const TRANSFER_PAGE = '0x3e8';
+const DISCOVERY_CACHE_TTL = 120_000;
+const DISCOVERY_CACHE_ENTRIES = 4;
+const DISCOVERY_CACHE_LOGS = 40_000;
+const discoveryCache = new Map();
+let registry, configSnapshot;
 
-async function transferPage(reader, wallet, from, to, direction, category, pageKey) {
+async function outgoingPage(reader, wallet, from, to, pageKey) {
   const result = await reader.rpc('alchemy_getAssetTransfers', [{
-    fromBlock: hex(from), toBlock: hex(to),
-    [direction]: wallet,
-    category: [category], ...(category === 'erc20' ? { contractAddresses: [USDC] } : {}),
+    fromBlock: hex(from), toBlock: hex(to), fromAddress: wallet, category: ['erc721'],
     maxCount: TRANSFER_PAGE, order: 'asc', excludeZeroValue: true, ...(pageKey ? { pageKey } : {}),
   }]);
   if (!Array.isArray(result?.transfers)) throw Error('Alchemy returned incomplete wallet transfer data');
@@ -23,23 +26,23 @@ function transferBoundary(page, from, to) {
   return page.pageKey ? Math.max(from, Number(page.transfers.at(-1)?.blockNum) - 1) : to;
 }
 
-async function transfersThrough(reader, firstPage, wallet, from, to, direction, category) {
+async function outgoingThrough(reader, firstPage, wallet, to) {
   const transfers = firstPage.transfers.filter(item => Number(item.blockNum) <= to);
   if (!firstPage.pageKey || Number(firstPage.transfers.at(-1)?.blockNum) > to) return transfers;
   let pageKey;
   const block = to;
   const complete = transfers.filter(item => Number(item.blockNum) < block);
   do {
-    const page = await transferPage(reader, wallet, block, block, direction, category, pageKey);
+    const page = await outgoingPage(reader, wallet, block, block, pageKey);
     complete.push(...page.transfers);
     pageKey = page.pageKey;
   } while (pageKey);
   return complete;
 }
 
-function selectPage(logs, from, to) {
-  if (logs.length <= WALLET_PAGE_LOGS) return to;
-  const boundary = logs.map(log => Number(log.blockNumber)).sort((a, b) => a - b)[WALLET_PAGE_LOGS];
+function selectPage(logs, from, to, limit = WALLET_PAGE_LOGS) {
+  if (logs.length <= limit) return to;
+  const boundary = logs.map(log => Number(log.blockNumber)).sort((a, b) => a - b)[limit];
   return Math.max(from, boundary);
 }
 
@@ -48,6 +51,40 @@ async function contractsAt(reader, block) {
   const contracts = await boxes(block, reader.batch);
   registry = { block, contracts };
   return contracts;
+}
+
+async function configuration(reader, addresses, to) {
+  const key = hex(to) + ':' + addresses.join(',');
+  if (configSnapshot?.key !== key) {
+    const history = await walletStateHistory(reader, addresses, WALLET_HISTORY_START, to);
+    if (addresses.length && !history.payers.size) throw Error('Top.Market treasury could not be identified at the wallet snapshot');
+    configSnapshot = { key, history };
+  }
+  return configSnapshot.history;
+}
+
+function logsWithPossibleProof(logs, receipts, wallet) {
+  const cashIn = new Map(), cashOut = new Set(), cardsIn = new Set();
+  for (const { tx, receipt } of receipts) {
+    for (const log of receipt.logs) {
+      if (log.topics[0] !== SIG.transfer) continue;
+      if (log.address === USDC && log.topics.length === 3) {
+        if (addr(log.topics[1]) === wallet) cashOut.add(tx);
+        if (addr(log.topics[2]) === wallet) {
+          if (!cashIn.has(tx)) cashIn.set(tx, new Set());
+          cashIn.get(tx).add(BigInt(log.data).toString());
+        }
+      } else if (log.topics.length === 4 && addr(log.topics[2]) === wallet) cardsIn.add(tx);
+    }
+  }
+  return logs.filter(log => {
+    const sig = log.topics[0], tx = log.transactionHash;
+    if (sig === SIG.draw) return cashOut.has(tx);
+    if (sig === SIG.kept) return log.dispositionCandidate || cardsIn.has(tx);
+    if (sig === SIG.buyback || sig === SIG.tokenBuyback) return decodeReward(log, wallet).some(event => cashIn.get(tx)?.has(event.raw));
+    if (sig === SIG.refund || sig === SIG.rescue) return cashIn.get(tx)?.has(decode(log).raw);
+    return true;
+  });
 }
 
 export async function finalizedWalletBlock(reader) {
@@ -63,55 +100,83 @@ export async function directWalletHead(reader = alchemy({ maxUnits: 3_000 })) {
     contracts, chainId: 8453, rpc: 'Alchemy Base Mainnet', directWallet: true, usage: reader.stats };
 }
 
-export async function directWalletReport(wallet, from, to, reader = alchemy({ maxUnits: 120_000, maxMs: 240_000 }), contracts) {
-  const started = performance.now();
-  const [registered, incoming, outgoingCards] = await Promise.all([
-    contracts ?? contractsAt(reader, hex(to)),
-    transferPage(reader, wallet, from, to, 'toAddress', 'erc20'),
-    transferPage(reader, wallet, from, to, 'fromAddress', 'erc721'),
-  ]);
-  const addresses = registered.map(item => item.address), knownBoxes = new Set(addresses);
+async function walletActivity(reader, wallet, from, to, contracts) {
   const recipient = word(wallet);
-  let through = Math.min(transferBoundary(incoming, from, to), transferBoundary(outgoingCards, from, to));
+  const [registered, outgoingCards] = await Promise.all([
+    contracts ?? contractsAt(reader, hex(to)),
+    outgoingPage(reader, wallet, from, to),
+  ]);
+  const addresses = registered.map(item => item.address);
+  const through = transferBoundary(outgoingCards, from, to);
   if (!Number.isSafeInteger(through)) throw Error('Invalid wallet transfer pagination');
   const getLogs = (address, topics) => Array.isArray(address) && address.length === 0
     ? Promise.resolve([])
     : getFilteredLogs(reader, { address, topics }, from, through);
-  const direct = (await Promise.all([
+  const [history, ...batches] = await Promise.all([
+    configuration(reader, addresses, to),
     getLogs(addresses, [[SIG.draw, SIG.refund, SIG.rescue, SIG.kept, SIG.buyback, SIG.tokenBuyback], null, recipient]),
     getLogs(addresses, [[SIG.won, SIG.tokenDraw], null, null, recipient]),
     getLogs(STAKE, [[SIG.staked, SIG.unstaked], null, null, recipient]),
     getLogs(MARKET, [[SIG.sold, SIG.offer], null, null, recipient]),
     getLogs(MARKET, [SIG.auction, null, recipient]),
-  ])).flat();
-  through = selectPage(direct, from, through);
-  const [received, soldCards, updates] = await Promise.all([
-    transfersThrough(reader, incoming, wallet, from, through, 'toAddress', 'erc20'),
-    transfersThrough(reader, outgoingCards, wallet, from, through, 'fromAddress', 'erc721'),
-    getLogs(addresses, [[SIG.treasuryUpdated, SIG.feeRecipientUpdated]]),
   ]);
+  const cardAddresses = new Set(registered.filter(contract => contract.type === 'card').map(contract => contract.address));
+  return { addresses, cardAddresses, history, outgoingCards, through, direct: batches.flat() };
+}
+
+async function discoverWallet(reader, wallet, from, to, contracts, key) {
+  const cached = discoveryCache.get(key);
+  if (cached?.expires > performance.now() && cached.from <= from && from <= cached.activity.through) {
+    return cached;
+  }
+  const recipient = word(wallet);
+  const cashLogs = topics => getFilteredLogs(reader, { address: USDC, topics }, from, to);
+  const [activity, incoming, outgoing] = await Promise.all([
+    walletActivity(reader, wallet, from, to, contracts),
+    cashLogs([SIG.transfer, null, recipient]),
+    cashLogs([SIG.transfer, recipient]),
+  ]);
+  return { from, activity, incoming, outgoing, expires: performance.now() + DISCOVERY_CACHE_TTL };
+}
+
+export async function directWalletReport(wallet, from, to, reader = alchemy({ maxUnits: 120_000, maxMs: 240_000 }), contracts) {
+  const started = performance.now();
+  const key = JSON.stringify([wallet, to, contracts]);
+  const discovery = await discoverWallet(reader, wallet, from, to, contracts, key);
+  const { activity, incoming, outgoing } = discovery;
+  const { addresses, cardAddresses, history, outgoingCards } = activity;
+  const direct = activity.direct.filter(log => Number(log.blockNumber) >= from);
+  let { through } = activity;
+  const relevantIncoming = incoming.filter(log => {
+    const block = Number(log.blockNumber);
+    return block >= from && block <= through &&
+      (!history.audited(block) || history.payers.has(addr(log.topics[1])) || addr(log.topics[1]) === MARKET);
+  });
+  through = Math.min(selectPage(direct, from, through), selectPage(relevantIncoming, from, through, 800));
+  if (through < activity.through && activity.direct.length + incoming.length + outgoing.length <= DISCOVERY_CACHE_LOGS) {
+    discoveryCache.delete(key);
+    if (discoveryCache.size >= DISCOVERY_CACHE_ENTRIES) discoveryCache.delete(discoveryCache.keys().next().value);
+    discoveryCache.set(key, discovery);
+  } else if (discoveryCache.get(key) === discovery) {
+    discoveryCache.delete(key);
+  }
+  const soldCards = (await outgoingThrough(reader, outgoingCards, wallet, through))
+    .filter(item => Number(item.blockNum) >= from);
+  const cash = [...incoming, ...outgoing].filter(log => {
+    const block = Number(log.blockNumber);
+    return block >= from && block <= through;
+  });
+  const updates = history.updates.filter(log => Number(log.blockNumber) >= from && Number(log.blockNumber) <= through);
   const logs = new Map(direct.filter(log => Number(log.blockNumber) <= through)
     .filter(log => log.topics[0] !== SIG.auction || activeAuction(log))
     .map(log => [log.transactionHash + ':' + log.logIndex, log]));
-  const candidates = new Set([...received, ...soldCards].map(item => item.hash));
-  for (const hash of evidencePlan([...logs.values()]).receipts) candidates.add(hash);
-  const hashes = [...candidates];
-  const rawReceipts = await reader.batch(hashes.map(hash => ['eth_getTransactionReceipt', [hash]]));
-  const receipts = new Map(hashes.map((hash, index) => [hash, receiptRecord(hash, rawReceipts[index])]));
-  for (const receipt of rawReceipts) {
-    for (const raw of receipt.logs) {
-      const address = raw.address.toLowerCase(), signature = raw.topics[0];
-      if (knownBoxes.has(address) && signature === SIG.buyback ||
-          address === MARKET && ([SIG.sold, SIG.offer].includes(signature) || activeAuction(raw))) {
-        const log = compactLog(raw);
-        logs.set(log.transactionHash + ':' + log.logIndex, log);
-      }
-    }
-  }
+  const receiptRecords = await walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, through);
   const related = [...logs.values()];
-  const plan = evidencePlan(related);
-  const responses = await readHistoricalCalls(reader, plan.calls);
-  const calls = plan.calls.map((call, index) => callRecord(call, responses[index]));
-  const report = await settleRecordedWallet(wallet, related, [...receipts.values()], calls, updates);
+  const plan = evidencePlan(related, true);
+  const required = evidencePlan(logsWithPossibleProof(related, receiptRecords, wallet), true).calls;
+  const responses = await readWalletHistoricalCalls(reader, required, history);
+  const historical = new Map(required.map((call, index) => [callKey(call[1]), responses[index]]));
+  const calls = plan.calls.map(call => callRecord(call, historical.get(callKey(call[1])) ?? null));
+  const report = await settleRecordedWallet(wallet, related, receiptRecords, calls, updates, true);
   return { from, to: through, ...report, seconds: (performance.now() - started) / 1_000 };
 }
