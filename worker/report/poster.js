@@ -8,7 +8,7 @@ export async function renderWalletPoster(card, background, complete, tools) {
   const viewWidth = width + 2 * margin;
   const source = card.cloneNode(true);
   source.querySelectorAll(
-    '#posterWarning, #posterDate, .poster-actions, #posterStatus, #posterFile, #posterImage'
+    '#posterDate, .poster-actions, #posterStatus, #posterFile, #posterImage'
   ).forEach(node => node.remove());
   if (!complete) source.querySelector('.poster-total .caption').textContent = '已識別淨收支（部分）';
   source.removeAttribute('id');
