@@ -157,7 +157,6 @@ async function analyzeWallet(event, afterBlock, evidenceOnly = false) {
   clearPosterDownload();
   $('posterStatus').textContent = '';
   $('analyze').disabled = true;
-  $('example').disabled = true;
   $('update').disabled = true;
   $('fullEvidence').disabled = true;
   $('cancel').hidden = false;
@@ -238,7 +237,6 @@ async function analyzeWallet(event, afterBlock, evidenceOnly = false) {
   } finally {
     running = false;
     $('analyze').disabled = false;
-    $('example').disabled = false;
     $('update').disabled = false;
     $('fullEvidence').disabled = false;
     $('cancel').hidden = true;
@@ -253,12 +251,6 @@ $('cancel').onclick = () => {
   stopped = true;
   $('cancel').disabled = true;
   updateScanStatus('stopping', '等目前的查詢結束後停止…', blockProgress());
-};
-$('example').onclick = () => {
-  if (running) return;
-  $('wallet').value = '0xe618f35dfbf4ab79b02b315fd60c69cd289ef75d';
-  updateScanStatus('idle', '已載入公開質押收益範例。按「分析錢包」查詢完整鏈上紀錄。');
-  $('wallet').focus();
 };
 function save(content,name,type){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 $('json').onclick=()=>{

@@ -1,5 +1,6 @@
 import { scanStatusMarkup } from './scan-status.js';
 import { reportBackgroundScript } from './background.js';
+import { reportEntryMotionStyles } from './entry-motion.js';
 import { topMarketLogo } from './brand.js';
 import { reportClientScript } from './client.js';
 import { installGlassRefraction } from './glass-refraction.js';
@@ -14,7 +15,7 @@ export function renderWalletReport(linkAcquisitionCosts) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050506">
   <title>Top.Market · Wallet Report</title>
-  <style>${reportStyles}</style>
+  <style>${reportStyles}${reportEntryMotionStyles}</style>
 </head>
 <body>
   <header class="site-header">
@@ -38,7 +39,6 @@ export function renderWalletReport(linkAcquisitionCosts) {
     <section class="glass query" data-lens="query" aria-labelledby="query-title">
       <div class="section-heading">
         <h2 id="query-title">錢包查詢</h2>
-        <button class="text-button" id="example" type="button">載入質押收益範例 <span aria-hidden="true">↗</span></button>
       </div>
       <form class="form" id="form">
         <label for="wallet">Base 錢包地址</label>
