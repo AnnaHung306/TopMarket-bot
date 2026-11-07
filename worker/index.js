@@ -115,7 +115,7 @@ function reconcileRefunds(input,receiptMap,wallet){
    cash.set(transfer.id,{...transfer,payer:addr(log.topics[1]),raw:amount.toString(),amount:Number(amount)/1e6});
   }
  }
- const transfersByKey=new Map(), cashAmounts=new Set(), claimCounts=new Map();
+ const transfersByKey=new Map(), cashAmounts=new Set(), claimsByKey=new Map();
  for(const transfer of cash.values()){
   const key=matchKey(transfer.tx,transfer.payer,transfer.raw);
   if(!transfersByKey.has(key))transfersByKey.set(key,[]);
@@ -125,7 +125,23 @@ function reconcileRefunds(input,receiptMap,wallet){
  for(const claim of claims){
   if(!claim.payer)continue;
   const key=matchKey(claim.tx,claim.payer.toLowerCase(),claim.raw);
-  claimCounts.set(key,(claimCounts.get(key)||0)+1);
+  if(!claimsByKey.has(key))claimsByKey.set(key,[]);
+  claimsByKey.get(key).push(claim);
+ }
+ const batchBuybacks=new Map();
+ for(const [key,group] of claimsByKey){
+  const candidates=transfersByKey.get(key)||[];
+  const first=group[0];
+  if(group.length<2||group.length!==candidates.length)continue;
+  if(group.some(claim=>claim.category!=='buyback-claim'||claim.buybackKind!=='card'||claim.contract!==first.contract))continue;
+  if(new Set(group.map(claim=>claim.winId)).size!==group.length)continue;
+  if(deferred.has(matchKey(first.tx,first.contract.toLowerCase(),first.raw)))continue;
+  // In the card batch sequence the winner's USDC transfer is three logs before WinRecycled.
+  const byPosition=new Map(candidates.map(transfer=>[transfer.logIndex,transfer]));
+  const matches=group.map(claim=>byPosition.get(claim.logIndex-3));
+  if(matches.every(Boolean)&&new Set(matches).size===group.length){
+   group.forEach((claim,index)=>batchBuybacks.set(claim.id,matches[index]));
+  }
  }
  const confirmed=new Map();
  const out=events.map(event=>{
@@ -134,8 +150,8 @@ function reconcileRefunds(input,receiptMap,wallet){
   const key=event.payer&&matchKey(event.tx,event.payer.toLowerCase(),event.raw);
   const candidates=transfersByKey.get(key)||[];
   const payoutDeferred=deferred.has(matchKey(event.tx,event.contract.toLowerCase(),event.raw));
-  if(!payoutDeferred&&candidates.length===1&&claimCounts.get(key)===1){
-   const transfer=candidates[0];
+  const transfer=candidates.length===1&&claimsByKey.get(key)?.length===1?candidates[0]:batchBuybacks.get(event.id);
+  if(!payoutDeferred&&transfer){
    const disposition=event.category==='kept-disposal'?{collection:event.collection,tokenId:event.tokenId,winId:event.winId}:{};
    confirmed.set(transfer.id,{...transfer,...disposition,category:event.category+'-confirmed',requestId:event.requestId,claimId:event.id,reconciled:true});
    return {...event,category:event.category+'-evidence',receiptId:transfer.id};
@@ -157,7 +173,7 @@ function decodeReward(log,wallet){
  const v=words(log.data);if(v.length!==(token?2:3))return [];
  const winner=addr(log.topics[2]),out=[];
  if(!token&&addr(v[1])===wallet)out.push({...base(log),id:base(log).id+':staking',category:'staking',winId:BigInt(log.topics[1]).toString(),raw:BigInt('0x'+v[2]).toString(),amount:Number(BigInt('0x'+v[2]))/1e6});
- if(winner===wallet)out.push({...base(log),id:base(log).id+':buyback',category:'buyback-claim',winId:BigInt(log.topics[1]).toString(),raw:BigInt('0x'+v[0]).toString(),amount:Number(BigInt('0x'+v[0]))/1e6});
+ if(winner===wallet)out.push({...base(log),id:base(log).id+':buyback',category:'buyback-claim',buybackKind:token?'token':'card',winId:BigInt(log.topics[1]).toString(),raw:BigInt('0x'+v[0]).toString(),amount:Number(BigInt('0x'+v[0]))/1e6});
  return out;
 }
 function verifyDrawPayments(packs,receipt,wallet,payer,feeRecipient){

@@ -230,16 +230,6 @@ button:not(:disabled):hover { border-color: #83e8ff; }
 .metric small { display: block; color: var(--muted); font-size: 11px; }
 .split { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 11px 0 0; }
 .split b { font-size: 14px; color: #e3edf4; }
-.warning {
-  margin-top: 14px;
-  padding: 9px 11px;
-  border-left: 2px solid #41c8e88c;
-  border-radius: 0 5px 5px 0;
-  background: #36b2d013;
-  color: #c5d9e2;
-  font-size: 12px;
-  line-height: 1.65;
-}
 .table-wrap { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
 table { width: 100%; border-collapse: collapse; white-space: nowrap; font-size: 12px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); }

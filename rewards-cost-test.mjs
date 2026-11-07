@@ -5,12 +5,22 @@ import {settleRecordedWallet} from './worker/history/report.js';
 import {treasuryStaking} from './worker/history/treasury-staking.js';
 import {walletEvidence} from './worker/history/wallet-evidence.js';
 import {walletStateHistory} from './worker/history/wallet-state.js';
+import {auditedCampaignWallet,campaignPayoutEvents} from './worker/history/campaign-payouts.js';
 import {addWalletTotals, displayWalletTotals, summarizeWalletEvents} from './worker/report/accounting.js';
 const wallet='0x'+'1'.repeat(40),box='0x'+'2'.repeat(40),treasury='0x'+'3'.repeat(40),other='0x'+'4'.repeat(40),nft='0x'+'5'.repeat(40),usdc='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',tx='0x'+'a'.repeat(64);
 const w=n=>BigInt(n).toString(16).padStart(64,'0'),a=s=>'0x'+s.slice(2).padStart(64,'0');
 const base={address:box,transactionHash:tx,logIndex:'0x1',blockNumber:'0x3030303'};
 const recycled={...base,topics:[SIG.buyback,'0x'+w(1),a(other)],data:'0x'+w(9000000)+a(wallet).slice(2)+w(1000000)};
 const transfers=(from,to,raw,index=2)=>({...base,address:usdc,logIndex:'0x'+index.toString(16),topics:[SIG.transfer,a(from),a(to)],data:'0x'+w(raw)});
+const campaignTransfer = { ...transfers('0xb7ef47bf545c62337ca239f202ca88cf05d14065', auditedCampaignWallet, 45_100_000, 0x2d7),
+  transactionHash: '0xbb9ac4f14bee2b9158ecae70735ab7ae099e8a232766b43377232d4aed7aaba6' };
+const campaignEvents = campaignPayoutEvents(auditedCampaignWallet, [campaignTransfer, campaignTransfer]);
+const campaignTotals = summarizeWalletEvents(campaignEvents);
+assert.equal(campaignTotals.compensation, '44400000');
+assert.equal(campaignTotals.campaignPrizes, '700000');
+assert.equal(displayWalletTotals(campaignTotals, campaignEvents).net, 45_100_000n);
+assert.deepEqual(campaignPayoutEvents(auditedCampaignWallet, [{ ...campaignTransfer, data: '0x' + w(45_100_001) }]), []);
+assert.deepEqual(treasuryStaking(auditedCampaignWallet, [campaignTransfer], campaignEvents, [], () => true), []);
 let claims=decodeReward(recycled,wallet).map(e=>({...e,payer:treasury}));
 assert.equal(claims.length,1);assert.equal(claims[0].raw,'1000000');
 const run=(c,logs,status='0x1')=>reconcileRefunds(c,new Map([[tx,{status,logs}]]),wallet);
@@ -42,6 +52,16 @@ assert.equal(winnerClaims.length,1);assert.equal(winnerClaims[0].category,'buyba
 assert.equal(run(winnerClaims,[transfers(treasury,wallet,9000000)]).filter(e=>e.category==='buyback-claim-confirmed').length,1);
 assert.equal(run(winnerClaims,[transfers(treasury,wallet,9000000)],'0x0').filter(e=>e.category==='buyback-claim-confirmed').length,0);
 assert.equal(run([...winnerClaims,{...winnerClaims[0],id:'refund-same',category:'refund'}],[transfers(treasury,wallet,9000000)]).filter(e=>e.category.endsWith('-confirmed')).length,0);
+const batchClaims = [5, 9].flatMap((index, i) => decodeReward({ ...winnerLog, logIndex: '0x' + index.toString(16),
+  topics: [SIG.buyback, '0x' + w(i + 1), a(wallet)] }, wallet).map(event => ({ ...event, payer: treasury })));
+const batchTransfers = [2, 6].map(index => transfers(treasury, wallet, 9000000, index));
+const matchedBatch = run(batchClaims, batchTransfers).filter(event => event.category === 'buyback-claim-confirmed');
+assert.deepEqual(matchedBatch.map(event => event.logIndex), [2, 6]);
+assert.equal(run(batchClaims, batchTransfers.slice(0, 1)).filter(event => event.category.endsWith('-confirmed')).length, 0);
+assert.equal(run(batchClaims, [batchTransfers[0], transfers(treasury, wallet, 9000000, 7)])
+  .filter(event => event.category.endsWith('-confirmed')).length, 0);
+assert.equal(run(batchClaims, [...batchTransfers, {...deferred, data: '0x' + w(9000000)}])
+  .filter(event => event.category.endsWith('-confirmed')).length, 0);
 const selfUnequal={...winnerLog,data:'0x'+w(9000000)+a(wallet).slice(2)+w(1000000)};
 const dualPaid=run(decodeReward(selfUnequal,wallet).map(e=>({...e,payer:treasury})),[transfers(treasury,wallet,9000000),transfers(treasury,wallet,1000000,3)]);
 assert.equal(dualPaid.filter(e=>e.category.endsWith('-confirmed')).length,2);
