@@ -105,4 +105,44 @@ assert.equal(pendingRows.find(x=>x.category==='kept').acquisition_cost_raw,'UNKN
 assert.equal(pendingRows.find(x=>x.category==='kept').acquisition_cost_status,'unknown');
 assert.equal(pendingRows.find(x=>x.category==='pack').source_status,'adapter-source-unresolved');
 assert.equal(pendingRows.find(x=>x.category==='pack').randomness_source,box);
+
+ctx.document.documentElement = { dataset: { walletCache: 'true' } };
+ctx.document.getElementById('wallet').value = '0x' + 'a'.repeat(40);
+const cachedSnapshot = { version: 2, rebuildRequired: true, start: 1, through: 100, blockHash: 'cached', totals: ctx.snapshotTotals };
+const resumedSnapshot = { ...cachedSnapshot, version: 3, rebuildRequired: false, through: 110, blockHash: 'resumed' };
+const latestSnapshot = { ...resumedSnapshot, through: 120, blockHash: 'latest', totals: { ...ctx.snapshotTotals, pack: '75561000000' } };
+const submitted = () => vm.runInContext("$('form').onsubmit({preventDefault(){}})", ctx);
+const response = (snapshot, cached, units, progress) => ({ ok: true, json: async () => ({
+  ready: true, snapshot, cached, usage: { units },
+  ...(progress && { progress, page: { from: snapshot.through - 9, to: snapshot.through, events: [] } }),
+}) });
+const checkpoints = [];
+ctx.fetch = async (path, request) => {
+  assert.equal(path, '/api/wallet-cache');
+  const { afterBlock } = JSON.parse(request.body);
+  checkpoints.push(afterBlock);
+  if (afterBlock === undefined) return response(cachedSnapshot, true, 0);
+  assert.equal(nodes.get('cash').textContent, '-191.50', 'saved totals stay visible during updates');
+  if (afterBlock === 100) {
+    assert.match(nodes.get('status').textContent, /正在重新核對完整歷史/);
+    return response(resumedSnapshot, false, 30, { resumed: true });
+  }
+  assert.equal(afterBlock, 110);
+  return response(latestSnapshot, false, 40, { resumed: false });
+};
+await submitted();
+assert.deepEqual(checkpoints, [undefined, 100, 110]);
+assert.equal(nodes.get('cash').textContent, '-192.50');
+assert.equal(vm.runInContext('state.alchemyUnits', ctx), 70);
+
+ctx.fetch = async (path, request) => {
+  assert.equal(path, '/api/wallet-cache');
+  const { afterBlock } = JSON.parse(request.body);
+  return afterBlock === undefined ? response(latestSnapshot, true, 0)
+    : { ok: false, json: async () => ({ error: '錢包鏈上資料暫時無法讀取' }) };
+};
+await submitted();
+assert.equal(nodes.get('cash').textContent, '-192.50');
+assert.match(nodes.get('status').textContent, /更新未完成，目前顯示已儲存的報表/);
+assert.equal(nodes.get('update').disabled, false);
 console.log('PASS: CSV/JSON cost linkage, unknown fields, HTML/poster net cash flow and buyback methodology agree');

@@ -149,47 +149,54 @@ function clearPosterDownload() {
   preparedPoster = null;
 }
 async function get(path){const r=await fetch(path);const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'資料讀取失敗');return d;}
-function blockProgress() {
-  if (state.through === undefined) return null;
-  return (state.through - state.from + 1) / (state.head - state.from + 1) * 100;
+function blockProgress(report = state) {
+  if (report.through === undefined) return null;
+  return (report.through - report.from + 1) / (report.head - report.from + 1) * 100;
 }
 
-async function readWalletCache(wallet, afterBlock, previous) {
-  let evidenceEnd, contiguous = true;
+function newWalletReport(wallet) {
+  return {wallet, events:[], warnings:[], complete:false, started:false, alchemyUnits:0};
+}
+
+async function readWalletCache(report, afterBlock, previous) {
+  const { wallet } = report;
+  let evidenceEnd, contiguous = true, resumed = false;
   while (!stopped) {
     const response = await fetch('/api/wallet-cache', {
       method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ wallet, afterBlock }),
     });
     const data = await response.json();
     if (!response.ok) throw Error(data.error || '錢包快取讀取失敗');
-    state.alchemyUnits += data.usage?.units || 0;
+    report.alchemyUnits += data.usage?.units || 0;
     if (data.page) {
+      if (evidenceEnd === undefined) resumed = data.progress?.resumed === true;
       if (evidenceEnd !== undefined && data.page.from !== evidenceEnd + 1) contiguous = false;
-      state.evidenceFrom ??= data.page.from;
-      state.evidenceThrough = evidenceEnd = data.page.to;
-      state.events.push(...data.page.events);
-      state.warnings.push(...(data.page.warnings || []));
+      report.evidenceFrom ??= data.page.from;
+      report.evidenceThrough = evidenceEnd = data.page.to;
+      report.events.push(...data.page.events);
+      report.warnings.push(...(data.page.warnings || []));
     }
     if (data.ready) {
       const summary = data.snapshot;
-      Object.assign(state, {
+      Object.assign(report, {
         summary, from: summary.start, head: summary.through, through: summary.through,
         asOf: summary.asOf, started: true, complete: true, cacheHit: data.cached && evidenceEnd === undefined,
-        fullEvidence: contiguous && state.evidenceFrom === summary.start && evidenceEnd === summary.through,
+        fullEvidence: contiguous && report.evidenceFrom === summary.start && evidenceEnd === summary.through,
       });
-      if (state.cacheHit && previous.wallet === wallet && previous.summary?.blockHash === summary.blockHash) {
-        for (const field of ['events', 'evidenceFrom', 'evidenceThrough', 'fullEvidence', 'assets', 'holdingsChecked', 'holdingsError', 'warnings']) state[field] = previous[field];
+      if (report.cacheHit && previous.wallet === wallet && previous.summary?.blockHash === summary.blockHash) {
+        for (const field of ['events', 'evidenceFrom', 'evidenceThrough', 'fullEvidence', 'assets', 'holdingsChecked', 'holdingsError', 'warnings']) report[field] = previous[field];
       }
-      return;
+      return resumed;
     }
-    if (data.progress) Object.assign(state, {
+    if (data.progress) Object.assign(report, {
       from: data.progress.from, head: data.progress.target, through: data.progress.through, asOf: data.progress.asOf,
     });
     const scanningHistory = afterBlock === undefined || previous.summary?.rebuildRequired;
     updateScanStatus('scanning', data.waiting ? '此錢包正在核對，等待共用結果。'
-      : scanningHistory ? '正在核對完整錢包活動…' : '正在核對檢查點之後的錢包活動…', blockProgress());
+      : scanningHistory ? '正在核對完整錢包活動…' : '正在核對檢查點之後的錢包活動…', blockProgress(report));
     if (data.waiting) await new Promise(resolve => setTimeout(resolve, 1_500));
   }
+  return false;
 }
 
 async function analyzeWallet(event, afterBlock, evidenceOnly = false) {
@@ -210,13 +217,28 @@ async function analyzeWallet(event, afterBlock, evidenceOnly = false) {
   $('fullEvidence').disabled = true;
   $('cancel').hidden = false;
   $('cancel').disabled = false;
-  state = {wallet, events:[], warnings:[], complete:false, started:false, alchemyUnits:0};
   const useCache = document.documentElement?.dataset?.walletCache === 'true' && !evidenceOnly;
-  updateScanStatus('preparing', useCache ? '正在檢查已存錢包摘要…' : '正在讀取 Base 區塊與工廠合約…');
+  const report = newWalletReport(wallet);
+  if (!useCache || afterBlock === undefined || !previous.summary) state = report;
+  const preparing = afterBlock === undefined ? '正在檢查已存錢包摘要…' : '正在核對最新區塊…';
+  updateScanStatus('preparing', useCache ? preparing : '正在讀取 Base 區塊與工廠合約…');
   render();
   try {
     if (useCache) {
-      await readWalletCache(wallet, afterBlock, previous);
+      const resumed = await readWalletCache(report, afterBlock, previous);
+      if (report.complete) state = report;
+      let needsRefresh = resumed || (afterBlock === undefined && report.cacheHit);
+      while (needsRefresh && !stopped) {
+        const message = state.summary.rebuildRequired
+          ? '已顯示舊版報表，正在重新核對完整歷史…'
+          : '已顯示上次儲存的報表，正在核對最新區塊…';
+        updateScanStatus('scanning', message);
+        render();
+        const refreshed = newWalletReport(wallet);
+        refreshed.alchemyUnits = state.alchemyUnits;
+        needsRefresh = await readWalletCache(refreshed, state.summary.through, state);
+        if (refreshed.complete) state = refreshed;
+      }
     } else {
       const init = await get('/api/init');
       if (stopped) {
@@ -266,7 +288,9 @@ async function analyzeWallet(event, afterBlock, evidenceOnly = false) {
         state.warnings.push('Holdings: ' + error.message);
       }
     }
-    if (state.complete) {
+    if (stopped && useCache && state.summary) {
+      updateScanStatus('stopped', '已停止更新，目前顯示已儲存的報表。');
+    } else if (state.complete) {
       const message = state.summary?.rebuildRequired ? '已讀取舊版收支摘要。重新核對後可更新交易分類。'
         : state.cacheHit
         ? state.alchemyUnits ? '已核對最新區塊，沒有需要更新的範圍。' : '已讀取上次收支摘要，這次未向 Alchemy 查詢。'
@@ -283,7 +307,11 @@ async function analyzeWallet(event, afterBlock, evidenceOnly = false) {
     render();
   } catch (error) {
     state.scanError = error.message;
-    updateScanStatus('error', '資料來源暫時無法完成：' + error.message + '。請稍後重試；未讀取資料不會填零。', blockProgress());
+    if (useCache && state.summary) {
+      updateScanStatus('error', '更新未完成，目前顯示已儲存的報表。' + error.message + '。');
+    } else {
+      updateScanStatus('error', '資料來源暫時無法完成：' + error.message + '。請稍後重試；未讀取資料不會填零。', blockProgress());
+    }
     render();
   } finally {
     running = false;

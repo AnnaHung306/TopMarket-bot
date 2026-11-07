@@ -98,7 +98,8 @@ export async function walletCachePage(sql, wallet, afterBlock) {
     }
     const reader = alchemy({ maxUnits: 120_000, maxMs: 240_000, beforeRequest: assertLock });
     const previous = saved?.version === CACHE_VERSION ? saved : null;
-    const draft = current.draft?.version === CACHE_VERSION ? current.draft : await begin(reader, previous);
+    const savedDraft = current.draft?.version === CACHE_VERSION ? current.draft : null;
+    const draft = savedDraft || await begin(reader, previous);
     if (!draft) {
       const updated = await fillRaffleTotals(saved, wallet, reader);
       if (updated !== saved) {
@@ -118,7 +119,7 @@ export async function walletCachePage(sql, wallet, afterBlock) {
     await save(sql, wallet, current, ready ? next : current.snapshot, ready ? null : next);
     return {
       ready, cached: false, snapshot: ready ? { ...next, campaignPayouts } : null,
-      progress: { from: WALLET_HISTORY_START, through: next.through, target: next.target, asOf: next.asOf },
+      progress: { from: WALLET_HISTORY_START, through: next.through, target: next.target, asOf: next.asOf, resumed: Boolean(savedDraft) },
       page, usage: reader.stats,
     };
   });
