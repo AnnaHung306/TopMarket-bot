@@ -85,7 +85,6 @@ main {
     "overview poster"
     "evidence poster"
     "holdings poster"
-    "methodology poster"
     "footer footer";
   align-items: start;
   gap: 16px 20px;
@@ -106,7 +105,6 @@ main {
 .evidence { grid-area: evidence; }
 .holdings { grid-area: holdings; }
 .poster { grid-area: poster; }
-.methodology { grid-area: methodology; }
 footer { grid-area: footer; }
 .glass {
   position: relative;
@@ -188,8 +186,6 @@ button.text-button {
 .text-button:hover { text-decoration: underline; text-underline-offset: 3px; }
 #cancel[hidden] { display: none; }
 button.text-button:disabled { opacity: .55; }
-summary { cursor: pointer; color: #dce7ef; font-size: 13px; font-weight: 650; }
-summary::marker { color: #83d7e8; }
 .scan-status { position: relative; margin-top: 16px; }
 .scan-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .scan-phase { color: var(--ink); font-size: 13px; font-weight: 700; }
@@ -278,16 +274,11 @@ td:nth-child(2), td:nth-child(3) { font-variant-numeric: tabular-nums; }
 #posterStatus { margin-top: 8px; }
 #posterStatus:empty { display: none; }
 #posterFile { margin-top: 12px; font-size: 12px; }
-.methodology { padding: 15px 22px; }
-.methodology > p { margin-top: 9px; }
-.methodology ul { padding-inline-start: 19px; }
-.methodology li + li { margin-top: 5px; }
-.methodology a { font-size: 12px; }
 footer { padding: 3px 0 22px; color: #9aa7b3; font-size: 11px; line-height: 1.7; }
 @media (max-width: 830px) {
   main {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "intro" "query" "overview" "evidence" "holdings" "poster" "methodology" "footer";
+    grid-template-areas: "intro" "query" "overview" "evidence" "holdings" "poster" "footer";
   }
   .poster { position: relative; top: auto; }
   .ambient { height: 920px; }
