@@ -43,7 +43,7 @@ oracle 地址讀 selector 0x2630c12f，再讀 decimals() 0x05300b28。僅 decima
 ## API 與掃描
 GET / 是前端。POST /api/wallet-cache 讀取或建立單錢包收支摘要；傳入目前的 `afterBlock` 才開始增量核對。GET /api/init 固定已最終確認的 Base 區塊和合約。GET /api/scan?wallet=0x…&from=…&to=…&mode=wallet 回傳錢包的一頁事件、證據及估算用量，透過回傳的 `to` 接續。POST /api/holdings 接受 JSON {wallet,block,assets:[{collection,tokenId}]}，Vercel 與本機最多 240 筆，單檔 Worker 最多 40 筆。
 
-Vercel 與本機依抽卡盒、StakingPool、USDC 的 indexed topic 查指定錢包，直接按交易雜湊配對事件及轉帳。已審核的 beacon 版本在同一設定區間內共用歷史 getter 讀值，版本或設定變更會切開區間。質押分潤的收款人及部分市場賣方未被索引。待核對的金庫入帳、NFT 轉出及留卡交易若集中在鄰近區塊，會批次讀取合約日誌，再依交易雜湊篩選。留卡另以錢包的 NFT 轉入日誌核對實際移轉。稀疏交易、未審核版本或有市場付款的交易會讀完整收據。尚未入帳的延期分潤可能無法發現。活動補償另列待確認，需發放紀錄才能認列。
+Vercel 與本機依抽卡盒、StakingPool、USDC 的 indexed topic 查指定錢包，直接按交易雜湊配對事件及轉帳。已審核的 beacon 版本在同一設定區間內共用歷史 getter 讀值，版本或設定變更會切開區間。質押分潤的收款人及部分市場賣方未被索引。NFT 轉出及留卡交易若集中在鄰近區塊，會批次讀取合約日誌，再依交易雜湊篩選。留卡另以錢包的 NFT 轉入日誌核對實際移轉。稀疏交易、未審核版本或有市場付款的交易會讀完整收據。尚未入帳的延期分潤可能無法發現。活動補償另列待確認，需發放紀錄才能認列。
 
 Neon 的單錢包摘要只儲存整數金額、分類計數、區塊／hash 與待完成的分頁進度。分頁由同一服務程序處理時，會短暫重用相同錢包與截止區塊、且已涵蓋該頁的已確認日誌。程序更換或快取過期時，依原本的進度繼續查鏈。舊的全站索引是獨立的。
 
@@ -63,8 +63,8 @@ Neon 的單錢包摘要只儲存整數金額、分類計數、區塊／hash 與�
 - Withdrawn：可混合延期用途，目前不做完整用途歸屬，不納入小計。
 
 ## 計算與限制
-收入小計＝已核實退款＋市場銷售實收＋質押入帳＋得獎者回購實收。質押入帳合計 WinRecycled 分潤與留卡結算實收。報表與海報主數字是「已識別淨收支」＝收入小計－已核對的 USDC 抽卡付款－USDC 市場買卡事件金額。買卡採用成交事件名目額，拍賣付款可能早於成交。此數字涵蓋所選區塊與已辨識事件。
-退款、分潤、回購須有最終確認的 USDC 轉帳及同交易合約事件。事件區塊前後 treasury 相同、settlementToken 均 USDC、整個區塊無 TreasuryUpdated；同交易／payer／recipient／raw amount 雙向唯一且無匹配 PayoutDeferred。payer 是 treasury，不是 box。先改再改回也拒絕。
+收入小計＝已核實退款＋市場銷售實收＋質押入帳＋得獎者回購實收。報表與海報主數字是「已識別淨收支」＝收入小計－已核對的 USDC 抽卡付款－USDC 市場買卡事件金額。買卡採用成交事件名目額，拍賣付款可能早於成交。此數字涵蓋所選區塊與已辨識事件。
+退款、回購須有最終確認的 USDC 轉帳及同交易合約事件。事件區塊前後 treasury 相同、settlementToken 均 USDC、整個區塊無 TreasuryUpdated；同交易／payer／recipient／raw amount 雙向唯一且無匹配 PayoutDeferred。payer 是 treasury，不是 box。先改再改回也拒絕。
 缺 archive data、同額多筆、跨類別歧義全部待核對。以 transfer log identity 在收入類別間去重。Vercel 與本機核對兩種 BlindBox 的回購實收。TokenStakingPool 的分潤及留卡款尚未涵蓋。
 抽卡付款必須守恆於同交易同 box 全部 paid+fee，核對歷史 treasury／feeRecipient。多 box、自付給自己的收款方、缺資料或不明 token 不推定。
 跨頁去重後須有唯一 request→Won→WinKept、wins 與真正 NFT Transfer 至錢包。退款、競爭 outcome、缺 NFT 收據、adapter 來源不明均未知。

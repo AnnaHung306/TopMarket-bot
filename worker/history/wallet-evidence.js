@@ -1,4 +1,4 @@
-import { addr, decode, decodeReward, MARKET, SIG, STAKE, USDC, word } from '../index.js';
+import { addr, MARKET, SIG, STAKE, USDC, word } from '../index.js';
 import { activeAuction, compactLog, evidencePlan, getFilteredLogs, receiptRecord } from './chain.js';
 
 const logId = log => log.transactionHash + ':' + log.logIndex;
@@ -38,39 +38,21 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
   const batchCandidates = new Map(soldCards.filter(item => history.audited(Number(item.blockNum)))
     .map(item => [item.hash, Number(item.blockNum)]));
   const kept = new Map();
-  const expected = new Map();
   for (const log of logs.values()) {
-    const signature = log.topics[0];
-    if (signature === SIG.kept) {
+    if (log.topics[0] === SIG.kept) {
       const block = Number(log.blockNumber);
       lookup.add(log.transactionHash);
       kept.set(log.transactionHash, block);
       if (history.audited(block)) batchCandidates.set(log.transactionHash, block);
     }
-    const claims = signature === SIG.refund || signature === SIG.rescue ? [decode(log)] : decodeReward(log, wallet);
-    const amounts = expected.get(log.transactionHash) ?? [];
-    for (const claim of claims) if (BigInt(claim.raw) > 0n) amounts.push(claim.raw);
-    if (amounts.length) expected.set(log.transactionHash, amounts);
   }
-  const paid = new Set();
-  for (const [tx, group] of byTx) {
-    const block = Number(group.values().next().value.blockNumber);
-    const audited = history.audited(block);
-    const inbound = [...group.values()].filter(log => log.topics[0] === SIG.transfer && log.topics[2] === recipient &&
-      BigInt(log.data) > 0n && (!audited || history.payers.has(addr(log.topics[1])) || addr(log.topics[1]) === MARKET));
-    if (!inbound.length) continue;
-    paid.add(tx);
-    const actual = inbound.map(log => BigInt(log.data).toString()).sort();
-    const amounts = (expected.get(tx) ?? []).sort();
-    // An unindexed staker with a positive claim either receives USDC or
-    // produces PayoutDeferred in the audited implementations.
-    const marketPayment = inbound.some(log => addr(log.topics[1]) === MARKET);
-    const unmatched = actual.length !== amounts.length || actual.some((amount, index) => amount !== amounts[index]);
-    if (!audited || marketPayment || unmatched) {
-      if (audited && !marketPayment) batchCandidates.set(tx, block);
-      else batchCandidates.delete(tx);
-      lookup.add(tx);
-    }
+  // Treasury cash is reconciled against the wallet's indexed events. Only
+  // market payments can require discovery here of an unindexed seller.
+  for (const log of cash) {
+    if (log.address !== USDC || log.topics[0] !== SIG.transfer || log.topics[2] !== recipient ||
+      addr(log.topics[1]) !== MARKET || BigInt(log.data) <= 0n) continue;
+    batchCandidates.delete(log.transactionHash);
+    lookup.add(log.transactionHash);
   }
 
   const windows = nearbyActivityWindows(batchCandidates);
@@ -97,9 +79,6 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
   for (const log of nftTransfers) {
     if (log.topics.length === 4 && kept.has(log.transactionHash) && covered.has(log.transactionHash)) addProof(log);
   }
-  const extra = [...new Set(deferred.map(log => log.transactionHash).filter(tx => paid.has(tx) && !lookup.has(tx)))];
-  raw.push(...await reader.batch(extra.map(hash => ['eth_getTransactionReceipt', [hash]])));
-  hashes.push(...extra);
   const records = new Map(hashes.map((tx, index) => [tx, receiptRecord(tx, raw[index])]));
   function addActivity(entry) {
     const address = entry.address.toLowerCase(), signature = entry.topics[0];
@@ -130,5 +109,5 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
     // only the log types consumed by settlement, without fetching a receipt.
     records.set(tx, { tx, receipt: { status: '0x1', logs: [...(byTx.get(tx)?.values() ?? [])] } });
   }
-  return [...records.values()];
+  return { receipts: [...records.values()], deferred };
 }
