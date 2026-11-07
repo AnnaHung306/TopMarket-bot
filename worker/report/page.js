@@ -63,7 +63,6 @@ export function renderWalletReport(linkAcquisitionCosts) {
         <div><span>未實現損益</span><b>未計算</b></div>
         <div><span>已核實持倉</span><b id="holdingCount">—</b></div>
       </div>
-      <div class="warning" id="warning">尚未分析。現金流不等於損益。成本、銷售、質押與持倉估值尚未完整覆蓋，查詢完成後會顯示核實狀態。</div>
     </section>
 
     <section class="glass evidence" data-lens="evidence" aria-labelledby="evidence-title">

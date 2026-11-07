@@ -1,6 +1,7 @@
 import { addr, boxes, decode, decodeReward, hex, MARKET, SIG, STAKE, USDC, word } from './index.js';
 import { activeAuction, alchemy, callKey, callRecord, evidencePlan, getFilteredLogs } from './history/chain.js';
 import { settleRecordedWallet } from './history/report.js';
+import { campaignPayoutEvents } from './history/campaign-payouts.js';
 import { treasuryStaking } from './history/treasury-staking.js';
 import { walletEvidence } from './history/wallet-evidence.js';
 import { readWalletHistoricalCalls, walletStateHistory } from './history/wallet-state.js';
@@ -179,6 +180,8 @@ export async function directWalletReport(wallet, from, to, reader = alchemy({ ma
   const historical = new Map(required.map((call, index) => [callKey(call[1]), responses[index]]));
   const calls = plan.calls.map(call => callRecord(call, historical.get(callKey(call[1])) ?? null));
   const { events, warnings } = await settleRecordedWallet(wallet, related, receipts, calls, updates, true);
+  const used = new Set(events.map(event => event.id));
+  events.push(...campaignPayoutEvents(wallet, cash).filter(event => !used.has(event.id)));
   events.push(...treasuryStaking(wallet, cash, events, deferred, history.isTreasury));
   return { from, to: through, events, warnings, seconds: (performance.now() - started) / 1_000 };
 }

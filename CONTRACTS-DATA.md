@@ -55,7 +55,7 @@ Neon 的單錢包摘要只儲存整數金額、分類計數、區塊／hash 與�
 - WinKept：得獎者取得卡片須有 wins getter 與 ERC-721 Transfer。Vercel 與本機另核對 Card BlindBox 的留卡結算收入，要求 wins getter 確認原質押人與金額，質押池 TokenReleased 及同交易金庫 USDC 轉帳均須吻合。
 - WinRecycled：Card BlindBox 的 winner recyclePrice 與 stakerShare 是不同款項。TokenBlindBox 的另一種事件格式提供 winner recyclePrice，質押分潤走 TokenStakingPool，不能歸給 winner。
 - DrawRefunded／RequestRescued：抽卡退款的請求證據，不直接當現金。
-- 活動補償（例如 Genesis Pack Lucky Airdrop）與抽卡退款分列，須有可核對的發放紀錄和實際入帳，才能認列。
+- 活動補償、活動獎金與抽卡退款分列。活動款需有可核對的發放資料及實際入帳，並按交易及日誌位置去重。已核對的活動款登錄在 `worker/history/campaign-payouts.js`。
 - TreasuryUpdated／FeeRecipientUpdated：歷史變更保護；PayoutDeferred 是延期款。
 - Sold／OfferAccepted／拍賣結算：辨識買賣方，再核對 USDC；自成交排除。
 - Staked／Unstaked：持倉候選，不是收益。
@@ -63,9 +63,9 @@ Neon 的單錢包摘要只儲存整數金額、分類計數、區塊／hash 與�
 - Withdrawn：可混合延期用途，目前不做完整用途歸屬，不納入小計。
 
 ## 計算與限制
-收入小計＝已核實退款＋市場銷售實收＋質押入帳＋得獎者回購實收。報表與海報主數字是「已識別淨收支」＝收入小計－已核對的 USDC 抽卡付款－USDC 市場買卡事件金額。買卡採用成交事件名目額，拍賣付款可能早於成交。此數字涵蓋所選區塊與已辨識事件。
-退款、回購須有最終確認的 USDC 轉帳及同交易合約事件。事件區塊前後 treasury 相同、settlementToken 均 USDC、整個區塊無 TreasuryUpdated；同交易／payer／recipient／raw amount 雙向唯一且無匹配 PayoutDeferred。payer 是 treasury，不是 box。先改再改回也拒絕。
-缺 archive data、同額多筆、跨類別歧義全部待核對。以 transfer log identity 在收入類別間去重。Vercel 與本機核對兩種 BlindBox 的回購實收。TokenStakingPool 的分潤及留卡款尚未涵蓋。
+收入小計＝已核實退款＋市場銷售實收＋質押入帳＋得獎者回購實收＋補償＋活動獎金。報表與海報主數字是「已識別淨收支」＝收入小計－已核對的 USDC 抽卡付款－USDC 市場買卡事件金額。買卡採用成交事件名目額，拍賣付款可能早於成交。此數字涵蓋所選區塊與已辨識事件。
+退款、回購須有最終確認的 USDC 轉帳及同交易合約事件。事件區塊前後 treasury 相同、settlementToken 均 USDC、整個區塊無 TreasuryUpdated。同交易的付款人、收款人和金額須吻合，且無匹配 PayoutDeferred。Card BlindBox 批次回購有多筆同額時，僅在同一合約的事件與實際轉帳筆數相符，並能依日誌位置逐筆配對時認列。付款人須為當時的 treasury。
+缺 archive data、無法配對的同額多筆及跨類別歧義均列待核對。以 transfer log identity 在收入類別間去重。Vercel 與本機核對兩種 BlindBox 的回購實收。TokenStakingPool 的分潤及留卡款尚未涵蓋。
 抽卡付款必須守恆於同交易同 box 全部 paid+fee，核對歷史 treasury／feeRecipient。多 box、自付給自己的收款方、缺資料或不明 token 不推定。
 跨頁去重後須有唯一 request→Won→WinKept、wins 與真正 NFT Transfer 至錢包。退款、競爭 outcome、缺 NFT 收據、adapter 來源不明均未知。
 持倉只顯示「關聯歷史抽卡支出」，不是目前稅務成本。離開後再取得、外部買入／贈與、先前持倉、gas 分攤、已實現及未實現損益尚未完整處理。
