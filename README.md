@@ -4,7 +4,7 @@
 
 機器人提供 `/wallet address:錢包地址`，回覆只有發出指令的人看得到。它先讀取已存摘要，接著核對至最新已最終確認區塊；首次掃描可能需要較長時間，進度會存入資料庫。報表只包含可識別的收支，不包含持倉估值。為控制鏈上查詢量，同一個機器人程序一次處理一個查詢。
 
-需要 Node.js 22+、Discord Bot、Alchemy Base API key，以及可供 Neon serverless driver 連線的 Neon Postgres 資料庫。設定 `DISCORD_TOKEN`、`DISCORD_CLIENT_ID`、`ALCHEMY_API_KEY`、`DATABASE_URL`；可選 `DISCORD_GUILD_ID`，讓指令在指定伺服器較快出現。Token 與資料庫連線字串應保存為 Railway 變數，切勿提交或貼在公開訊息中。
+需要 Node.js 22+、Discord Bot、Alchemy Base API key，以及 PostgreSQL 資料庫。使用 Railway PostgreSQL 時設定 `DATABASE_DRIVER=postgres` 並將 `DATABASE_URL` 指向資料庫服務；未設定此選項時沿用 Neon。設定 `DISCORD_TOKEN`、`DISCORD_CLIENT_ID`、`ALCHEMY_API_KEY`、`DATABASE_URL`；可選 `DISCORD_GUILD_ID`，讓指令在指定伺服器較快出現。Token 與資料庫連線字串應保存為 Railway 變數，切勿提交或貼在公開訊息中。
 
 1. 在 Discord Developer Portal 建立 Application 與 Bot，取得 Application ID 和 Bot Token。使用 OAuth2 URL Generator 勾選 `bot` 和 `applications.commands`，將機器人邀請到伺服器。這個機器人不需要訊息內容等 privileged intents。
 2. 在 Railway 建立從本儲存庫部署的服務，設定上述變數。Railway 使用 `npm start` 執行常駐程序；請維持單一實例。資料庫使用 Neon，並提供其 `DATABASE_URL`。不需要公開網域或 HTTP 服務。

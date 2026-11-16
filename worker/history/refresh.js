@@ -1,9 +1,11 @@
-import { Client } from '@neondatabase/serverless';
+import { Client as NeonClient } from '@neondatabase/serverless';
+import pg from 'pg';
 
 async function withAdvisoryLock(query, parameters, run) {
   const url = new URL(process.env.DATABASE_URL);
   // Advisory locks belong to a Postgres session, so connect directly even if SQL reads use a pooler.
-  url.hostname = url.hostname.replace(/-pooler(?=\.)/, '');
+  if (process.env.DATABASE_DRIVER !== 'postgres') url.hostname = url.hostname.replace(/-pooler(?=\.)/, '');
+  const Client = process.env.DATABASE_DRIVER === 'postgres' ? pg.Client : NeonClient;
   const client = new Client({ connectionString: url.href, connectionTimeoutMillis: 5_000 });
   let alive = true, heartbeat;
   const markLost = () => { alive = false; };

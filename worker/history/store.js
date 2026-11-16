@@ -1,7 +1,35 @@
 import { neon } from '@neondatabase/serverless';
+import pg from 'pg';
+
+let pool;
+export function postgresSql(connectionPool) {
+  function sql(strings, ...values) {
+    const text = strings.reduce((result, part, index) => result + (index ? `$${index}` : '') + part, '');
+    const run = async client => (await client.query(text, values)).rows;
+    return { run, then: (resolve, reject) => run(connectionPool).then(resolve, reject) };
+  }
+  sql.transaction = async queries => {
+    const client = await connectionPool.connect();
+    try {
+      await client.query('BEGIN');
+      const rows = [];
+      for (const query of queries) rows.push(await query.run(client));
+      await client.query('COMMIT');
+      return rows;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally { client.release(); }
+  };
+  return sql;
+}
 
 export function database() {
-  if (!process.env.DATABASE_URL?.trim()) throw Error('Neon DATABASE_URL is not configured');
+  if (!process.env.DATABASE_URL?.trim()) throw Error('DATABASE_URL is not configured');
+  if (process.env.DATABASE_DRIVER === 'postgres') {
+    pool ||= new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    return postgresSql(pool);
+  }
   return neon(process.env.DATABASE_URL);
 }
 
