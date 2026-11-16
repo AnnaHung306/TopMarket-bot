@@ -5,21 +5,24 @@ const PAGE_SIZE = 1_000;
 const MAX_PAGES = 20;
 const HASH = /^0x[0-9a-f]{64}$/i;
 
-// Query the transfer index for one recipient, then verify every result against
-// the finalized transaction receipt before accepting it as cash-flow evidence.
-export async function incomingUsdcLogs(reader, wallet, from, to) {
+// Query the wallet transfer index, then verify every result against a finalized
+// receipt before accepting it as cash-flow evidence.
+async function walletUsdcLogs(reader, wallet, from, to, direction) {
+  const addressField = direction === 'incoming' ? 'toAddress' : 'fromAddress';
+  const transferField = direction === 'incoming' ? 'to' : 'from';
+  const topicIndex = direction === 'incoming' ? 2 : 1;
   const indexed = new Map();
   const seenKeys = new Set();
   let pageKey;
   for (let page = 0; page < MAX_PAGES; page++) {
     const result = await reader.rpc('alchemy_getAssetTransfers', [{ fromBlock: hex(from), toBlock: hex(to),
-      toAddress: wallet, contractAddresses: [USDC], category: ['erc20'],
+      [addressField]: wallet, contractAddresses: [USDC], category: ['erc20'],
       order: 'asc', maxCount: hex(PAGE_SIZE), ...(pageKey ? { pageKey } : {}) }]);
     if (!Array.isArray(result?.transfers) || result.transfers.length > PAGE_SIZE) throw Error('Incomplete wallet transfer index');
     for (const transfer of result.transfers) {
       const block = Number(transfer.blockNum);
       const hash = transfer.hash?.toLowerCase();
-      if (transfer.category !== 'erc20' || transfer.to?.toLowerCase() !== wallet ||
+      if (transfer.category !== 'erc20' || transfer[transferField]?.toLowerCase() !== wallet ||
         transfer.rawContract?.address?.toLowerCase() !== USDC || !HASH.test(hash || '') ||
         !Number.isSafeInteger(block) || block < from || block > to) throw Error('Invalid indexed USDC transfer');
       const entry = indexed.get(hash) ?? { block, count: 0 };
@@ -41,11 +44,18 @@ export async function incomingUsdcLogs(reader, wallet, from, to) {
       Number(receipt.blockNumber) !== entry.block || !Array.isArray(receipt.logs)) throw Error('Indexed USDC transfer has no finalized receipt');
     const logs = receipt.logs.filter(log => log.address?.toLowerCase() === USDC &&
       log.topics?.length === 3 && log.topics[0]?.toLowerCase() === SIG.transfer &&
-      log.topics[2]?.toLowerCase() === word(wallet));
+      log.topics[topicIndex]?.toLowerCase() === word(wallet));
     if (logs.length !== entry.count || logs.some(log => log.removed || !Number.isSafeInteger(Number(log.logIndex)))) {
       throw Error('USDC transfer index does not match transaction receipt');
     }
     output.push(...logs.map(compactLog));
   }
   return output.sort((a, b) => Number(a.blockNumber) - Number(b.blockNumber) || Number(a.logIndex) - Number(b.logIndex));
+}
+
+export const incomingUsdcLogs = (reader, wallet, from, to) => walletUsdcLogs(reader, wallet, from, to, 'incoming');
+
+export async function outgoingUsdcLogs(reader, wallet, from, to, recipient = null) {
+  const logs = await walletUsdcLogs(reader, wallet, from, to, 'outgoing');
+  return recipient ? logs.filter(log => log.topics[2].toLowerCase() === word(recipient)) : logs;
 }

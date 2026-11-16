@@ -6,7 +6,7 @@ import { RAFFLE_CONTRACT, RAFFLE_SHARES_BOUGHT, raffleEvents, readRaffleLogs } f
 import { treasuryStaking } from './history/treasury-staking.js';
 import { readWalletDeferredPayments, readWalletDrawSources, walletEvidence } from './history/wallet-evidence.js';
 import { readWalletHistoricalCalls, walletStateHistory } from './history/wallet-state.js';
-import { incomingUsdcLogs } from './history/wallet-transfers.js';
+import { incomingUsdcLogs, outgoingUsdcLogs } from './history/wallet-transfers.js';
 
 export const WALLET_HISTORY_START = 50634768;
 const WALLET_PAGE_LOGS = 2_000;
@@ -132,7 +132,7 @@ export async function directWalletHead(reader = alchemy({ maxUnits: 3_000 })) {
     contracts, chainId: 8453, rpc: 'Alchemy Base Mainnet', directWallet: true, usage: reader.stats };
 }
 
-function outgoingPaymentLogs(reader, recipient, boxLogs, raffleLogs) {
+function outgoingPaymentLogs(reader, wallet, boxLogs, raffleLogs) {
   let first = Infinity, last = -Infinity, hasDraws = false;
   const addBlock = log => {
     const block = Number(log.blockNumber);
@@ -151,7 +151,8 @@ function outgoingPaymentLogs(reader, recipient, boxLogs, raffleLogs) {
   }
   if (first === Infinity) return [];
   // Draw verification compares every USDC destination in the matched transaction.
-  const topics = hasDraws ? [SIG.transfer, recipient] : [SIG.transfer, recipient, word(RAFFLE_CONTRACT)];
+  if (reader.indexedWalletTransfers) return outgoingUsdcLogs(reader, wallet, first, last, hasDraws ? null : RAFFLE_CONTRACT);
+  const topics = hasDraws ? [SIG.transfer, word(wallet)] : [SIG.transfer, word(wallet), word(RAFFLE_CONTRACT)];
   return getFilteredLogs(reader, { address: USDC, topics }, first, last);
 }
 
@@ -177,7 +178,7 @@ async function discoverWallet(reader, wallet, from, to, contracts, key) {
   ]);
   const raffleLogs = readRaffleLogs(reader, wallet, from, through);
   const outgoing = Promise.all([boxLogs, raffleLogs])
-    .then(([boxes, raffles]) => outgoingPaymentLogs(reader, recipient, boxes, raffles));
+    .then(([boxes, raffles]) => outgoingPaymentLogs(reader, wallet, boxes, raffles));
   const shared = Promise.all([
     configuration(reader, addresses, to),
     reader.indexedWalletTransfers ? incomingUsdcLogs(reader, wallet, from, through)

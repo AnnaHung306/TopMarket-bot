@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { SIG, USDC, word } from './worker/index.js';
-import { incomingUsdcLogs } from './worker/history/wallet-transfers.js';
+import { incomingUsdcLogs, outgoingUsdcLogs } from './worker/history/wallet-transfers.js';
 
 const wallet = '0x' + 'a'.repeat(40), sender = '0x' + 'b'.repeat(40);
 const hash = '0x' + 'c'.repeat(64);
@@ -40,4 +40,21 @@ let repeatedPages = 0;
 await assert.rejects(incomingUsdcLogs({ rpc: async () => { repeatedPages++; return { transfers: [], pageKey: 'repeated' }; },
   batch: async () => { throw Error('Should not fetch receipt'); } }, wallet, 90, 110), /pagination limit/);
 assert.equal(repeatedPages, 2);
+
+const outgoing = { ...transfer(100, 'outgoing'), from: wallet, to: sender };
+const outgoingReceipt = { ...receipt, logs: [{ ...log(100, 2), topics: [SIG.transfer, word(wallet), word(sender)] }] };
+let outgoingRequests = 0;
+const outgoingReader = {
+  async rpc(method, [params]) {
+    assert.equal(method, 'alchemy_getAssetTransfers');
+    assert.equal(params.fromAddress, wallet);
+    outgoingRequests++;
+    return { transfers: [outgoing] };
+  },
+  async batch(calls) { assert.deepEqual(calls, [['eth_getTransactionReceipt', [hash]]]); return [outgoingReceipt]; },
+};
+assert.equal((await outgoingUsdcLogs(outgoingReader, wallet, 90, 110)).length, 1);
+assert.equal((await outgoingUsdcLogs(outgoingReader, wallet, 90, 110, sender)).length, 1);
+assert.equal((await outgoingUsdcLogs(outgoingReader, wallet, 90, 110, '0x' + 'd'.repeat(40))).length, 0);
+assert.equal(outgoingRequests, 3);
 console.log('Wallet transfer index and receipt reconciliation passed');
