@@ -25,8 +25,8 @@ export function alchemy({
     const cost = methods.reduce((sum, method) => sum + (units[method] ?? 80), 0);
     for (let attempt = 0; ; attempt++) {
       beforeRequest();
-      if (Math.max(nextTime, performance.now()) >= deadline) throw Error('Alchemy sync time limit reached; saved chunks can resume');
-      if (stats.units + cost > maxUnits) throw Error('Alchemy sync budget reached; saved chunks can resume');
+      if (Math.max(nextTime, performance.now()) >= deadline) throw Error(`Alchemy sync time limit reached; requests=${stats.requests} estimated_units=${stats.units}`);
+      if (stats.units + cost > maxUnits) throw Error(`Alchemy sync budget reached; requests=${stats.requests} estimated_units=${stats.units}`);
       stats.units += cost;
       stats.requests++;
       for (const method of methods) stats.methods[method] = (stats.methods[method] || 0) + 1;

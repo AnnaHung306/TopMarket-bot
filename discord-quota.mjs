@@ -2,7 +2,7 @@
 // persists across restarts and is deliberately charged even for failed scans.
 export const SCAN_MAX_UNITS = 25000;
 export const DAILY_SCAN_LIMIT = 4;
-export const SCAN_BLOCK_WINDOW = 200000;
+export const SCAN_BLOCK_WINDOW = 10000;
 
 export async function reserveScan(sql) {
   await sql`CREATE TABLE IF NOT EXISTS discord_scan_quota (
