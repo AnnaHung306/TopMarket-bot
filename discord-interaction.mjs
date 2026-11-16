@@ -23,7 +23,14 @@ export function createWalletHandler({ readPage, getReport, renderPoster, formatR
       const poster = renderPoster(wallet, snapshot, note);
       await interaction.editReply({ content: formatReport(wallet, snapshot, note), files: [{ attachment: poster, name: 'wallet-report.png' }] });
     } catch (error) {
-      console.error('錢包查詢失敗', error.code || error.name);
+      let detail = String(error.message || 'Unknown error');
+      for (const key of ['ALCHEMY_API_KEY', 'DATABASE_URL', 'DISCORD_TOKEN', 'ETHERSCAN_API_KEY']) {
+        const secret = process.env[key];
+        if (secret) detail = detail.split(secret).join('[redacted]');
+      }
+      detail = detail.replace(/(?:https?|postgres(?:ql)?):\/\/\S+/gi, '[redacted-url]');
+      detail = detail.replace(/password\s*[=:]\s*\S+/gi, 'password=[redacted]');
+      console.error('錢包查詢失敗', error.code || error.name, detail.slice(0, 300));
       const message = '錢包查詢未完成，請稍後再試；已保存的掃描進度可繼續使用。';
       if (interaction.deferred || interaction.replied) await interaction.editReply(message).catch(() => {});
       else await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
