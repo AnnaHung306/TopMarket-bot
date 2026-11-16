@@ -25,7 +25,8 @@ client.once('ready', async () => {
 });
 client.on('interactionCreate', createWalletHandler({
   readSnapshot: address => readWalletSnapshot(database(), address),
-  readPage: address => walletCachePage(database(), address, undefined, { maxUnits: SCAN_MAX_UNITS, maxMs: 120_000, blockWindow: SCAN_BLOCK_WINDOW }),
+  readPage: address => walletCachePage(database(), address, undefined, { maxUnits: SCAN_MAX_UNITS, maxMs: 120_000,
+    blockWindow: SCAN_BLOCK_WINDOW, indexedWalletTransfers: true }),
   reserveScan: () => reserveScan(database()),
   scanBlocked: address => scanBlocked(database(), address),
   recordScanFailure: address => recordScanFailure(database(), address),

@@ -106,7 +106,8 @@ export async function walletCachePage(sql, wallet, afterBlock, options = {}) {
       throw Error('Wallet refresh must start from its current saved checkpoint');
     }
     const reader = alchemy({
-      maxUnits: options.maxUnits ?? WALLET_PARALLEL_PAGES * 120_000, maxMs: options.maxMs ?? 600_000, perSecond: 200, maxInFlight: 4, beforeRequest: assertLock,
+      maxUnits: options.maxUnits ?? WALLET_PARALLEL_PAGES * 120_000, maxMs: options.maxMs ?? 600_000, perSecond: 200, maxInFlight: 4,
+      indexedWalletTransfers: options.indexedWalletTransfers ?? false, beforeRequest: assertLock,
     });
     const previous = saved?.version === CACHE_VERSION ? saved : null;
     const savedDraft = current.draft?.version === CACHE_VERSION ? current.draft : null;

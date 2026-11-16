@@ -6,6 +6,7 @@ import { RAFFLE_CONTRACT, RAFFLE_SHARES_BOUGHT, raffleEvents, readRaffleLogs } f
 import { treasuryStaking } from './history/treasury-staking.js';
 import { readWalletDeferredPayments, readWalletDrawSources, walletEvidence } from './history/wallet-evidence.js';
 import { readWalletHistoricalCalls, walletStateHistory } from './history/wallet-state.js';
+import { incomingUsdcLogs } from './history/wallet-transfers.js';
 
 export const WALLET_HISTORY_START = 50634768;
 const WALLET_PAGE_LOGS = 2_000;
@@ -179,7 +180,8 @@ async function discoverWallet(reader, wallet, from, to, contracts, key) {
     .then(([boxes, raffles]) => outgoingPaymentLogs(reader, recipient, boxes, raffles));
   const shared = Promise.all([
     configuration(reader, addresses, to),
-    getLogs(USDC, [SIG.transfer, null, recipient]),
+    reader.indexedWalletTransfers ? incomingUsdcLogs(reader, wallet, from, through)
+      : getLogs(USDC, [SIG.transfer, null, recipient]),
     raffleLogs,
     boxLogs,
     getLogs(STAKE, [[SIG.staked, SIG.unstaked], null, null, recipient]),

@@ -14,6 +14,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function alchemy({
   maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infinity, maxInFlight = Infinity, beforeRequest = () => {},
+  indexedWalletTransfers = false,
 } = {}) {
   if (!process.env.ALCHEMY_API_KEY?.trim()) throw Error('Alchemy Base RPC is not configured');
   const stats = { units: 0, requests: 0, retries: 0, splits: 0, methods: {} };
@@ -83,7 +84,7 @@ export function alchemy({
     }
     return results;
   }
-  return { rpc, batch, stats, parallelLogSplits: Number.isFinite(maxInFlight) };
+  return { rpc, batch, stats, parallelLogSplits: Number.isFinite(maxInFlight), indexedWalletTransfers };
 }
 
 export async function getFilteredLogs(reader, filter, from, to) {
