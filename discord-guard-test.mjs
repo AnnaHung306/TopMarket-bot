@@ -54,13 +54,13 @@ for (let iteration=0; iteration<10; iteration++) {
   try { await createWalletHandler(options)(test); } finally { console.error=oldError; }
   assert.ok(test.ackAt-begin < 3000, `iteration ${iteration}: initial response exceeded 3s`);
   assert.equal(test.first.flags,64);
-  assert.ok(scans <= 4 && reservations <= 4, `iteration ${iteration}: scan limit exceeded`);
+  assert.ok(scans <= 1 && reservations <= 1, `iteration ${iteration}: scan limit exceeded`);
   if (iteration <= 3) assert.equal(scans,0);
   if (iteration===2) { assert.equal(reservations,0); assert.equal(test.edits.at(-1).files[0].name,'wallet-report.png'); }
   if (iteration===3) assert.match(test.edits.at(-1),/額度已用完/);
   if (iteration===4) assert.match(test.edits.at(-1),/其他查詢處理/);
   if (iteration===5) assert.match(test.edits.at(-1),/未完成/);
   if (iteration===6) assert.equal(test.edits.at(-1).files[0].name,'wallet-report.png');
-  if (iteration>=7) { assert.equal(scans,4); assert.match(test.edits.at(-1),/用量上限/); }
+  if (iteration>=7) { assert.equal(scans,1); assert.match(test.edits.at(-1),/進度已保存/); }
   console.log(`PASS iteration ${iteration+1}: ack ${Math.round(test.ackAt-begin)}ms, scans ${scans}`);
 }

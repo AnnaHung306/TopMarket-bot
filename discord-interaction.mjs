@@ -30,29 +30,26 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         await interaction.editReply('此錢包今天的掃描曾失敗，為避免重複消耗 API，暫停重試至 UTC 零點。已儲存的進度不受影響。'); return;
       }
       await interaction.editReply('找不到已儲存報表，正在背景掃描歷史資料；本次消耗設有上限，請稍候。');
-      for (let i = 0; i < 4; i++) {
-        if (!await reserveScan()) {
-          await interaction.editReply('今日背景掃描額度已用完；已完成的進度會保留，請於 UTC 零點後再試。'); return;
-        }
-        let result;
-        try { result = await readPage(wallet); }
-        catch (error) {
-          failedWallets.set(wallet, today);
-          try { await recordScanFailure(wallet); }
-          catch (recordError) { console.error('無法保存掃描保護狀態', recordError.code || recordError.name); }
-          throw error;
-        }
-        if (result.ready) {
-          const poster = renderPoster(wallet, result.snapshot, '');
-          await interaction.editReply({ content: formatReport(wallet, result.snapshot, ''), files: [{ attachment: poster, name: 'wallet-report.png' }] }); return;
-        }
-        if (result.waiting) {
-          await interaction.editReply('這個錢包正由其他查詢處理，請稍後再試。'); return;
-        }
-        const p = result.progress;
-        await interaction.editReply(p ? `背景掃描進行中：區塊 ${p.through} / ${p.target}。已完成的進度會保存。` : '背景掃描進行中，請稍候。');
+      if (!await reserveScan()) {
+        await interaction.editReply('今日背景掃描額度已用完；已完成的進度會保留，請於 UTC 零點後再試。'); return;
       }
-      await interaction.editReply('本次背景掃描已達用量上限；已完成的進度會保留，請稍後再試。');
+      let result;
+      try { result = await readPage(wallet); }
+      catch (error) {
+        failedWallets.set(wallet, today);
+        try { await recordScanFailure(wallet); }
+        catch (recordError) { console.error('無法保存掃描保護狀態', recordError.code || recordError.name); }
+        throw error;
+      }
+      if (result.ready) {
+        const poster = renderPoster(wallet, result.snapshot, '');
+        await interaction.editReply({ content: formatReport(wallet, result.snapshot, ''), files: [{ attachment: poster, name: 'wallet-report.png' }] }); return;
+      }
+      if (result.waiting) {
+        await interaction.editReply('這個錢包正由其他查詢處理，請稍後再試。'); return;
+      }
+      const p = result.progress;
+      await interaction.editReply(p ? `本次掃描已處理至區塊 ${p.through} / ${p.target}；進度已保存，稍後可再次使用指令繼續。` : '本次掃描尚未取得進度，請稍後再試。');
     } catch (error) {
       let detail = String(error.message || 'Unknown error');
       for (const key of ['ALCHEMY_API_KEY', 'DATABASE_URL', 'DISCORD_TOKEN', 'ETHERSCAN_API_KEY']) {
