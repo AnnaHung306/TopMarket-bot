@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { createWalletHandler } from './discord-interaction.mjs';
 
 function interaction(address) {
-  const edits = [];
-  return { commandName:'wallet', isChatInputCommand:()=>true, options:{ getString:()=>address }, edits,
+  const edits = [], messages = [];
+  const thread = { async send(payload) { messages.push(payload); return { async edit(value) { edits.push(value); } }; } };
+  return { commandName:'wallet', isChatInputCommand:()=>true, options:{ getString:()=>address }, edits, messages,
     async reply(payload) { this.replied = true; this.first = payload; this.ackAt = performance.now(); },
+    async fetchReply() { return { async startThread() { return thread; } }; },
     async editReply(payload) { edits.push(payload); } };
 }
 
@@ -33,10 +35,19 @@ try {
   hasSnapshot = true;
   const cached = interaction(wallet);
   await createWalletHandler(options)(cached);
-  assert.equal(cached.edits.at(-1).files[0].name, 'wallet-report.png');
+  assert.equal(cached.messages.at(-1).files[0].name, 'wallet-report.png');
   assert.equal(reserved, 1);
 } finally { console.error = originalError; }
 console.log('PASS persistent failure protection and cached report');
+const denied = interaction(wallet);
+denied.fetchReply = async () => { throw Object.assign(Error('missing thread permission'), { code: 50013 }); };
+let deniedScans = 0;
+const previousError = console.error; console.error = () => {};
+try {
+  await createWalletHandler({ ...options, readPage: async () => { deniedScans++; } })(denied);
+} finally { console.error = previousError; }
+assert.equal(deniedScans, 0);
+assert.match(denied.edits.at(-1), /建立公開討論串/);
 for (let iteration=0; iteration<10; iteration++) {
   let scans=0, reservations=0;
   const test = interaction(iteration===0 ? 'invalid' : wallet);
@@ -53,14 +64,14 @@ for (let iteration=0; iteration<10; iteration++) {
   const oldError=console.error; console.error=()=>{};
   try { await createWalletHandler(options)(test); } finally { console.error=oldError; }
   assert.ok(test.ackAt-begin < 3000, `iteration ${iteration}: initial response exceeded 3s`);
-  assert.equal(test.first.flags,64);
+  assert.match(test.first.content,/已收到/);
   assert.ok(scans <= 1 && reservations <= 1, `iteration ${iteration}: scan limit exceeded`);
   if (iteration <= 3) assert.equal(scans,0);
-  if (iteration===2) { assert.equal(reservations,0); assert.equal(test.edits.at(-1).files[0].name,'wallet-report.png'); }
+  if (iteration===2) { assert.equal(reservations,0); assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png'); }
   if (iteration===3) assert.match(test.edits.at(-1),/額度已用完/);
   if (iteration===4) assert.match(test.edits.at(-1),/其他查詢處理/);
   if (iteration===5) assert.match(test.edits.at(-1),/未完成/);
-  if (iteration===6) assert.equal(test.edits.at(-1).files[0].name,'wallet-report.png');
+  if (iteration===6) assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png');
   if (iteration>=7) { assert.equal(scans,1); assert.match(test.edits.at(-1),/進度已保存/); }
   console.log(`PASS iteration ${iteration+1}: ack ${Math.round(test.ackAt-begin)}ms, scans ${scans}`);
 }

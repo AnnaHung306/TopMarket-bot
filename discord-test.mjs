@@ -22,16 +22,18 @@ assert.match(report, /不含持倉估值/);
 const image = renderPoster(wallet, updated);
 assert.deepEqual([...image.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 assert.ok(image.length > 10000);
-const responses = [];
+const responses = [], threadMessages = [], statusEdits = [];
+const thread = { async send(payload) { threadMessages.push(payload); return { async edit(value) { statusEdits.push(value); } }; } };
 const interaction = {
   isChatInputCommand: () => true, commandName: 'wallet', options: { getString: () => wallet },
   async reply(options) { this.replied = true; responses.push(options); },
-  async editReply(content) { responses.push(content); },
+  async fetchReply() { return { async startThread(options) { assert.match(options.name, /錢包報表/); return thread; } }; },
 };
 const handler = createWalletHandler({ readSnapshot: async () => updated, reserveScan: async () => { throw Error('cache must not consume quota'); }, readPage: async () => { throw Error('cache must not call RPC'); }, renderPoster, formatReport, configured: () => true });
 await handler(interaction);
-assert.equal(responses[0].flags, 64);
-assert.match(responses[1].content, /3\.765433 USDC/);
-assert.equal(responses[1].files[0].name, 'wallet-report.png');
-assert.deepEqual([...responses[1].files[0].attachment.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+assert.match(responses[0].content, /已收到/);
+assert.match(threadMessages[1].content, /3\.765433 USDC/);
+assert.equal(threadMessages[1].files[0].name, 'wallet-report.png');
+assert.deepEqual([...threadMessages[1].files[0].attachment.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+assert.match(statusEdits[0], /已完成/);
 console.log('Discord report tests passed');
