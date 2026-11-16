@@ -213,9 +213,9 @@ function rememberDiscovery(key, discovery, cacheable, through) {
   }
 }
 
-async function settlementEvidence(reader, wallet, logs, cash, soldCards, activity, from, through, deferred) {
+async function settlementEvidence(reader, wallet, logs, payments, soldCards, activity, from, through) {
   const { addresses, cardAddresses, history } = activity;
-  const proof = await walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, through, deferred);
+  const proof = await walletEvidence(reader, wallet, logs, payments, soldCards, addresses, cardAddresses, history, from, through);
   const related = [...logs.values()];
   const plan = evidencePlan(related, true);
   const required = evidencePlan(logsWithPossibleProof(related, proof.receipts, wallet), true).calls;
@@ -238,13 +238,15 @@ async function settleWalletPage(reader, wallet, { from, through, direct, discove
     .map(log => [log.transactionHash + ':' + log.logIndex, log]));
   const [sources, settlement] = await Promise.allSettled([
     readWalletDrawSources(reader, logs, from, through),
-    Promise.all([outgoing, outgoingThrough(reader, outgoingCards, wallet, through)])
-      .then(async ([paid, cards]) => {
-        const cash = [...incoming, ...paid].filter(inPage);
+    outgoingThrough(reader, outgoingCards, wallet, through)
+      .then(cards => {
         const soldCards = cards.filter(item => Number(item.blockNum) >= from);
-        const pageDeferred = deferred.then(logs => logs.filter(inPage));
-        const proof = await settlementEvidence(reader, wallet, logs, cash, soldCards, activity, from, through, pageDeferred);
-        return { ...proof, cash };
+        const payments = {
+          incoming: incoming.filter(inPage),
+          outgoing: outgoing.then(logs => logs.filter(inPage)),
+          deferred: deferred.then(logs => logs.filter(inPage)),
+        };
+        return settlementEvidence(reader, wallet, logs, payments, soldCards, activity, from, through);
       }),
   ]);
   if (sources.status === 'rejected') throw sources.reason;

@@ -145,6 +145,11 @@ const outgoingGate = new Promise(resolve => { releaseOutgoing = resolve; });
 const emergencyRelease = setTimeout(releaseOutgoing, 1_000);
 const startedPages = [];
 const deferredRanges = [];
+const evidenceTx = '0x' + w(800_000);
+let receiptStarted = false;
+function releaseAfterLookupsStart() {
+  if (startedPages.length === 6 && receiptStarted) releaseOutgoing();
+}
 const denseDraws = Array.from({ length: 6 }, (_, index) => ({
   ...base,
   blockNumber: '0x' + (denseStart + 17 * index).toString(16),
@@ -155,8 +160,19 @@ const denseDraws = Array.from({ length: 6 }, (_, index) => ({
 const deferredDeposit = { ...denseDeposits[0], address: box, topics: [SIG.payoutDeferred, a(wallet)] };
 const failingPageReader = {
   ...denseReader,
+  batch: async (calls, allowReverts) => {
+    if (calls[0]?.[0] !== 'eth_getTransactionReceipt') return denseReader.batch(calls, allowReverts);
+    assert.deepEqual(calls, [['eth_getTransactionReceipt', [evidenceTx]]]);
+    assert.equal(outgoingFinished, false, 'shared receipt lookup starts while outgoing transfers are pending');
+    receiptStarted = true;
+    releaseAfterLookupsStart();
+    return [{ transactionHash: evidenceTx, status: '0x1', logs: [] }];
+  },
   rpc: async (method, params) => {
     const [filter] = params;
+    if (method === 'alchemy_getAssetTransfers') {
+      return { transfers: [{ hash: evidenceTx, blockNum: '0x' + denseStart.toString(16) }] };
+    }
     if (method !== 'eth_getLogs') return denseReader.rpc(method, params);
     const [topic, sender] = filter.topics;
     const from = Number(filter.fromBlock), to = Number(filter.toBlock);
@@ -173,7 +189,7 @@ const failingPageReader = {
     if (topic === SIG.requestVia) {
       assert.equal(outgoingFinished, false, 'draw sources start while outgoing transfers are pending');
       startedPages.push(from);
-      if (startedPages.length === 6) releaseOutgoing();
+      releaseAfterLookupsStart();
       if (from === denseStart + 34) throw Error('third page rejected');
       return [];
     }
@@ -355,7 +371,7 @@ const reader = {
   },
 };
 const proof = await walletEvidence(reader, wallet, new Map(directLogs.map(log => [log.transactionHash, log])),
-  cash, [], [box], new Set([box]), { audited: () => false, isTreasury: payer => payer === treasury },
+  { incoming: cash, outgoing: [] }, [], [box], new Set([box]), { audited: () => false, isTreasury: payer => payer === treasury },
   Number(base.blockNumber), Number(deposits.at(-1).blockNumber));
 const payoutCalls = evidencePlan(directLogs, true).calls.map(call =>
   callRecord(call, call[1][0].data === '0x61d027b3' ? a(treasury) : a(usdc)));
@@ -385,7 +401,7 @@ const mixedEvidence = await walletEvidence({
     return [{ transactionHash: tx, status: '0x1', logs: [...hiddenStakes, ...stakerPayments] }];
   },
   rpc: async () => [],
-}, wallet, indexedLogs, [...indexedPayments, ...stakerPayments], [], [box], new Set([box]),
+}, wallet, indexedLogs, { incoming: [...indexedPayments, ...stakerPayments], outgoing: [] }, [], [box], new Set([box]),
 { audited: () => true, isTreasury }, Number(base.blockNumber), Number(base.blockNumber));
 const discovered = [...indexedLogs.values()];
 const discoveredCalls = evidencePlan(discovered, true).calls.map(call =>

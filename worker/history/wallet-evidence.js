@@ -68,7 +68,8 @@ export function readWalletDeferredPayments(reader, wallet, addresses, from, to) 
   return getFilteredLogs(reader, { address: addresses, topics: [SIG.payoutDeferred, word(wallet)] }, from, to);
 }
 
-export async function walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, to, deferred) {
+export async function walletEvidence(reader, wallet, logs, payments, soldCards, addresses, cardAddresses, history, from, to) {
+  const { incoming, outgoing, deferred } = payments;
   const recipient = word(wallet);
   const sources = new Set(addresses);
   const byTx = new Map();
@@ -77,12 +78,11 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
     group.set(logId(log), log);
     byTx.set(log.transactionHash, group);
   }
-  cash.forEach(addProof);
-
   const lookup = new Set(soldCards.map(item => item.hash));
   const batchCandidates = new Map(soldCards.filter(item => history.audited(Number(item.blockNum)))
     .map(item => [item.hash, Number(item.blockNum)]));
-  for (const [tx, block] of repeatedTreasuryPayouts(wallet, recipient, logs, cash, history)) {
+  // Receipt candidates depend on incoming payments, known events, and NFT transfers.
+  for (const [tx, block] of repeatedTreasuryPayouts(wallet, recipient, logs, incoming, history)) {
     lookup.add(tx);
     batchCandidates.set(tx, block);
   }
@@ -96,7 +96,7 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
     }
   }
   // Market payments can identify sellers absent from wallet-indexed events.
-  for (const log of cash) {
+  for (const log of incoming) {
     if (log.address !== USDC || log.topics[0] !== SIG.transfer || log.topics[2] !== recipient ||
       addr(log.topics[1]) !== MARKET || BigInt(log.data) <= 0n) continue;
     batchCandidates.delete(log.transactionHash);
@@ -109,7 +109,7 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
     topics: [[SIG.buyback, SIG.sold, SIG.offer, SIG.auction, SIG.kept, SIG.tokenReleased]] };
   const keptBlocks = [...kept].filter(([tx]) => covered.has(tx)).map(([, block]) => block);
   const hashes = [...lookup].filter(tx => !covered.has(tx));
-  const [raw, deferredLogs, activity, nftTransfers] = await Promise.all([
+  const [raw, deferredLogs, activity, nftTransfers, outgoingLogs] = await Promise.all([
     reader.batch(hashes.map(hash => ['eth_getTransactionReceipt', [hash]])),
     deferred ?? readWalletDeferredPayments(reader, wallet, addresses, from, to),
     Promise.all(windows.map(async ({from, to, hashes}) => {
@@ -118,7 +118,10 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
     })),
     keptBlocks.length ? getFilteredLogs(reader, { topics: [SIG.transfer, null, recipient] },
       Math.min(...keptBlocks), Math.max(...keptBlocks)) : [],
+    outgoing,
   ]);
+  const cash = [...incoming, ...outgoingLogs];
+  cash.forEach(addProof);
   deferredLogs.forEach(addProof);
   for (const log of nftTransfers) {
     if (log.topics.length === 4 && kept.has(log.transactionHash) && covered.has(log.transactionHash)) addProof(log);
@@ -156,5 +159,5 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
     syntheticReceipts.set(tx, receipt);
     records.set(tx, { tx, receipt });
   }
-  return { receipts: [...records.values()], deferred: deferredLogs, syntheticReceipts };
+  return { receipts: [...records.values()], deferred: deferredLogs, syntheticReceipts, cash };
 }
