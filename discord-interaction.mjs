@@ -1,7 +1,9 @@
 import { MessageFlags } from 'discord.js';
 
-export function createWalletHandler({ readPage, readSnapshot, reserveScan, renderPoster, formatReport, configured }) {
+export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanBlocked = async () => false,
+  recordScanFailure = async () => {}, renderPoster, formatReport, configured }) {
   let busy = false;
+  const failedWallets = new Map();
   return async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'wallet') return;
     const wallet = interaction.options.getString('address', true).trim().toLowerCase();
@@ -22,12 +24,24 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, rende
         await interaction.editReply({ content: formatReport(wallet, cached, note), files: [{ attachment: poster, name: 'wallet-report.png' }] });
         return;
       }
+      const today = new Date().toISOString().slice(0, 10);
+      for (const [key, day] of failedWallets) if (day !== today) failedWallets.delete(key);
+      if (failedWallets.has(wallet) || await scanBlocked(wallet)) {
+        await interaction.editReply('此錢包今天的掃描曾失敗，為避免重複消耗 API，暫停重試至 UTC 零點。已儲存的進度不受影響。'); return;
+      }
       await interaction.editReply('找不到已儲存報表，正在背景掃描歷史資料；本次消耗設有上限，請稍候。');
       for (let i = 0; i < 4; i++) {
         if (!await reserveScan()) {
           await interaction.editReply('今日背景掃描額度已用完；已完成的進度會保留，請於 UTC 零點後再試。'); return;
         }
-        const result = await readPage(wallet);
+        let result;
+        try { result = await readPage(wallet); }
+        catch (error) {
+          failedWallets.set(wallet, today);
+          try { await recordScanFailure(wallet); }
+          catch (recordError) { console.error('無法保存掃描保護狀態', recordError.code || recordError.name); }
+          throw error;
+        }
         if (result.ready) {
           const poster = renderPoster(wallet, result.snapshot, '');
           await interaction.editReply({ content: formatReport(wallet, result.snapshot, ''), files: [{ attachment: poster, name: 'wallet-report.png' }] }); return;
@@ -48,7 +62,9 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, rende
       detail = detail.replace(/(?:https?|postgres(?:ql)?):\/\/\S+/gi, '[redacted-url]');
       detail = detail.replace(/password\s*[=:]\s*\S+/gi, 'password=[redacted]');
       console.error('錢包查詢失敗', error.code || error.name, detail.slice(0, 300));
-      const message = '錢包查詢未完成，請稍後再試；若已有保存的掃描進度，將從上次進度繼續。';
+      const message = failedWallets.has(wallet)
+        ? '錢包掃描未完成。為避免重複消耗 API，這個錢包暫停掃描至 UTC 零點；若先前有保存進度，會從保存的位置繼續。'
+        : '錢包查詢未完成，請稍後再試；若已有保存的掃描進度，將從上次進度繼續。';
       if (interaction.deferred || interaction.replied) await interaction.editReply(message).catch(() => {});
       else await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
     } finally { busy = false; }

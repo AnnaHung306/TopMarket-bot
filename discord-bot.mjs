@@ -5,7 +5,7 @@ import { readWalletSnapshot, walletCachePage } from './worker/wallet-cache.js';
 import { formatReport } from './discord-report.mjs';
 import { renderPoster } from './discord-poster.mjs';
 import { createWalletHandler } from './discord-interaction.mjs';
-import { reserveScan, SCAN_MAX_UNITS, SCAN_BLOCK_WINDOW } from './discord-quota.mjs';
+import { reserveScan, scanBlocked, recordScanFailure, SCAN_MAX_UNITS, SCAN_BLOCK_WINDOW } from './discord-quota.mjs';
 
 try { loadEnvFile(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 for (const key of ['DISCORD_TOKEN', 'DISCORD_CLIENT_ID']) {
@@ -27,6 +27,8 @@ client.on('interactionCreate', createWalletHandler({
   readSnapshot: address => readWalletSnapshot(database(), address),
   readPage: address => walletCachePage(database(), address, undefined, { maxUnits: SCAN_MAX_UNITS, maxMs: 120_000, blockWindow: SCAN_BLOCK_WINDOW }),
   reserveScan: () => reserveScan(database()),
+  scanBlocked: address => scanBlocked(database(), address),
+  recordScanFailure: address => recordScanFailure(database(), address),
   renderPoster, formatReport,
   configured: () => Boolean(process.env.ALCHEMY_API_KEY?.trim() && process.env.DATABASE_URL?.trim()),
 }));

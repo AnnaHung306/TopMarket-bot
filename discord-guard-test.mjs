@@ -7,7 +7,36 @@ function interaction(address) {
     async reply(payload) { this.replied = true; this.first = payload; this.ackAt = performance.now(); },
     async editReply(payload) { edits.push(payload); } };
 }
+
 const wallet='0x'+'a'.repeat(40), snapshot={ through: 99 };
+
+// A failed scan is recorded across handler restarts; checking the cached
+// snapshot must still work and consume no scan quota.
+let blocked = false, reads = 0, reserved = 0, hasSnapshot = false;
+const options = {
+  configured: () => true,
+  readSnapshot: async () => hasSnapshot ? snapshot : null,
+  scanBlocked: async () => blocked,
+  recordScanFailure: async () => { blocked = true; },
+  reserveScan: async () => { reserved++; return true; },
+  readPage: async () => { reads++; throw Error('simulated upstream failure'); },
+  renderPoster: () => Buffer.from('PNG'), formatReport: () => '摘要',
+};
+const originalError = console.error; console.error = () => {};
+try {
+  await createWalletHandler(options)(interaction(wallet));
+  const retry = interaction(wallet);
+  await createWalletHandler(options)(retry);
+  assert.equal(reads, 1);
+  assert.equal(reserved, 1);
+  assert.match(retry.edits.at(-1), /暫停重試/);
+  hasSnapshot = true;
+  const cached = interaction(wallet);
+  await createWalletHandler(options)(cached);
+  assert.equal(cached.edits.at(-1).files[0].name, 'wallet-report.png');
+  assert.equal(reserved, 1);
+} finally { console.error = originalError; }
+console.log('PASS persistent failure protection and cached report');
 for (let iteration=0; iteration<10; iteration++) {
   let scans=0, reservations=0;
   const test = interaction(iteration===0 ? 'invalid' : wallet);
