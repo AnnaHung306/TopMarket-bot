@@ -48,7 +48,7 @@ export function renderPoster(wallet, snapshot, note = '') {
   const notices = [];
   if (pending) notices.push(`${pending} 筆事件待核對，未計入已核實金額`);
   if (!totals.raffleKnown || snapshot.rebuildRequired) notices.push('舊版摘要，部分分類待更新');
-  if (note) notices.push('更新未完成，顯示先前已存摘要');
+  if (note) notices.push(note.includes('未自動') ? '已存摘要，未自動更新' : '更新未完成，顯示先前已存摘要');
   text(notices.join('　·　') || '僅統計可識別鏈上活動，不含持倉估值', 100, 1392, 18, '#a8bdc3', 'left', 1000);
   return canvas.toBuffer('image/png');
 }

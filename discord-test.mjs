@@ -25,10 +25,10 @@ assert.ok(image.length > 10000);
 const responses = [];
 const interaction = {
   isChatInputCommand: () => true, commandName: 'wallet', options: { getString: () => wallet },
-  async deferReply(options) { this.deferred = true; responses.push(options); },
+  async reply(options) { this.replied = true; responses.push(options); },
   async editReply(content) { responses.push(content); },
 };
-const handler = createWalletHandler({ readPage: async () => ({ ready: true, cached: false, snapshot: updated }), getReport, renderPoster, formatReport, configured: () => true });
+const handler = createWalletHandler({ readSnapshot: async () => updated, reserveScan: async () => { throw Error('cache must not consume quota'); }, readPage: async () => { throw Error('cache must not call RPC'); }, renderPoster, formatReport, configured: () => true });
 await handler(interaction);
 assert.equal(responses[0].flags, 64);
 assert.match(responses[1].content, /3\.765433 USDC/);

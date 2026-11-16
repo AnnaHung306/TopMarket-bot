@@ -81,7 +81,16 @@ async function begin(reader, previous) {
   };
 }
 
-export async function walletCachePage(sql, wallet, afterBlock) {
+export async function readWalletSnapshot(sql, wallet) {
+  const state = await stateFor(sql, wallet).catch(error => {
+    if (error.code === '42P01') return null;
+    throw error;
+  });
+  const snapshot = readable(state?.snapshot);
+  return snapshot ? fromCache(snapshot, wallet).snapshot : null;
+}
+
+export async function walletCachePage(sql, wallet, afterBlock, options = {}) {
   const first = await stateFor(sql, wallet).catch(error => {
     if (error.code === '42P01') return null;
     throw error;
@@ -97,7 +106,7 @@ export async function walletCachePage(sql, wallet, afterBlock) {
       throw Error('Wallet refresh must start from its current saved checkpoint');
     }
     const reader = alchemy({
-      maxUnits: WALLET_PARALLEL_PAGES * 120_000, maxMs: 600_000, perSecond: 200, maxInFlight: 4, beforeRequest: assertLock,
+      maxUnits: options.maxUnits ?? WALLET_PARALLEL_PAGES * 120_000, maxMs: options.maxMs ?? 600_000, perSecond: 200, maxInFlight: 4, beforeRequest: assertLock,
     });
     const previous = saved?.version === CACHE_VERSION ? saved : null;
     const savedDraft = current.draft?.version === CACHE_VERSION ? current.draft : null;
@@ -111,7 +120,8 @@ export async function walletCachePage(sql, wallet, afterBlock) {
       return { ...fromCache(updated, wallet, reader.stats), cached: updated === saved };
     }
     const covered = await fillRaffleTotals(draft, wallet, reader);
-    const page = await directWalletReportBatch(wallet, covered.through + 1, covered.target, reader);
+    const end = options.blockWindow ? Math.min(covered.target, covered.through + options.blockWindow) : covered.target;
+    const page = await directWalletReportBatch(wallet, covered.through + 1, end, reader);
     const { snapshot: next, campaignPayouts } = reconcileCampaign({
       ...covered, through: page.to,
       totals: addWalletTotals(covered.totals, summarizeWalletEvents(page.events)),
