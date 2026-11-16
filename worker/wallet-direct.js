@@ -2,13 +2,15 @@ import { addr, boxes, decode, decodeReward, hex, MARKET, SIG, STAKE, USDC, word 
 import { activeAuction, alchemy, callKey, callRecord, evidencePlan, getFilteredLogs } from './history/chain.js';
 import { settleRecordedWallet } from './history/report.js';
 import { campaignPayoutEvents } from './history/campaign-payouts.js';
-import { raffleEvents, readRaffleLogs } from './history/raffle.js';
+import { RAFFLE_CONTRACT, RAFFLE_SHARES_BOUGHT, raffleEvents, readRaffleLogs } from './history/raffle.js';
 import { treasuryStaking } from './history/treasury-staking.js';
-import { walletEvidence } from './history/wallet-evidence.js';
+import { readWalletDeferredPayments, readWalletDrawSources, walletEvidence } from './history/wallet-evidence.js';
 import { readWalletHistoricalCalls, walletStateHistory } from './history/wallet-state.js';
 
 export const WALLET_HISTORY_START = 50634768;
 const WALLET_PAGE_LOGS = 2_000;
+const WALLET_PAGE_INCOMING = 800;
+export const WALLET_PARALLEL_PAGES = 6;
 const TRANSFER_PAGE = '0x3e8';
 const DISCOVERY_CACHE_TTL = 120_000;
 const DISCOVERY_CACHE_ENTRIES = 4;
@@ -47,6 +49,32 @@ function selectPage(logs, from, to, limit = WALLET_PAGE_LOGS) {
   if (logs.length <= limit) return to;
   const boundary = logs.map(log => Number(log.blockNumber)).sort((a, b) => a - b)[limit];
   return Math.max(from, boundary);
+}
+
+function isRelevantIncoming(log, history, from, through) {
+  const block = Number(log.blockNumber);
+  const payer = addr(log.topics[1]);
+  return block >= from && block <= through && (history.isTreasury(payer, block) || payer === MARKET);
+}
+
+function canReuseDiscovery(discovery, from) {
+  const { activity, expires, limited } = discovery;
+  if (expires <= performance.now() || from < discovery.from || from > activity.through) return false;
+  if (!limited) return true;
+  // A partial cache is sufficient only if a complete block within it sets the next page boundary.
+  return activity.direct.filter(log => Number(log.blockNumber) >= from).length > WALLET_PAGE_LOGS ||
+    discovery.incoming.filter(log => isRelevantIncoming(log, activity.history, from, activity.through)).length > WALLET_PAGE_INCOMING;
+}
+
+function limitDiscoveryCache(discovery) {
+  const { activity, incoming, outgoing, raffles } = discovery;
+  const groups = [activity.direct, incoming, outgoing, raffles];
+  if (groups.reduce((count, logs) => count + logs.length, 0) <= DISCOVERY_CACHE_LOGS) return discovery;
+  const blocks = groups.flatMap(logs => logs.map(log => Number(log.blockNumber))).sort((a, b) => a - b);
+  const through = blocks[DISCOVERY_CACHE_LOGS] - 1;
+  const within = log => Number(log.blockNumber) <= through;
+  return { ...discovery, limited: true, activity: { ...activity, through, direct: activity.direct.filter(within) },
+    incoming: incoming.filter(within), outgoing: outgoing.filter(within), raffles: raffles.filter(within) };
 }
 
 async function contractsAt(reader, block) {
@@ -103,7 +131,34 @@ export async function directWalletHead(reader = alchemy({ maxUnits: 3_000 })) {
     contracts, chainId: 8453, rpc: 'Alchemy Base Mainnet', directWallet: true, usage: reader.stats };
 }
 
-async function walletActivity(reader, wallet, from, to, contracts) {
+function outgoingPaymentLogs(reader, recipient, boxLogs, raffleLogs) {
+  let first = Infinity, last = -Infinity, hasDraws = false;
+  const addBlock = log => {
+    const block = Number(log.blockNumber);
+    first = Math.min(first, block);
+    last = Math.max(last, block);
+  };
+  for (const logs of boxLogs) {
+    for (const log of logs) {
+      if (log.topics[0] !== SIG.draw && log.topics[0] !== SIG.tokenDraw) continue;
+      hasDraws = true;
+      addBlock(log);
+    }
+  }
+  for (const log of raffleLogs) {
+    if (log.topics[0] === RAFFLE_SHARES_BOUGHT) addBlock(log);
+  }
+  if (first === Infinity) return [];
+  // Draw verification compares every USDC destination in the matched transaction.
+  const topics = hasDraws ? [SIG.transfer, recipient] : [SIG.transfer, recipient, word(RAFFLE_CONTRACT)];
+  return getFilteredLogs(reader, { address: USDC, topics }, first, last);
+}
+
+async function discoverWallet(reader, wallet, from, to, contracts, key) {
+  const cached = discoveryCache.get(key);
+  if (cached && canReuseDiscovery(cached, from)) {
+    return { shared: Promise.resolve(cached), outgoing: Promise.resolve(cached.outgoing) };
+  }
   const recipient = word(wallet);
   const [registered, outgoingCards] = await Promise.all([
     contracts ?? contractsAt(reader, hex(to)),
@@ -115,80 +170,142 @@ async function walletActivity(reader, wallet, from, to, contracts) {
   const getLogs = (address, topics) => Array.isArray(address) && address.length === 0
     ? Promise.resolve([])
     : getFilteredLogs(reader, { address, topics }, from, through);
-  const [history, ...batches] = await Promise.all([
-    configuration(reader, addresses, to),
+  const boxLogs = Promise.all([
     getLogs(addresses, [[SIG.draw, SIG.refund, SIG.rescue, SIG.kept, SIG.buyback, SIG.tokenBuyback], null, recipient]),
     getLogs(addresses, [[SIG.won, SIG.tokenDraw], null, null, recipient]),
+  ]);
+  const raffleLogs = readRaffleLogs(reader, wallet, from, through);
+  const outgoing = Promise.all([boxLogs, raffleLogs])
+    .then(([boxes, raffles]) => outgoingPaymentLogs(reader, recipient, boxes, raffles));
+  const shared = Promise.all([
+    configuration(reader, addresses, to),
+    getLogs(USDC, [SIG.transfer, null, recipient]),
+    raffleLogs,
+    boxLogs,
     getLogs(STAKE, [[SIG.staked, SIG.unstaked], null, null, recipient]),
     getLogs(MARKET, [[SIG.sold, SIG.offer], null, null, recipient]),
     getLogs(MARKET, [SIG.auction, null, recipient]),
-  ]);
-  const cardAddresses = new Set(registered.filter(contract => contract.type === 'card').map(contract => contract.address));
-  return { addresses, cardAddresses, history, outgoingCards, through, direct: batches.flat() };
-}
-
-async function discoverWallet(reader, wallet, from, to, contracts, key) {
-  const cached = discoveryCache.get(key);
-  if (cached?.expires > performance.now() && cached.from <= from && from <= cached.activity.through) {
-    return cached;
-  }
-  const recipient = word(wallet);
-  const cashLogs = topics => getFilteredLogs(reader, { address: USDC, topics }, from, to);
-  const [activity, incoming, outgoing, raffles] = await Promise.all([
-    walletActivity(reader, wallet, from, to, contracts),
-    cashLogs([SIG.transfer, null, recipient]),
-    cashLogs([SIG.transfer, recipient]),
-    readRaffleLogs(reader, wallet, from, to),
-  ]);
-  return { from, activity, incoming, outgoing, raffles, expires: performance.now() + DISCOVERY_CACHE_TTL };
-}
-
-export async function directWalletReport(wallet, from, to, reader = alchemy({ maxUnits: 120_000, maxMs: 240_000 }), contracts) {
-  const started = performance.now();
-  const key = JSON.stringify([wallet, to, contracts]);
-  const discovery = await discoverWallet(reader, wallet, from, to, contracts, key);
-  const { activity, incoming, outgoing, raffles } = discovery;
-  const { addresses, cardAddresses, history, outgoingCards } = activity;
-  const direct = activity.direct.filter(log => Number(log.blockNumber) >= from);
-  let { through } = activity;
-  const relevantIncoming = incoming.filter(log => {
-    const block = Number(log.blockNumber);
-    const payer = addr(log.topics[1]);
-    return block >= from && block <= through && (history.isTreasury(payer, block) || payer === MARKET);
+  ]).then(([history, incoming, raffles, boxEvents, ...marketAndStake]) => {
+    const cardAddresses = new Set(registered.filter(contract => contract.type === 'card').map(contract => contract.address));
+    const direct = [...boxEvents, ...marketAndStake].flat();
+    const activity = { addresses, cardAddresses, history, outgoingCards, through, direct };
+    return { from, activity, incoming, raffles, expires: performance.now() + DISCOVERY_CACHE_TTL };
   });
-  through = Math.min(selectPage(direct, from, through), selectPage(relevantIncoming, from, through, 800));
-  if (through < activity.through && activity.direct.length + incoming.length + outgoing.length + raffles.length <= DISCOVERY_CACHE_LOGS) {
+  return { shared, outgoing };
+}
+
+function walletPage(discovery, from) {
+  const { activity, incoming } = discovery;
+  const direct = activity.direct.filter(log => Number(log.blockNumber) >= from);
+  const { history, through } = activity;
+  const relevant = incoming.filter(log => isRelevantIncoming(log, history, from, through));
+  const end = Math.min(selectPage(direct, from, through), selectPage(relevant, from, through, WALLET_PAGE_INCOMING));
+  return { from, through: end, direct, discovery };
+}
+
+function rememberDiscovery(key, discovery, cacheable, through) {
+  if (cacheable && cacheable.activity.through > through) {
     discoveryCache.delete(key);
     if (discoveryCache.size >= DISCOVERY_CACHE_ENTRIES) discoveryCache.delete(discoveryCache.keys().next().value);
-    discoveryCache.set(key, discovery);
+    discoveryCache.set(key, cacheable);
   } else if (discoveryCache.get(key) === discovery) {
     discoveryCache.delete(key);
   }
-  const soldCards = (await outgoingThrough(reader, outgoingCards, wallet, through))
-    .filter(item => Number(item.blockNum) >= from);
-  const cash = [...incoming, ...outgoing].filter(log => {
-    const block = Number(log.blockNumber);
-    return block >= from && block <= through;
-  });
-  const updates = history.updates.filter(log => Number(log.blockNumber) >= from && Number(log.blockNumber) <= through);
-  const logs = new Map(direct.filter(log => Number(log.blockNumber) <= through)
-    .filter(log => log.topics[0] !== SIG.auction || activeAuction(log))
-    .map(log => [log.transactionHash + ':' + log.logIndex, log]));
-  const { receipts, deferred } = await walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, through);
+}
+
+async function settlementEvidence(reader, wallet, logs, cash, soldCards, activity, from, through, deferred) {
+  const { addresses, cardAddresses, history } = activity;
+  const proof = await walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, through, deferred);
   const related = [...logs.values()];
   const plan = evidencePlan(related, true);
-  const required = evidencePlan(logsWithPossibleProof(related, receipts, wallet), true).calls;
+  const required = evidencePlan(logsWithPossibleProof(related, proof.receipts, wallet), true).calls;
   const responses = await readWalletHistoricalCalls(reader, required, history);
   const historical = new Map(required.map((call, index) => [callKey(call[1]), responses[index]]));
   const calls = plan.calls.map(call => callRecord(call, historical.get(callKey(call[1])) ?? null));
+  return { ...proof, related, calls };
+}
+
+async function settleWalletPage(reader, wallet, { from, through, direct, discovery }, outgoing, deferred) {
+  const { activity, incoming, raffles } = discovery;
+  const { history, outgoingCards } = activity;
+  const inPage = log => {
+    const block = Number(log.blockNumber);
+    return block >= from && block <= through;
+  };
+  const updates = history.updates.filter(inPage);
+  const logs = new Map(direct.filter(log => Number(log.blockNumber) <= through)
+    .filter(log => log.topics[0] !== SIG.auction || activeAuction(log))
+    .map(log => [log.transactionHash + ':' + log.logIndex, log]));
+  const [sources, settlement] = await Promise.allSettled([
+    readWalletDrawSources(reader, logs, from, through),
+    Promise.all([outgoing, outgoingThrough(reader, outgoingCards, wallet, through)])
+      .then(async ([paid, cards]) => {
+        const cash = [...incoming, ...paid].filter(inPage);
+        const soldCards = cards.filter(item => Number(item.blockNum) >= from);
+        const pageDeferred = deferred.then(logs => logs.filter(inPage));
+        const proof = await settlementEvidence(reader, wallet, logs, cash, soldCards, activity, from, through, pageDeferred);
+        return { ...proof, cash };
+      }),
+  ]);
+  if (sources.status === 'rejected') throw sources.reason;
+  if (settlement.status === 'rejected') throw settlement.reason;
+  const { receipts, deferred: deferredLogs, syntheticReceipts, related, calls, cash } = settlement.value;
+  for (const log of sources.value) syntheticReceipts.get(log.transactionHash)?.logs.push(log);
   const { events, warnings } = await settleRecordedWallet(wallet, related, receipts, calls, updates, true);
   const used = new Set(events.map(event => event.id));
-  const raffleLogs = raffles.filter(log => Number(log.blockNumber) >= from && Number(log.blockNumber) <= through);
+  const raffleLogs = raffles.filter(inPage);
   for (const event of [...raffleEvents(wallet, raffleLogs, cash), ...campaignPayoutEvents(wallet, cash)]) {
     if (used.has(event.id)) continue;
     events.push(event);
     used.add(event.id);
   }
-  events.push(...treasuryStaking(wallet, cash, events, deferred, history.isTreasury));
-  return { from, to: through, events, warnings, seconds: (performance.now() - started) / 1_000 };
+  events.push(...treasuryStaking(wallet, cash, events, deferredLogs, history.isTreasury));
+  return { from, to: through, events, warnings };
+}
+
+async function directWalletReports(wallet, from, to, reader, contracts, maxPages) {
+  const started = performance.now();
+  const key = JSON.stringify([wallet, to, contracts]);
+  const { shared, outgoing } = await discoverWallet(reader, wallet, from, to, contracts, key);
+  const settledPages = shared.then(async discovery => {
+    const pages = [walletPage(discovery, from)];
+    // The cache limit applies when retaining discovery for another request.
+    while (pages.length < maxPages) {
+      const next = pages.at(-1).through + 1;
+      if (!canReuseDiscovery(discovery, next)) break;
+      pages.push(walletPage(discovery, next));
+    }
+    const deferred = Promise.resolve(readWalletDeferredPayments(reader, wallet, discovery.activity.addresses, from, pages.at(-1).through));
+    const [paymentState, ...results] = await Promise.allSettled([
+      deferred,
+      ...pages.map(page => settleWalletPage(reader, wallet, page, outgoing, deferred)),
+    ]);
+    if (paymentState.status === 'rejected') throw paymentState.reason;
+    return { discovery, results };
+  });
+  const [settled, payments] = await Promise.allSettled([settledPages, outgoing]);
+  if (settled.status === 'rejected') throw settled.reason;
+  if (payments.status === 'rejected') throw payments.reason;
+  const { discovery, results } = settled.value;
+  const failure = results.findIndex(result => result.status === 'rejected');
+  if (failure === 0) throw results[0].reason;
+  // Only a consecutive prefix can move the checkpoint past a failed page.
+  const complete = results.slice(0, failure === -1 ? results.length : failure).map(result => result.value);
+  const through = complete.at(-1).to;
+  const reusable = limitDiscoveryCache({ ...discovery, outgoing: payments.value });
+  rememberDiscovery(key, discovery, reusable, through);
+  return {
+    from, to: through,
+    events: complete.flatMap(page => page.events),
+    warnings: complete.flatMap(page => page.warnings),
+    seconds: (performance.now() - started) / 1_000,
+  };
+}
+
+export function directWalletReport(wallet, from, to, reader = alchemy({ maxUnits: 120_000, maxMs: 240_000 }), contracts) {
+  return directWalletReports(wallet, from, to, reader, contracts, 1);
+}
+
+export function directWalletReportBatch(wallet, from, to, reader, contracts) {
+  return directWalletReports(wallet, from, to, reader, contracts, WALLET_PARALLEL_PAGES);
 }

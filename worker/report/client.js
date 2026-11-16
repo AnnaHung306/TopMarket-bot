@@ -173,7 +173,7 @@ async function readWalletCache(report, afterBlock, previous) {
       if (evidenceEnd !== undefined && data.page.from !== evidenceEnd + 1) contiguous = false;
       report.evidenceFrom ??= data.page.from;
       report.evidenceThrough = evidenceEnd = data.page.to;
-      report.events.push(...data.page.events);
+      for (const event of data.page.events) report.events.push(event);
       report.warnings.push(...(data.page.warnings || []));
     }
     if (data.ready) {

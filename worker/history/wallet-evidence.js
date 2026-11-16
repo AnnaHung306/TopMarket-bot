@@ -54,10 +54,23 @@ function repeatedTreasuryPayouts(wallet, recipient, logs, cash, history) {
   return candidates;
 }
 
-export async function walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, to) {
+export function readWalletDrawSources(reader, logs, from, to) {
+  const draws = [...logs.values()].filter(log => log.topics[0] === SIG.draw);
+  if (!draws.length) return [];
+  return getFilteredLogs(reader, {
+    address: [...new Set(draws.map(log => log.address))],
+    topics: [SIG.requestVia, [...new Set(draws.map(log => log.topics[1]))]],
+  }, from, to);
+}
+
+export function readWalletDeferredPayments(reader, wallet, addresses, from, to) {
+  if (!addresses.length) return [];
+  return getFilteredLogs(reader, { address: addresses, topics: [SIG.payoutDeferred, word(wallet)] }, from, to);
+}
+
+export async function walletEvidence(reader, wallet, logs, cash, soldCards, addresses, cardAddresses, history, from, to, deferred) {
   const recipient = word(wallet);
   const sources = new Set(addresses);
-  const draws = [...logs.values()].filter(log => log.topics[0] === SIG.draw);
   const byTx = new Map();
   function addProof(log) {
     const group = byTx.get(log.transactionHash) ?? new Map();
@@ -96,13 +109,9 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
     topics: [[SIG.buyback, SIG.sold, SIG.offer, SIG.auction, SIG.kept, SIG.tokenReleased]] };
   const keptBlocks = [...kept].filter(([tx]) => covered.has(tx)).map(([, block]) => block);
   const hashes = [...lookup].filter(tx => !covered.has(tx));
-  const [raw, deferred, requests, activity, nftTransfers] = await Promise.all([
+  const [raw, deferredLogs, activity, nftTransfers] = await Promise.all([
     reader.batch(hashes.map(hash => ['eth_getTransactionReceipt', [hash]])),
-    addresses.length ? getFilteredLogs(reader, { address: addresses, topics: [SIG.payoutDeferred, recipient] }, from, to) : [],
-    draws.length ? getFilteredLogs(reader, {
-      address: [...new Set(draws.map(log => log.address))],
-      topics: [SIG.requestVia, [...new Set(draws.map(log => log.topics[1]))]],
-    }, from, to) : [],
+    deferred ?? readWalletDeferredPayments(reader, wallet, addresses, from, to),
     Promise.all(windows.map(async ({from, to, hashes}) => {
       const found = await getFilteredLogs(reader, activityFilter, from, to);
       return found.filter(log => hashes.has(log.transactionHash));
@@ -110,7 +119,7 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
     keptBlocks.length ? getFilteredLogs(reader, { topics: [SIG.transfer, null, recipient] },
       Math.min(...keptBlocks), Math.max(...keptBlocks)) : [],
   ]);
-  [...deferred, ...requests].forEach(addProof);
+  deferredLogs.forEach(addProof);
   for (const log of nftTransfers) {
     if (log.topics.length === 4 && kept.has(log.transactionHash) && covered.has(log.transactionHash)) addProof(log);
   }
@@ -138,11 +147,14 @@ export async function walletEvidence(reader, wallet, logs, cash, soldCards, addr
   }
   raw.forEach(receipt => receipt.logs.forEach(addActivity));
   activity.forEach(group => group.forEach(addActivity));
+  const syntheticReceipts = new Map();
   for (const tx of evidencePlan([...logs.values()], true).receipts) {
     if (records.has(tx)) continue;
     // Canonical finalized logs are emitted by successful transactions. Supply
     // only the log types consumed by settlement, without fetching a receipt.
-    records.set(tx, { tx, receipt: { status: '0x1', logs: [...(byTx.get(tx)?.values() ?? [])] } });
+    const receipt = { status: '0x1', logs: [...(byTx.get(tx)?.values() ?? [])] };
+    syntheticReceipts.set(tx, receipt);
+    records.set(tx, { tx, receipt });
   }
-  return { receipts: [...records.values()], deferred };
+  return { receipts: [...records.values()], deferred: deferredLogs, syntheticReceipts };
 }

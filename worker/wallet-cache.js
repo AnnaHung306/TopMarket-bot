@@ -4,7 +4,7 @@ import { campaignPayoutsInRange } from './history/campaign-payouts.js';
 import { readRaffleHistory } from './history/raffle.js';
 import { withWalletLock } from './history/refresh.js';
 import { addWalletTotals, summarizeWalletEvents } from './report/accounting.js';
-import { directWalletReport, finalizedWalletBlock, WALLET_HISTORY_START } from './wallet-direct.js';
+import { directWalletReportBatch, finalizedWalletBlock, WALLET_HISTORY_START, WALLET_PARALLEL_PAGES } from './wallet-direct.js';
 
 const CACHE_VERSION = 3;
 const LEGACY_CACHE_VERSION = 2;
@@ -96,7 +96,9 @@ export async function walletCachePage(sql, wallet, afterBlock) {
     if (afterBlock !== undefined && (!saved || afterBlock !== saved.through)) {
       throw Error('Wallet refresh must start from its current saved checkpoint');
     }
-    const reader = alchemy({ maxUnits: 120_000, maxMs: 240_000, beforeRequest: assertLock });
+    const reader = alchemy({
+      maxUnits: WALLET_PARALLEL_PAGES * 120_000, maxMs: 240_000, maxInFlight: 24, beforeRequest: assertLock,
+    });
     const previous = saved?.version === CACHE_VERSION ? saved : null;
     const savedDraft = current.draft?.version === CACHE_VERSION ? current.draft : null;
     const draft = savedDraft || await begin(reader, previous);
@@ -109,7 +111,7 @@ export async function walletCachePage(sql, wallet, afterBlock) {
       return { ...fromCache(updated, wallet, reader.stats), cached: updated === saved };
     }
     const covered = await fillRaffleTotals(draft, wallet, reader);
-    const page = await directWalletReport(wallet, covered.through + 1, covered.target, reader);
+    const page = await directWalletReportBatch(wallet, covered.through + 1, covered.target, reader);
     const { snapshot: next, campaignPayouts } = reconcileCampaign({
       ...covered, through: page.to,
       totals: addWalletTotals(covered.totals, summarizeWalletEvents(page.events)),

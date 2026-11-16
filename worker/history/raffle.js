@@ -8,6 +8,7 @@ const sharesBought = '0x846b419737e4796baa1e2f5ea7b76571d256eac56d566c44767ee2c4
 const boughtBack = '0xd04674a07f53a70d82fa6f13a59443dcc4ccd58f8b504604dd61e5982c91f9e3';
 const refundClaimed = '0xf3f402280ef0a7905e124aa621b65eaeb2725c343e8b36d398ed78c29daf285c';
 const prizeClaimed = '0xbfb36529287d5a1dcbfbbc958f0a7337a1f5bca269edc737da0be1be702f2251';
+export { raffle as RAFFLE_CONTRACT, sharesBought as RAFFLE_SHARES_BOUGHT };
 const categories = {
   [sharesBought]: 'raffle-participation',
   [boughtBack]: 'raffle-income',
