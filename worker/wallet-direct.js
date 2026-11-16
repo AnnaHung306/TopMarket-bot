@@ -86,13 +86,13 @@ async function contractsAt(reader, block) {
 }
 
 async function configuration(reader, addresses, to) {
-  const key = hex(to) + ':' + addresses.join(',');
-  if (configSnapshot?.key !== key) {
-    const history = await walletStateHistory(reader, addresses, WALLET_HISTORY_START, to);
-    if (addresses.length && !history.payers.size) throw Error('Top.Market treasury could not be identified at the wallet snapshot');
-    configSnapshot = { key, history };
-  }
-  return configSnapshot.history;
+  const key = addresses.join(',');
+  if (configSnapshot?.key === key && configSnapshot.history.through === to) return configSnapshot.history;
+  const previous = configSnapshot?.key === key && configSnapshot.history.through < to ? configSnapshot.history : null;
+  const history = await walletStateHistory(reader, addresses, WALLET_HISTORY_START, to, previous);
+  if (addresses.length && !history.payers.size) throw Error('Top.Market treasury could not be identified at the wallet snapshot');
+  configSnapshot = { key, history };
+  return history;
 }
 
 function logsWithPossibleProof(logs, receipts, wallet) {
