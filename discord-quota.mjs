@@ -2,7 +2,9 @@
 // persists across restarts and is deliberately charged even for failed scans.
 export const SCAN_MAX_UNITS = 25000;
 export const DAILY_SCAN_LIMIT = 4;
-export const SCAN_BLOCK_WINDOW = 10000;
+// PAYG has no fixed eth_getLogs block-range cap on Base. The request budget,
+// deadline, result-size splitting, and daily reservations remain in force.
+export const SCAN_BLOCK_WINDOW = null;
 
 async function ensureFailures(sql) {
   await sql`CREATE TABLE IF NOT EXISTS discord_scan_failures (
