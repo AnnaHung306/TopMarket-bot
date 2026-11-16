@@ -12,12 +12,16 @@ const signatures = {
 const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_getStorageAt: 20, eth_chainId: 0, eth_getBlockByNumber: 20, alchemy_getAssetTransfers: 120 };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infinity, beforeRequest = () => {} } = {}) {
+export function alchemy({
+  maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infinity, maxInFlight = Infinity, beforeRequest = () => {},
+} = {}) {
   if (!process.env.ALCHEMY_API_KEY?.trim()) throw Error('Alchemy Base RPC is not configured');
   const stats = { units: 0, requests: 0, retries: 0, splits: 0, methods: {} };
   const deadline = performance.now() + maxMs;
   let nextTime = 0;
-  async function request(payload, methods) {
+  let active = 0;
+  const waiting = [];
+  async function send(payload, methods) {
     const cost = methods.reduce((sum, method) => sum + (units[method] ?? 80), 0);
     for (let attempt = 0; ; attempt++) {
       beforeRequest();
@@ -37,6 +41,18 @@ export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infin
         stats.retries++;
         await delay(500 * (2 ** attempt));
       }
+    }
+  }
+
+  async function request(payload, methods) {
+    if (active >= maxInFlight) await new Promise(resolve => waiting.push(resolve));
+    else active++;
+    try {
+      return await send(payload, methods);
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
     }
   }
 
@@ -67,7 +83,7 @@ export function alchemy({ maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infin
     }
     return results;
   }
-  return { rpc, batch, stats };
+  return { rpc, batch, stats, parallelLogSplits: Number.isFinite(maxInFlight) };
 }
 
 export async function getFilteredLogs(reader, filter, from, to) {
@@ -79,7 +95,16 @@ export async function getFilteredLogs(reader, filter, from, to) {
     if (from === to || !/log response size|more than [0-9,]+ (?:results|logs)|block range should work|response (?:is too large|size exceeded)|exceed(?:s|ed) (?:the )?max(?:imum)? (?:block|log)/i.test(error.message)) throw error;
     reader.stats.splits++;
     const mid = Math.floor((from + to) / 2);
-    return [...await getFilteredLogs(reader, filter, from, mid), ...await getFilteredLogs(reader, filter, mid + 1, to)];
+    if (!reader.parallelLogSplits) {
+      return [...await getFilteredLogs(reader, filter, from, mid), ...await getFilteredLogs(reader, filter, mid + 1, to)];
+    }
+    const results = await Promise.allSettled([
+      getFilteredLogs(reader, filter, from, mid),
+      getFilteredLogs(reader, filter, mid + 1, to),
+    ]);
+    const failed = results.find(result => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    return results.flatMap(result => result.value);
   }
 }
 

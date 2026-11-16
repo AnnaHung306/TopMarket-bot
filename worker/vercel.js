@@ -8,6 +8,29 @@ import { directWalletHead, directWalletReport, finalizedWalletBlock, WALLET_HIST
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
 
+function walletCacheResponse(result) {
+  const status = result.ready ? 200 : 202;
+  if (!result.page) return json(result, status);
+  const { page, ...summary } = result;
+  const { events, ...range } = page;
+  function* chunks() {
+    yield JSON.stringify(summary).slice(0, -1) + ',"page":' + JSON.stringify(range).slice(0, -1) + ',"events":[';
+    for (let offset = 0; offset < events.length; offset += 256) {
+      yield (offset ? ',' : '') + JSON.stringify(events.slice(offset, offset + 256)).slice(1, -1);
+    }
+    yield ']}}';
+  }
+  const body = chunks();
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream({
+    pull(controller) {
+      const { value, done } = body.next();
+      if (done) controller.close();
+      else controller.enqueue(encoder.encode(value));
+    },
+  }), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -26,7 +49,7 @@ export default {
           return json({ error: '錢包快取參數無效' }, 400);
         }
         const result = await walletCachePage(database(), body.wallet.toLowerCase(), body.afterBlock);
-        return json(result, result.ready ? 200 : 202);
+        return walletCacheResponse(result);
       }
       if (!process.env.ALCHEMY_API_KEY?.trim()) return json({ error: 'Alchemy Base RPC 尚未設定' }, 503);
       if (url.pathname === '/api/init' && request.method === 'GET') return json(await directWalletHead());
