@@ -2,7 +2,7 @@
 
 ## Discord 機器人
 
-機器人提供 `/wallet address:錢包地址`，回覆只有發出指令的人看得到。它先讀取已存摘要，接著核對至最新已最終確認區塊；首次掃描可能需要較長時間，進度會存入資料庫。報表只包含可識別的收支，不包含持倉估值。為控制鏈上查詢量，同一個機器人程序一次處理一個查詢。
+機器人提供 `/wallet address:錢包地址`，直接在 Discord 回覆收支摘要與 PNG 海報，回覆只有發出指令的人看得到，無需開啟網站。它先讀取已存摘要，接著核對至最新已最終確認區塊；首次掃描可能需要較長時間，進度會存入資料庫。報表只包含可識別的收支，不包含持倉估值。為控制鏈上查詢量，同一個機器人程序一次處理一個查詢。
 
 需要 Node.js 22+、Discord Bot、Alchemy Base API key，以及 PostgreSQL 資料庫。使用 Railway PostgreSQL 時設定 `DATABASE_DRIVER=postgres` 並將 `DATABASE_URL` 指向資料庫服務；未設定此選項時沿用 Neon。設定 `DISCORD_TOKEN`、`DISCORD_CLIENT_ID`、`ALCHEMY_API_KEY`、`DATABASE_URL`；可選 `DISCORD_GUILD_ID`，讓指令在指定伺服器較快出現。Token 與資料庫連線字串應保存為 Railway 變數，切勿提交或貼在公開訊息中。
 
