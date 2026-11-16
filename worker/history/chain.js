@@ -9,7 +9,7 @@ const signatures = {
   stake: [SIG.staked, SIG.unstaked],
 };
 
-const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_getStorageAt: 20, eth_chainId: 0, eth_getBlockByNumber: 20, alchemy_getAssetTransfers: 120 };
+const units = { eth_call: 26, eth_getLogs: 75, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_getStorageAt: 20, eth_chainId: 0, eth_getBlockByNumber: 20, alchemy_getAssetTransfers: 120 };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function alchemy({
@@ -37,9 +37,9 @@ export function alchemy({
       try {
         return await rpcRequest(payload);
       } catch (error) {
-        if (attempt === 2 || ![429, 500, 502, 503, 504].includes(error.status)) throw error;
+        if (attempt === 5 || ![429, 500, 502, 503, 504].includes(error.status)) throw error;
         stats.retries++;
-        await delay(500 * (2 ** attempt));
+        await delay(Math.min(1000 * (2 ** attempt), 16000) + Math.floor(Math.random() * 250));
       }
     }
   }
@@ -64,7 +64,7 @@ export function alchemy({
 
   async function batch(calls, allowReverts = false) {
     const chunks = [];
-    for (let i = 0; i < calls.length; i += 25) chunks.push(calls.slice(i, i + 25));
+    for (let i = 0; i < calls.length; i += 8) chunks.push(calls.slice(i, i + 8));
     const results = [];
     for (let i = 0; i < chunks.length; i += 8) {
       const pages = await Promise.all(chunks.slice(i, i + 8).map(async chunk => {

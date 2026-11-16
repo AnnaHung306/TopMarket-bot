@@ -31,7 +31,7 @@ export function createWalletHandler({ readPage, getReport, renderPoster, formatR
       detail = detail.replace(/(?:https?|postgres(?:ql)?):\/\/\S+/gi, '[redacted-url]');
       detail = detail.replace(/password\s*[=:]\s*\S+/gi, 'password=[redacted]');
       console.error('錢包查詢失敗', error.code || error.name, detail.slice(0, 300));
-      const message = '錢包查詢未完成，請稍後再試；已保存的掃描進度可繼續使用。';
+      const message = '錢包查詢未完成，請稍後再試；若已有保存的掃描進度，將從上次進度繼續。';
       if (interaction.deferred || interaction.replied) await interaction.editReply(message).catch(() => {});
       else await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
     } finally { busy = false; }
