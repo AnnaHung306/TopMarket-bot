@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node discord-bot.mjs",
+    "test:discord": "node discord-test.mjs",
     "dev": "node dev.mjs",
     "test": "node test.mjs && node integration-test.mjs && node refund-test.mjs && node treasury-integration-test.mjs && node export-test.mjs && node rewards-cost-test.mjs && node acquisition-integration-test.mjs && node output-consistency-test.mjs",
     "build": "bash scripts/build.sh",
@@ -10,6 +12,7 @@
     "sync:history": "node scripts/sync-history.mjs"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.2.0"
+    "@neondatabase/serverless": "^1.2.0",
+    "discord.js": "^14.28.1"
   }
 }

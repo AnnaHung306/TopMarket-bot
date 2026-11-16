@@ -1,5 +1,17 @@
 # Top.Market Wallet Report
 
+## Discord 機器人
+
+機器人提供 `/wallet address:錢包地址`，回覆只有發出指令的人看得到。它先讀取已存摘要，接著核對至最新已最終確認區塊；首次掃描可能需要較長時間，進度會存入資料庫。報表只包含可識別的收支，不包含持倉估值。為控制鏈上查詢量，同一個機器人程序一次處理一個查詢。
+
+需要 Node.js 22+、Discord Bot、Alchemy Base API key，以及可供 Neon serverless driver 連線的 Neon Postgres 資料庫。設定 `DISCORD_TOKEN`、`DISCORD_CLIENT_ID`、`ALCHEMY_API_KEY`、`DATABASE_URL`；可選 `DISCORD_GUILD_ID`，讓指令在指定伺服器較快出現。Token 與資料庫連線字串應保存為 Railway 變數，切勿提交或貼在公開訊息中。
+
+1. 在 Discord Developer Portal 建立 Application 與 Bot，取得 Application ID 和 Bot Token。使用 OAuth2 URL Generator 勾選 `bot` 和 `applications.commands`，將機器人邀請到伺服器。這個機器人不需要訊息內容等 privileged intents。
+2. 在 Railway 建立從本儲存庫部署的服務，設定上述變數。Railway 使用 `npm start` 執行常駐程序；請維持單一實例。資料庫使用 Neon，並提供其 `DATABASE_URL`。不需要公開網域或 HTTP 服務。
+3. 等待部署成功，在 Discord 輸入 `/wallet` 並填入 Base 地址。若使用全域指令，Discord 的指令同步可能需要一些時間。
+
+本機執行：複製 `.env.example` 為 `.env` 並填入設定，然後執行 `npm ci` 和 `npm start`。停止程序可按 Ctrl+C。執行 `npm run test:discord` 測試報表格式與快取更新流程。
+
 請先閱讀 [CONTRACTS-DATA.md](CONTRACTS-DATA.md)。需要 Node.js 22+。
 
 ```sh
