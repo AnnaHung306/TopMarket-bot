@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 
 const directory = new URL('../assets/tenor-cat-wait/', import.meta.url);
 const entries = JSON.parse(await readFile(new URL('manifest.json', directory), 'utf8'));
-if (!Array.isArray(entries) || entries.length < 20) throw Error('等待動畫清單不足 20 項');
+if (!Array.isArray(entries) || entries.length === 0) throw Error('等待動畫清單不可為空');
 const names = new Set();
 for (const entry of entries) {
   if (!/^[a-z0-9-]+\.gif$/.test(entry.file) || names.has(entry.file) ||

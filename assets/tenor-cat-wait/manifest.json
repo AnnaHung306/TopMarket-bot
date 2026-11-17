@@ -7,13 +7,6 @@
     "sha256": "1ea9121300d28c07be7ff05d006ee3f9111bf9a6ed9e1323203e060f5bb8eebc"
   },
   {
-    "file": "cat-02.gif",
-    "source": "https://tenor.com/zh-TW/view/cat-pc-gif-7268173458416888836",
-    "license": "未確認",
-    "bytes": 124775,
-    "sha256": "842d0bd65a57010978cf9c50704081a2e9c6667fbd7b05d3a768ead191fb3c81"
-  },
-  {
     "file": "cat-03.gif",
     "source": "https://tenor.com/zh-TW/view/aa-aaa-aah-scream-screaming-cat-gif-693344121160663519",
     "license": "未確認",
@@ -35,20 +28,6 @@
     "sha256": "7b3485c5dce880eeb44dc56d1c7fb348cf59c93a4c77dd9335ff8cb6741da5e8"
   },
   {
-    "file": "cat-08.gif",
-    "source": "https://tenor.com/zh-TW/view/cat-typing-fast-typing-gif-14177119913605598677",
-    "license": "未確認",
-    "bytes": 445121,
-    "sha256": "92ebfabcb6923ddbfd71fb798fcb760dfa681211c1f71771aaa8294944a95cab"
-  },
-  {
-    "file": "cat-10.gif",
-    "source": "https://tenor.com/zh-TW/view/computer-cat-working-type-typing-gif-11462399520167387826",
-    "license": "未確認",
-    "bytes": 123948,
-    "sha256": "c768fd131c80372a829e4eb97b37942a39356b5eb58fc5700c26ed1222a68791"
-  },
-  {
     "file": "cat-11.gif",
     "source": "https://tenor.com/zh-TW/view/cat-kitty-typing-laptop-work-from-home-be-like-gif-17459139",
     "license": "未確認",
@@ -63,20 +42,6 @@
     "sha256": "81fbfdcb62424a515f83713573b4ae8a886dcad4ca32147fd848db943aeef111"
   },
   {
-    "file": "cat-13.gif",
-    "source": "https://tenor.com/zh-TW/view/cat-work-working-busy-type-gif-2472949038814051558",
-    "license": "未確認",
-    "bytes": 270103,
-    "sha256": "aba40b393ec244ff8f12ee6bdd42ff66a44edde0ae802c11a22891df3c546351"
-  },
-  {
-    "file": "cat-14.gif",
-    "source": "https://tenor.com/zh-TW/view/kitten-cat-typing-typing-cat-homework-time-gif-17522692860952025464",
-    "license": "未確認",
-    "bytes": 185591,
-    "sha256": "fcd71964a7e55a5bb41812d4966a86c86f3e5065228ec1453bef3d4f0b1b1884"
-  },
-  {
     "file": "cat-17.gif",
     "source": "https://tenor.com/zh-TW/view/cat-typing-typing-on-computer-computer-work-laptop-gif-21481919",
     "license": "未確認",
@@ -89,54 +54,5 @@
     "license": "未確認",
     "bytes": 776134,
     "sha256": "a5a56704b64e3c6804fa0b0141f367ca828be672bf7271bd15a08360e5b0cf36"
-  },
-  {
-    "file": "cat-19.gif",
-    "source": "https://tenor.com/zh-TW/view/busy-working-cat-typing-gif-21770088",
-    "license": "未確認",
-    "bytes": 838791,
-    "sha256": "b34fc73d615669eb1db43878757c9bda6021af20945e1db4de34b5ad01f72f0b"
-  },
-  {
-    "file": "cat-20.gif",
-    "source": "https://tenor.com/zh-TW/view/typing-typing-furiously-typing-furiously-cat-typing-furiously-kitty-typing-furiously-kitty-bow-gif-1200647839766061758",
-    "license": "未確認",
-    "bytes": 197127,
-    "sha256": "adefe6efa9644fb5c34c1eb37f26aa69b30a9fdb7a01c6bd099f8c5bf1d7fabd"
-  },
-  {
-    "file": "cat-21.gif",
-    "source": "https://tenor.com/zh-TW/view/cat-typing-on-keyboard---i'm-cooking-gif-17132887018908126710",
-    "license": "未確認",
-    "bytes": 445084,
-    "sha256": "0402a7bfceaebf03137bdaa9a8043c8b34e14f759b795cd82d82b40893f81171"
-  },
-  {
-    "file": "cat-24.gif",
-    "source": "https://tenor.com/zh-TW/view/aa-aaa-aah-scream-screaming-cat-gif-17239552312142170653",
-    "license": "未確認",
-    "bytes": 859246,
-    "sha256": "d6e2697515d521c64c607f1e97f40e9b96428401d56a0867f0451ec65556c5c4"
-  },
-  {
-    "file": "cat-25.gif",
-    "source": "https://tenor.com/zh-TW/view/cat-typing-typing-on-computer-computer-work-laptop-gif-428799913361709801",
-    "license": "未確認",
-    "bytes": 126313,
-    "sha256": "c2b0f83f3d7511e061045cc5d4556fb1c44d5fb0a9b676379fabc5bbde98f24f"
-  },
-  {
-    "file": "cat-27.gif",
-    "source": "https://tenor.com/zh-TW/view/aa-aaa-aah-scream-screaming-cat-gif-7649225493373792965",
-    "license": "未確認",
-    "bytes": 890065,
-    "sha256": "f2dd2feaee0efa8fd735fd4b2d8332e3431d432723c85d44faf4ee23d0971737"
-  },
-  {
-    "file": "cat-28.gif",
-    "source": "https://tenor.com/zh-TW/view/cat-hack-the-planet-workaholic-gif-14347423185743287948",
-    "license": "未確認",
-    "bytes": 256139,
-    "sha256": "0a665c17f37365d23cf3f2230cca8d70172a1bf5227dc85f1dee90fe7f8d79f6"
   }
 ]
