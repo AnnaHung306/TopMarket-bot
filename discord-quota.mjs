@@ -1,6 +1,10 @@
 // Reserve the full estimated budget before each scan. The shared daily limit
 // persists across restarts and is deliberately charged even for failed scans.
-export const SCAN_MAX_UNITS = 25000;
+// Two attempts share one daily reservation. Each attempt is independently
+// bounded, so a pathological wallet cannot create an open-ended PAYG bill.
+export const SCAN_MAX_UNITS = 40000;
+export const SCAN_ATTEMPTS = 2;
+export const SCAN_MAX_MS = 22000;
 export const DAILY_SCAN_LIMIT = 4;
 // PAYG has no fixed eth_getLogs block-range cap on Base. The request budget,
 // deadline, result-size splitting, and daily reservations remain in force.
@@ -26,6 +30,8 @@ export async function recordScanFailure(sql, wallet) {
   await sql`INSERT INTO discord_scan_failures (wallet, failed_day)
     VALUES (${wallet}, (now() AT TIME ZONE 'UTC')::date)
     ON CONFLICT (wallet) DO UPDATE SET failed_day = excluded.failed_day`;
+  await sql`DELETE FROM discord_scan_failures
+    WHERE failed_day < (now() AT TIME ZONE 'UTC')::date`;
 }
 
 export async function reserveScan(sql) {
@@ -37,5 +43,7 @@ export async function reserveScan(sql) {
     ON CONFLICT (quota_day) DO UPDATE SET reservations = discord_scan_quota.reservations + 1
     WHERE discord_scan_quota.reservations < ${DAILY_SCAN_LIMIT}
     RETURNING reservations`;
+  await sql`DELETE FROM discord_scan_quota
+    WHERE quota_day < (now() AT TIME ZONE 'UTC')::date - 7`;
   return rows.length === 1;
 }

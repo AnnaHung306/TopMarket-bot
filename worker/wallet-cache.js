@@ -8,6 +8,9 @@ import { directWalletReportBatch, finalizedWalletBlock, WALLET_HISTORY_START, WA
 
 const CACHE_VERSION = 3;
 const LEGACY_CACHE_VERSION = 2;
+const MAX_CACHE_JSON_BYTES = 32_768;
+const MAX_CACHE_ROWS = 1_000;
+let schemaReady;
 
 async function stateFor(sql, wallet) {
   const [row] = await sql`SELECT revision, snapshot, draft FROM wallet_cashflow_cache WHERE wallet = ${wallet}`;
@@ -18,19 +21,34 @@ async function initialize(sql) {
   await sql.transaction([
     sql`SELECT pg_advisory_xact_lock(8453, 20261108)`,
     sql`CREATE TABLE IF NOT EXISTS wallet_cashflow_cache (
-      wallet text PRIMARY KEY, revision integer NOT NULL, snapshot jsonb, draft jsonb
+      wallet text PRIMARY KEY, revision integer NOT NULL, snapshot jsonb, draft jsonb,
+      updated_at timestamptz NOT NULL DEFAULT now()
     )`,
+    sql`ALTER TABLE wallet_cashflow_cache ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()`,
+    sql`CREATE INDEX IF NOT EXISTS wallet_cashflow_cache_updated_at_idx ON wallet_cashflow_cache (updated_at)`,
   ]);
 }
 
+function ensureSchema(sql) {
+  schemaReady ??= initialize(sql).catch(error => { schemaReady = undefined; throw error; });
+  return schemaReady;
+}
+
 async function save(sql, wallet, current, snapshot, draft) {
+  const snapshotJson = JSON.stringify(snapshot), draftJson = JSON.stringify(draft);
+  if (new TextEncoder().encode(snapshotJson).length > MAX_CACHE_JSON_BYTES ||
+      new TextEncoder().encode(draftJson).length > MAX_CACHE_JSON_BYTES) throw Error('Wallet cache row size limit reached');
+  await ensureSchema(sql);
   const rows = await sql`INSERT INTO wallet_cashflow_cache (wallet, revision, snapshot, draft)
-    VALUES (${wallet}, ${current.revision + 1}, ${JSON.stringify(snapshot)}::jsonb, ${JSON.stringify(draft)}::jsonb)
+    VALUES (${wallet}, ${current.revision + 1}, ${snapshotJson}::jsonb, ${draftJson}::jsonb)
     ON CONFLICT (wallet) DO UPDATE
-      SET revision = excluded.revision, snapshot = excluded.snapshot, draft = excluded.draft
+      SET revision = excluded.revision, snapshot = excluded.snapshot, draft = excluded.draft, updated_at = now()
       WHERE wallet_cashflow_cache.revision = ${current.revision}
     RETURNING revision`;
   if (rows.length !== 1) throw Error('Wallet report was advanced by another request');
+  await sql`DELETE FROM wallet_cashflow_cache WHERE wallet IN (
+    SELECT wallet FROM wallet_cashflow_cache ORDER BY updated_at DESC, wallet OFFSET ${MAX_CACHE_ROWS}
+  )`;
 }
 
 function readable(snapshot) {
@@ -98,7 +116,7 @@ export async function walletCachePage(sql, wallet, afterBlock, options = {}) {
   const snapshot = readable(first?.snapshot);
   if (canRead(snapshot, afterBlock)) return fromCache(snapshot, wallet);
   const result = await withWalletLock(wallet, async assertLock => {
-    if (!first) await initialize(sql);
+    if (!first) await ensureSchema(sql);
     const current = await stateFor(sql, wallet);
     const saved = readable(current.snapshot);
     if (canRead(saved, afterBlock)) return fromCache(saved, wallet);
@@ -106,7 +124,8 @@ export async function walletCachePage(sql, wallet, afterBlock, options = {}) {
       throw Error('Wallet refresh must start from its current saved checkpoint');
     }
     const reader = alchemy({
-      maxUnits: options.maxUnits ?? WALLET_PARALLEL_PAGES * 120_000, maxMs: options.maxMs ?? 600_000, perSecond: 200, maxInFlight: 4,
+      maxUnits: options.maxUnits ?? WALLET_PARALLEL_PAGES * 120_000, maxMs: options.maxMs ?? 600_000,
+      perSecond: options.perSecond ?? 6_000, maxInFlight: options.maxInFlight ?? 24,
       indexedWalletTransfers: options.indexedWalletTransfers ?? false, beforeRequest: assertLock,
     });
     const previous = saved?.version === CACHE_VERSION ? saved : null;

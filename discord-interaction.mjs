@@ -1,6 +1,7 @@
 import { MessageFlags, ThreadAutoArchiveDuration } from 'discord.js';
 import { readFile } from 'node:fs/promises';
 import { randomInt } from 'node:crypto';
+import { SCAN_ATTEMPTS } from './discord-quota.mjs';
 
 const assetsDirectory = new URL('./assets/tenor-cat-wait/', import.meta.url);
 const waitingText = '貓貓正在努力工作，請稍後... 完成後會拍拍通知';
@@ -32,6 +33,15 @@ async function waitingAsset(chooseIndex = randomInt) {
 }
 
 const validWallet = wallet => /^0x[0-9a-f]{40}$/.test(wallet);
+function safeError(error) {
+  let detail = String(error?.message || 'Unknown error');
+  for (const key of ['ALCHEMY_API_KEY', 'DATABASE_URL', 'DISCORD_TOKEN', 'ETHERSCAN_API_KEY']) {
+    const secret = process.env[key];
+    if (secret) detail = detail.split(secret).join('[redacted]');
+  }
+  return detail.replace(/(?:https?|postgres(?:ql)?):\/\/\S+/gi, '[redacted-url]')
+    .replace(/password\s*[=:]\s*\S+/gi, 'password=[redacted]').slice(0, 300);
+}
 const threadName = interaction => {
   const username = String(interaction.member?.displayName || interaction.user.displayName || interaction.user.username)
     .replace(/[\u0000-\u001f\u007f]/g, ' ').trim() || '用戶';
@@ -87,8 +97,6 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       if (!configured()) {
         await editStatus('機器人已連線，但錢包資料來源尚未完成設定，目前無法產生報表。'); return;
       }
-      if (busy) { await editStatus('目前有查詢進行中，請稍後再試。'); return; }
-      busy = true; ownsBusy = true;
       const cached = await readSnapshot(wallet);
       if (cached) {
         const note = '顯示已儲存的摘要，未自動查詢最新區塊。';
@@ -98,6 +106,8 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
         return;
       }
+      if (busy) { await editStatus('目前有查詢進行中，請稍後再試。'); return; }
+      busy = true; ownsBusy = true;
       const today = new Date().toISOString().slice(0, 10);
       for (const [key, day] of failedWallets) if (day !== today) failedWallets.delete(key);
       if (failedWallets.has(wallet) || await scanBlocked(wallet)) {
@@ -107,13 +117,31 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       if (!await reserveScan()) {
         await editStatus('今日背景掃描額度已用完；已完成的進度會保留，請於 UTC 零點後再試。'); return;
       }
-      let result;
-      try { result = await readPage(wallet); }
-      catch (error) {
+      let result, lastError;
+      for (let attempt = 1; attempt <= SCAN_ATTEMPTS; attempt++) {
+        try {
+          result = await readPage(wallet);
+          if (result.ready) break;
+          lastError = new Error(result.waiting ? 'Wallet scan is locked' : 'Wallet scan returned an incomplete checkpoint');
+        } catch (error) {
+          lastError = error;
+        }
+        // Keep the first failed attempt inside the worker. The requester sees
+        // only the original progress message while the second attempt runs.
+        console.error(`錢包掃描第 ${attempt} 次未完成`, lastError.code || lastError.name);
+      }
+      if (!result?.ready) {
         failedWallets.set(wallet, today);
         try { await recordScanFailure(wallet); }
         catch (recordError) { console.error('無法保存掃描保護狀態', recordError.code || recordError.name); }
-        throw error;
+        const adminId = process.env.DISCORD_ADMIN_ID?.trim();
+        await editStatus('兩次掃描仍未完成，已通知 MOD 協助；請勿重複送出。');
+        await thread.send({
+          content: `${adminId && /^\d{17,20}$/.test(adminId) ? `<@${adminId}>` : '@en'} 錢包 ${wallet} 連續兩次掃描未完成，請協助查核。`,
+          allowedMentions: { users: adminId && /^\d{17,20}$/.test(adminId) ? [adminId] : [] },
+        });
+        console.error('錢包查詢兩次失敗', lastError?.code || lastError?.name, safeError(lastError));
+        return;
       }
       if (result.ready) {
         const poster = renderPoster(wallet, result.snapshot, '');
@@ -122,19 +150,8 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
         return;
       }
-      if (result.waiting) { await editStatus('這個錢包正由其他查詢處理，請稍後再試。'); return; }
-      const p = result.progress;
-      await editStatus(p ? `本次掃描已處理至區塊 ${p.through} / ${p.target}；進度已保存，稍後可再次使用指令繼續。`
-        : '本次掃描尚未取得進度，請稍後再試。');
     } catch (error) {
-      let detail = String(error.message || 'Unknown error');
-      for (const key of ['ALCHEMY_API_KEY', 'DATABASE_URL', 'DISCORD_TOKEN', 'ETHERSCAN_API_KEY']) {
-        const secret = process.env[key];
-        if (secret) detail = detail.split(secret).join('[redacted]');
-      }
-      detail = detail.replace(/(?:https?|postgres(?:ql)?):\/\/\S+/gi, '[redacted-url]');
-      detail = detail.replace(/password\s*[=:]\s*\S+/gi, 'password=[redacted]');
-      console.error('錢包查詢失敗', error.code || error.name, detail.slice(0, 300));
+      console.error('錢包查詢失敗', error.code || error.name, safeError(error));
       const message = failedWallets.has(wallet)
         ? '錢包掃描未完成。為避免重複消耗 API，這個錢包暫停掃描至 UTC 零點；若先前有保存進度，會從保存的位置繼續。'
         : '錢包查詢未完成，請稍後再試；若已有保存的掃描進度，將從上次進度繼續。';

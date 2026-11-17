@@ -9,7 +9,7 @@ const signatures = {
   stake: [SIG.staked, SIG.unstaked],
 };
 
-const units = { eth_call: 26, eth_getLogs: 75, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_getStorageAt: 20, eth_chainId: 0, eth_getBlockByNumber: 20, alchemy_getAssetTransfers: 120 };
+const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 26, eth_getStorageAt: 20, eth_chainId: 0, eth_getBlockByNumber: 20, alchemy_getAssetTransfers: 120 };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function alchemy({
@@ -36,11 +36,11 @@ export function alchemy({
       if (start > performance.now()) await delay(start - performance.now());
       beforeRequest();
       try {
-        return await rpcRequest(payload);
+        return await rpcRequest(payload, Math.max(1, Math.floor(Math.min(20_000, deadline - performance.now()))));
       } catch (error) {
         if (attempt === 5 || ![429, 500, 502, 503, 504].includes(error.status)) throw error;
         stats.retries++;
-        await delay(Math.min(1000 * (2 ** attempt), 16000) + Math.floor(Math.random() * 250));
+        await delay(Math.min(1000 * (2 ** attempt) + Math.floor(Math.random() * 250), Math.max(0, deadline - performance.now())));
       }
     }
   }

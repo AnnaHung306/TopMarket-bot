@@ -30,7 +30,7 @@ try {
   await createWalletHandler(options)(interaction(wallet));
   const retry = interaction(wallet);
   await createWalletHandler(options)(retry);
-  assert.equal(reads, 1);
+  assert.equal(reads, 2);
   assert.equal(reserved, 1);
   assert.match(retry.edits.at(-1), /暫停重試/);
   hasSnapshot = true;
@@ -78,7 +78,7 @@ for (let iteration=0; iteration<10; iteration++) {
   assert.equal(test.messages[0],'正在檢查地址與已儲存報表。');
   assert.equal(test.edits[0].content, `${test.first.content}\n進度與報表請見 <#thread-123>`);
   assert.ok(test.messages.every(message => typeof message === 'string' || !message.files?.some(file => file.name === 'cat-wait.gif')));
-  assert.ok(scans <= 1 && reservations <= 1, `iteration ${iteration}: scan limit exceeded`);
+  assert.ok(scans <= 2 && reservations <= 1, `iteration ${iteration}: scan limit exceeded`);
   if (iteration <= 3) assert.equal(scans,0);
   if (iteration===2) { assert.equal(reservations,0); assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png'); }
   if (iteration===2 || iteration===6) {
@@ -86,9 +86,9 @@ for (let iteration=0; iteration<10; iteration++) {
     assert.deepEqual(test.messages.at(-1).allowedMentions, { users:['123456789012345678'] });
   }
   if (iteration===3) assert.match(test.edits.at(-1),/額度已用完/);
-  if (iteration===4) assert.match(test.edits.at(-1),/其他查詢處理/);
+  if (iteration===4) assert.match(test.edits.at(-1),/兩次掃描仍未完成/);
   if (iteration===5) assert.match(test.edits.at(-1),/未完成/);
   if (iteration===6) assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png');
-  if (iteration>=7) { assert.equal(scans,1); assert.match(test.edits.at(-1),/進度已保存/); }
+  if (iteration>=7) { assert.equal(scans,2); assert.match(test.edits.at(-1),/兩次掃描仍未完成/); }
   console.log(`PASS iteration ${iteration+1}: ack ${Math.round(test.ackAt-begin)}ms, scans ${scans}`);
 }
