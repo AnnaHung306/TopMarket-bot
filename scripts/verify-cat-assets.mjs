@@ -1,14 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
-const directory = new URL('../assets/cat-wait/', import.meta.url);
+const directory = new URL('../assets/tenor-cat-wait/', import.meta.url);
 const entries = JSON.parse(await readFile(new URL('manifest.json', directory), 'utf8'));
 if (!Array.isArray(entries) || entries.length < 20) throw Error('等待動畫清單不足 20 項');
 const names = new Set();
 for (const entry of entries) {
   if (!/^[a-z0-9-]+\.gif$/.test(entry.file) || names.has(entry.file) ||
-      !['CC0 1.0', 'CC BY 2.5', 'CC BY-SA 4.0'].includes(entry.license) ||
-      !entry.author || !entry.source?.startsWith('https://') || !entry.license_url?.startsWith('https://') || !entry.changes) {
+      entry.license !== '未確認' || !entry.source?.startsWith('https://tenor.com/')) {
     throw Error('等待動畫名稱重複或授權資料不完整');
   }
   names.add(entry.file);
@@ -18,4 +17,4 @@ for (const entry of entries) {
     throw Error(`等待動畫檔案損壞或與清單不符：${entry.file}`);
   }
 }
-console.log(`已驗證 ${entries.length} 個等待動畫及授權資料`);
+console.log(`已驗證 ${entries.length} 個等待動畫及來源資料（授權未確認）`);

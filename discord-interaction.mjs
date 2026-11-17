@@ -2,7 +2,7 @@ import { MessageFlags, ThreadAutoArchiveDuration } from 'discord.js';
 import { readFile } from 'node:fs/promises';
 import { randomInt } from 'node:crypto';
 
-const assetsDirectory = new URL('./assets/cat-wait/', import.meta.url);
+const assetsDirectory = new URL('./assets/tenor-cat-wait/', import.meta.url);
 let waitingAssetsPromise;
 
 async function waitingAsset(chooseIndex = randomInt) {
@@ -16,15 +16,13 @@ async function waitingAsset(chooseIndex = randomInt) {
   while (candidates.length) {
     const [entry] = candidates.splice(chooseIndex(candidates.length), 1);
     if (!entry || !/^[a-z0-9-]+\.gif$/.test(entry.file) ||
-        !['CC0 1.0', 'CC BY 2.5', 'CC BY-SA 4.0'].includes(entry.license) ||
-        !entry.author || !entry.source?.startsWith('https://') || !entry.license_url?.startsWith('https://') || !entry.changes) {
+        entry.license !== '未確認' || !entry.source?.startsWith('https://tenor.com/')) {
       console.error('等待動畫授權資料不完整，已略過');
       continue;
     }
     try {
       const gif = await readFile(new URL(entry.file, assetsDirectory));
-      const credit = entry.license === 'CC0 1.0' ? '' :
-        `\n\n動畫：${entry.author}｜${entry.license}\n來源：${entry.source}\n授權：${entry.license_url}\n變更：未修改（僅更名）`;
+      const credit = `\n\nGIF 來源：${entry.source}`;
       return { files: [{ attachment: gif, name: 'cat-wait.gif' }], credit };
     } catch (error) {
       console.error('無法讀取等待動畫', entry.file, error.code || error.name);
