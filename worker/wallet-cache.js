@@ -108,6 +108,15 @@ export async function readWalletSnapshot(sql, wallet) {
   return snapshot ? fromCache(snapshot, wallet).snapshot : null;
 }
 
+export async function readWalletProgress(sql, wallet) {
+  const state = await stateFor(sql, wallet).catch(error => {
+    if (error.code === '42P01') return null;
+    throw error;
+  });
+  const draft = state?.draft?.version === CACHE_VERSION ? state.draft : null;
+  return draft ? { from: draft.start, through: draft.through, target: draft.target } : null;
+}
+
 export async function walletCachePage(sql, wallet, afterBlock, options = {}) {
   const first = await stateFor(sql, wallet).catch(error => {
     if (error.code === '42P01') return null;

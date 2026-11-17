@@ -1,7 +1,6 @@
 import { MessageFlags, ThreadAutoArchiveDuration } from 'discord.js';
 import { readFile } from 'node:fs/promises';
 import { randomInt } from 'node:crypto';
-import { SCAN_ATTEMPTS, SCAN_MAX_MS, SCAN_MAX_UNITS } from './discord-quota.mjs';
 
 const assetsDirectory = new URL('./assets/tenor-cat-wait/', import.meta.url);
 const waitingText = '貓貓正在努力工作，請稍後... 完成後會拍拍通知';
@@ -49,20 +48,17 @@ const threadName = interaction => {
   return username.slice(0, 100 - suffix.length) + suffix;
 };
 
-export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanBlocked = async () => false,
-  recordScanFailure = async () => {}, renderPoster, formatReport, configured, chooseWaitingIndex = randomInt }) {
-  let busy = false;
-  const failedWallets = new Map();
+export function createWalletHandler({ readSnapshot, enqueueScan, scanBlocked = async () => false,
+  wake = () => {}, renderPoster, formatReport, configured, chooseWaitingIndex = randomInt }) {
   return async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'wallet') return;
-    const commandStarted = performance.now();
     const allowedChannel = process.env.DISCORD_WALLET_CHANNEL_ID?.trim();
     if (allowedChannel && interaction.channelId !== allowedChannel) {
       await interaction.reply({ content: '請在指定的 MOD 工具箱頻道使用此指令。', flags: MessageFlags.Ephemeral });
       return;
     }
     const wallet = interaction.options.getString('address', true).trim().toLowerCase();
-    let status, ownsBusy = false;
+    let status;
     const editStatus = message => status.edit(message);
     try {
       await interaction.deferReply();
@@ -75,7 +71,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       try {
         thread = await interaction.channel.threads.create({
           name: threadName(interaction),
-          autoArchiveDuration: ThreadAutoArchiveDuration.OneHour,
+          autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
           reason: 'Top.Market wallet report',
         });
         await interaction.editReply({ content: `${waitingText}\n進度與報表請見 <#${thread.id}>` });
@@ -101,91 +97,42 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       const cached = await readSnapshot(wallet);
       if (cached) {
         const note = '顯示已儲存的摘要，未自動查詢最新區塊。';
-        const poster = await renderPoster(wallet, cached, note);
+        let poster;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try { poster = await renderPoster(wallet, cached, note); break; }
+          catch (error) {
+            console.error(`已存報表海報第 ${attempt} 次未完成`, error.code || error.name);
+            if (attempt === 2) throw error;
+          }
+        }
         await thread.send({ content: `拍拍 <@${interaction.user.id}>\n${formatReport(wallet, cached, note)}`,
           allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
-        await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
+        await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。')
+          .catch(error => console.error('無法更新完成狀態', error.code || error.name));
         return;
       }
-      if (busy) { await editStatus('目前有查詢進行中，請稍後再試。'); return; }
-      busy = true; ownsBusy = true;
-      const today = new Date().toISOString().slice(0, 10);
-      for (const [key, day] of failedWallets) if (day !== today) failedWallets.delete(key);
-      if (failedWallets.has(wallet) || await scanBlocked(wallet)) {
-        await editStatus('此錢包今天的掃描曾失敗，為避免重複消耗 API，暫停重試至 UTC 零點。已儲存的進度不受影響。'); return;
-      }
-      await editStatus('找不到已儲存報表，正在掃描歷史資料；本次消耗設有上限，請稍候。');
-      if (!await reserveScan()) {
-        await editStatus('今日背景掃描額度已用完；已完成的進度會保留，請於 UTC 零點後再試。'); return;
-      }
-      const budget = { maxUnits: SCAN_MAX_UNITS, units: 0, deadline: commandStarted + SCAN_MAX_MS };
-      let result, lastError, through = -1, pages = 0, failedAttempts = 0, limitReached = false;
-      for (let attempt = 1; attempt <= SCAN_ATTEMPTS; attempt++) {
-        if (performance.now() >= budget.deadline || budget.units >= budget.maxUnits || pages >= 100) {
-          limitReached = true;
-          break;
-        }
-        try {
-          while (performance.now() < budget.deadline && budget.units < budget.maxUnits && pages < 100) {
-            result = await readPage(wallet, budget);
-            if (result?.ready) break;
-            if (result?.waiting) throw Error('Wallet scan is locked');
-            const next = Number(result?.progress?.through);
-            if (!Number.isSafeInteger(next) || next <= through) throw Error('Wallet scan made no checkpoint progress');
-            through = next;
-            pages++;
-            console.info(`錢包掃描已保存第 ${pages} 頁`, `through=${through}`, `estimated_units=${budget.units}`);
-          }
-          if (result?.ready) break;
-          limitReached = true;
-          break;
-        } catch (error) {
-          lastError = error;
-          if (/^Alchemy sync (?:budget|time limit) reached/.test(String(error?.message))) {
-            limitReached = true;
-            break;
-          }
-          failedAttempts++;
-          // A saved page is progress. Only an actual exception counts as a failed attempt.
-          console.error(`錢包掃描第 ${attempt} 次未完成`, error.code || error.name,
-            `pages=${pages}`, `estimated_units=${budget.units}`);
-        }
-      }
-      if (!result?.ready) {
-        failedWallets.set(wallet, today);
-        try { await recordScanFailure(wallet); }
-        catch (recordError) { console.error('無法保存掃描保護狀態', recordError.code || recordError.name); }
-        if (failedAttempts === SCAN_ATTEMPTS) {
-          const adminId = process.env.DISCORD_ADMIN_ID?.trim();
-          await editStatus('兩次掃描仍未完成，已通知 MOD 協助；請勿重複送出。');
-          await thread.send({
-            content: `${adminId && /^\d{17,20}$/.test(adminId) ? `<@${adminId}>` : '@en'} 錢包 ${wallet} 連續兩次掃描未完成，請協助查核。`,
-            allowedMentions: { users: adminId && /^\d{17,20}$/.test(adminId) ? [adminId] : [] },
-          });
-          console.error('錢包查詢兩次失敗', lastError?.code || lastError?.name, safeError(lastError));
-        } else if (limitReached) {
-          await editStatus('本次掃描已達時間或 API 用量上限，進度已保留；為避免重複消耗，請於 UTC 零點後再試。');
-          console.info('錢包掃描達上限', `pages=${pages}`, `estimated_units=${budget.units}`);
-        } else {
-          await editStatus('掃描未完成，尚未達兩次實際失敗；為避免重複消耗，請於 UTC 零點後再試。');
-        }
+      if (await scanBlocked(wallet)) {
+        await editStatus('此錢包今天的掃描已停止並通知 MOD，暫停新工作至 UTC 零點；已保存的進度不受影響。');
         return;
       }
-      if (result.ready) {
-        const poster = await renderPoster(wallet, result.snapshot, '');
-        await thread.send({ content: `拍拍 <@${interaction.user.id}>\n${formatReport(wallet, result.snapshot, '')}`,
-          allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
-        await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
+      const queued = await enqueueScan({ wallet, threadId: thread.id,
+        requesterId: interaction.user.id, statusId: status.id });
+      if (queued.existingThreadId) {
+        await editStatus(`此錢包正在 <#${queued.existingThreadId}> 背景掃描；請到原討論串查看進度。`);
         return;
       }
+      if (queued.full) {
+        await editStatus('背景掃描佇列已滿，請稍後再試；本次沒有使用 Alchemy 額度。');
+        return;
+      }
+      await editStatus('已排入背景掃描，目前尚未開始鏈上查詢；此處會更新掃描進度，完整報表完成後會拍拍通知。');
+      wake();
     } catch (error) {
       console.error('錢包查詢失敗', error.code || error.name, safeError(error));
-      const message = failedWallets.has(wallet)
-        ? '錢包掃描未完成。為避免重複消耗 API，這個錢包暫停掃描至 UTC 零點；若先前有保存進度，會從保存的位置繼續。'
-        : '錢包查詢未完成，請稍後再試；若已有保存的掃描進度，將從上次進度繼續。';
+      const message = '錢包查詢尚未建立，請稍後再試；若已有保存的掃描進度，將從上次進度繼續。';
       if (status) await editStatus(message).catch(() => {});
       else if (interaction.replied || interaction.deferred) await interaction.editReply(message).catch(() => {});
       else await interaction.reply({ content: message }).catch(() => {});
-    } finally { if (ownsBusy) busy = false; }
+    }
   };
 }

@@ -6,10 +6,12 @@ export const SCAN_MAX_UNITS = 80000;
 export const SCAN_ATTEMPTS = 2;
 export const SCAN_MAX_MS = 52000;
 export const DAILY_SCAN_LIMIT = 8;
-const SCAN_ALGORITHM_VERSION = 3;
-// PAYG has no fixed eth_getLogs block-range cap on Base. The request budget,
-// deadline, result-size splitting, and daily reservations remain in force.
-export const SCAN_BLOCK_WINDOW = null;
+// Version 3 also blocked wallets after a normal time/CU checkpoint. Those
+// records must not prevent the corrected background queue from resuming.
+const SCAN_ALGORITHM_VERSION = 4;
+// Smaller checkpoints make long-running background scans resumable after a
+// timeout or deployment restart. The shared CU and daily caps still apply.
+export const SCAN_BLOCK_WINDOW = 500_000;
 
 async function ensureFailures(sql) {
   await sql`CREATE TABLE IF NOT EXISTS discord_scan_failures (
@@ -20,8 +22,7 @@ async function ensureFailures(sql) {
     ADD COLUMN IF NOT EXISTS algorithm_version integer NOT NULL DEFAULT 1`;
 }
 
-// A scan that failed before committing its checkpoint should not be retried
-// repeatedly on the same day. Successful cached reports remain available.
+// Only two real failures block new work for the rest of the UTC day.
 export async function scanBlocked(sql, wallet) {
   await ensureFailures(sql);
   const rows = await sql`SELECT 1 FROM discord_scan_failures
@@ -52,4 +53,11 @@ export async function reserveScan(sql) {
   await sql`DELETE FROM discord_scan_quota
     WHERE quota_day < (now() AT TIME ZONE 'UTC')::date - 7`;
   return rows.length === 1;
+}
+
+// A lock collision cannot issue any Alchemy request, so it must not consume
+// the day's scan quota. Other failed or timed-out segments keep their charge.
+export async function releaseUnusedScan(sql) {
+  await sql`UPDATE discord_scan_quota SET reservations = reservations - 1
+    WHERE quota_day = (now() AT TIME ZONE 'UTC')::date AND reservations > 0`;
 }

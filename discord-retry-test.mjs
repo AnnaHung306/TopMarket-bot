@@ -1,134 +1,208 @@
 import assert from 'node:assert/strict';
-import { createWalletHandler } from './discord-interaction.mjs';
+import { createScanRunner } from './discord-scan-runner.mjs';
+import { nextUtcMidnight } from './discord-scan-jobs.mjs';
 
-const wallet = '0x' + 'a'.repeat(40), other = '0x' + 'b'.repeat(40);
-const snapshot = { through: 99 }, adminId = '872351254536405093';
-process.env.DISCORD_ADMIN_ID = adminId;
+const wallet = '0x' + 'a'.repeat(40);
+const requester = '123456789012345678', admin = '872351254536405093';
+const snapshot = { through: 99 };
+process.env.DISCORD_ADMIN_ID = admin;
 
-function interaction(address = wallet) {
-  const edits = [], messages = [];
-  const thread = { id: 'thread-123', async send(payload) {
-    messages.push(payload);
-    return { async edit(value) { edits.push(value); } };
-  } };
-  return { commandName: 'wallet', isChatInputCommand: () => true,
-    options: { getString: () => address }, channelId: 'allowed-channel',
-    user: { id: '123456789012345678', username: 'test-user' }, member: { displayName: '測試用戶' },
-    edits, messages,
-    async deferReply() { this.deferred = true; this.ackAt = performance.now(); },
-    channel: { threads: { async create() { return thread; } } },
-    async editReply(payload) { if (!this.first) this.first = payload; else edits.push(payload); this.replied = true; },
+function harness(overrides = {}) {
+  const queue = [{ wallet, thread_id: 'thread-123', requester_id: requester, status_id: 'status-123', failures: 0 }];
+  const messages = [], edits = [], rescheduled = [], removed = [];
+  let reserved = 0, released = 0, recorded = 0;
+  const status = { async edit(value) { edits.push(value); } };
+  const thread = { isThread: () => true, messages: { async fetch() { return status; } },
+    async send(value) { messages.push(value); return { id: 'result-123' }; } };
+  const jobs = {
+    async claim() { return queue.shift() || null; },
+    async reschedule(address, options) { assert.equal(address, wallet); rescheduled.push(options); },
+    async remove(address) { removed.push(address); },
   };
+  const base = { client: { channels: { async fetch() { return thread; } } }, jobs,
+    readSnapshot: async () => null, readProgress: async () => null,
+    readPage: async () => ({ ready: true, snapshot }),
+    reserveScan: async () => { reserved++; return true; },
+    releaseUnusedScan: async () => { released++; },
+    recordScanFailure: async () => { recorded++; },
+    renderPoster: async () => Buffer.from('PNG'), formatReport: () => '摘要',
+    maxMs: 5_000, maxUnits: 100,
+  };
+  const runner = createScanRunner({ ...base, ...overrides });
+  return { runner, queue, messages, edits, rescheduled, removed,
+    counts: () => ({ reserved, released, recorded }), thread };
 }
-const base = { configured: () => true, readSnapshot: async () => null,
-  scanBlocked: async () => false, recordScanFailure: async () => {}, reserveScan: async () => true,
-  readPage: async () => ({ ready: true, snapshot }), renderPoster: () => Buffer.from('PNG'), formatReport: () => '摘要' };
 async function quiet(work) {
   const oldError = console.error, oldInfo = console.info;
   console.error = console.info = () => {};
   try { return await work(); } finally { console.error = oldError; console.info = oldInfo; }
 }
-function report(item) {
-  const message = item.messages.find(value => value.files?.some(file => file.name === 'wallet-report.png'));
-  assert.ok(message);
-  assert.match(message.content, /^拍拍 <@123456789012345678>\n/);
-  return message;
-}
-function noEarlyAlert(item) {
-  assert.ok(item.messages.slice(0, -1).every(value => !String(value.content || '').includes(`<@${adminId}>`)));
-}
 
-let calls = 0, quota = 0, failed = 0;
-const transient = interaction();
-const began = performance.now();
-await quiet(() => createWalletHandler({ ...base,
-  reserveScan: async () => { quota++; return true; },
-  recordScanFailure: async () => { failed++; },
-  readPage: async () => { if (++calls === 1) throw Error('temporary'); return { ready: true, snapshot }; },
-})(transient));
-assert.ok(transient.ackAt - began < 3_000);
-assert.equal(calls, 2); assert.equal(quota, 1); assert.equal(failed, 0);
-report(transient); noEarlyAlert(transient);
-assert.ok(transient.edits.every(value => !String(value).includes('未完成')));
-console.log('PASS 1: transient error retried privately within one quota reservation');
+let reads = 0;
+const transient = harness({ readPage: async () => {
+  if (++reads === 1) throw Error('temporary');
+  return { ready: true, snapshot };
+} });
+await quiet(() => transient.runner.wake());
+assert.equal(reads, 2);
+assert.deepEqual(transient.counts(), { reserved: 1, released: 0, recorded: 0 });
+assert.equal(transient.rescheduled.length, 0);
+assert.equal(transient.removed.length, 1);
+assert.match(transient.messages[0].content, new RegExp(`^拍拍 <@${requester}>`));
+assert.deepEqual(transient.messages[0].allowedMentions, { users: [requester] });
+console.log('PASS: first real failure is retried silently in one reservation');
 
-calls = quota = failed = 0;
-const twice = interaction();
-await quiet(() => createWalletHandler({ ...base,
-  reserveScan: async () => { quota++; return true; },
-  recordScanFailure: async () => { failed++; },
-  readPage: async () => { calls++; throw Error('unavailable'); },
-})(twice));
-assert.equal(calls, 2); assert.equal(quota, 1); assert.equal(failed, 1);
-noEarlyAlert(twice);
-assert.match(twice.messages.at(-1).content, new RegExp(`<@${adminId}>.*連續兩次`));
-assert.deepEqual(twice.messages.at(-1).allowedMentions, { users: [adminId] });
-console.log('PASS 2: two failures produce one en alert');
+reads = 0;
+const twice = harness({ readPage: async () => { reads++; throw Error('upstream unavailable'); } });
+await quiet(() => twice.runner.wake());
+assert.equal(reads, 2);
+assert.deepEqual(twice.counts(), { reserved: 1, released: 0, recorded: 1 });
+assert.equal(twice.removed.length, 1);
+assert.match(twice.messages[0].content, new RegExp(`<@${admin}>.*連續兩次`));
+assert.deepEqual(twice.messages[0].allowedMentions, { users: [admin] });
+assert.ok(!twice.messages.some(message => String(message.content).includes(`<@${requester}>`)));
+console.log('PASS: only two real failures alert the MOD, not the requester');
 
-const blocked = interaction();
-await createWalletHandler({ ...base, scanBlocked: async () => true,
-  reserveScan: async () => { throw Error('quota touched'); },
-  readPage: async () => { throw Error('RPC touched'); } })(blocked);
-assert.match(blocked.edits.at(-1), /暫停重試/);
-console.log('PASS 3: persisted failure prevents repeat spend');
+const alertRetry = harness({ readPage: async () => { throw Error('upstream unavailable'); } });
+const originalSend = alertRetry.thread.send;
+let alertPosts = 0;
+alertRetry.thread.send = async function(message) {
+  if (++alertPosts === 1) throw Error('temporary Discord send error');
+  return originalSend.call(this, message);
+};
+await quiet(() => alertRetry.runner.wake());
+assert.equal(alertRetry.rescheduled.at(-1).failures, 2);
+assert.equal(alertRetry.removed.length, 0);
+alertRetry.queue.push({ wallet, thread_id: 'thread-123', requester_id: requester,
+  status_id: 'status-123', failures: 2 });
+await quiet(() => alertRetry.runner.wake());
+assert.equal(alertRetry.counts().reserved, 1);
+assert.equal(alertRetry.messages.length, 1);
+assert.equal(alertRetry.removed.length, 1);
+console.log('PASS: a failed MOD alert retries without another Alchemy scan');
 
-let release, entered;
-const pending = new Promise(resolve => { release = resolve; });
-const reached = new Promise(resolve => { entered = resolve; });
-quota = 0;
-const handler = createWalletHandler({ ...base,
-  readSnapshot: async address => address === other ? snapshot : null,
-  reserveScan: async () => { quota++; return true; },
-  readPage: async () => { entered(); await pending; return { ready: true, snapshot }; },
-});
-const cold = interaction(); const coldTask = handler(cold);
-await reached;
-const cached = interaction(other); await handler(cached);
-report(cached); assert.equal(quota, 1);
-release(); await coldTask; report(cold);
-console.log('PASS 4: cached report remains available during cold scan');
+reads = 0;
+const progressed = harness({ readPage: async (_wallet, budget) => {
+  budget.units = budget.maxUnits;
+  return { ready: false, progress: { from: 1, through: ++reads * 50, target: 100 } };
+} });
+await quiet(() => progressed.runner.wake());
+assert.equal(reads, 1);
+assert.equal(progressed.rescheduled.length, 1);
+assert.equal(progressed.counts().recorded, 0);
+assert.match(progressed.edits.at(-1), /50\.0%/);
+assert.ok(!progressed.messages.length);
+console.log('PASS: CU ceiling preserves true checkpoint without a failure or alert');
 
-calls = 0;
-const resumed = interaction();
-await quiet(() => createWalletHandler({ ...base, readPage: async () => ++calls === 1
-  ? { ready: false, progress: { through: 50, target: 99 } } : { ready: true, snapshot } })(resumed));
-assert.equal(calls, 2); report(resumed); noEarlyAlert(resumed);
-console.log('PASS 5: saved checkpoint resumes automatically');
+const limit = harness({ readPage: async () => { throw Error('Alchemy sync time limit reached; requests=1'); } });
+await quiet(() => limit.runner.wake());
+assert.equal(limit.rescheduled.length, 1);
+assert.equal(limit.counts().recorded, 0);
+assert.match(limit.edits.at(-1), /尚未取得可保存的檢查點/);
+assert.equal(limit.rescheduled[0].blockWindow, 100_000);
+assert.equal(limit.rescheduled[0].stalls, 1);
+console.log('PASS: a time limit narrows the block range without false failure');
 
-calls = 0;
-const unfinished = interaction();
-await quiet(() => createWalletHandler({ ...base,
+limit.queue.push({ wallet, thread_id: 'thread-123', requester_id: requester,
+  status_id: 'status-123', failures: 0, stalls: 1, block_window: 100_000 });
+await quiet(() => limit.runner.wake());
+assert.equal(limit.rescheduled[1].blockWindow, 20_000);
+assert.equal(limit.rescheduled[1].stalls, 2);
+limit.queue.push({ wallet, thread_id: 'thread-123', requester_id: requester,
+  status_id: 'status-123', failures: 0, stalls: 2, block_window: 20_000 });
+await quiet(() => limit.runner.wake());
+assert.deepEqual(limit.counts(), { reserved: 3, released: 0, recorded: 1 });
+assert.equal(limit.removed.length, 1);
+assert.match(limit.messages[0].content, new RegExp(`<@${admin}>`));
+console.log('PASS: three no-progress segments stop further Alchemy spend and alert MOD');
+
+const locked = harness({ readPage: async () => ({ ready: false, waiting: true }) });
+await quiet(() => locked.runner.wake());
+assert.equal(locked.rescheduled.length, 1);
+assert.equal(locked.counts().recorded, 0);
+assert.equal(locked.counts().released, 1);
+console.log('PASS: an active wallet lock refunds the unused reservation');
+
+const noQuota = harness({ reserveScan: async () => false });
+await quiet(() => noQuota.runner.wake());
+assert.equal(noQuota.rescheduled.length, 1);
+assert.ok(noQuota.rescheduled[0].nextRunAt > new Date());
+assert.match(noQuota.edits.at(-1), /UTC 零點後自動續掃/);
+assert.deepEqual(noQuota.counts(), { reserved: 0, released: 0, recorded: 0 });
+assert.equal(nextUtcMidnight(new Date('2026-11-17T22:30:00Z')).toISOString(), '2026-11-18T00:00:05.000Z');
+console.log('PASS: exhausted daily quota resumes automatically next UTC day');
+
+const cached = harness({ readSnapshot: async () => snapshot,
+  reserveScan: async () => { throw Error('cached report cannot reserve Alchemy'); } });
+await quiet(() => cached.runner.wake());
+assert.equal(cached.messages.length, 1);
+assert.equal(cached.removed.length, 1);
+console.log('PASS: completed snapshot delivers without another Alchemy reservation');
+
+let posterAttempts = 0;
+const restart = harness({ readSnapshot: async () => snapshot,
+  renderPoster: async () => { if (++posterAttempts === 1) throw Error('temporary renderer error'); return Buffer.from('PNG'); },
+  reserveScan: async () => { throw Error('renderer retry cannot reserve Alchemy'); } });
+await quiet(() => restart.runner.wake());
+assert.equal(restart.rescheduled.length, 1);
+assert.equal(restart.messages.length, 0);
+restart.queue.push({ wallet, thread_id: 'thread-123', requester_id: requester, status_id: 'status-123', failures: 1 });
+const resumed = createScanRunner({ client: { channels: { async fetch() { return restart.thread; } } },
+  jobs: { claim: async () => restart.queue.shift() || null,
+    reschedule: async () => { throw Error('should complete'); },
+    remove: async () => restart.removed.push(wallet) },
+  readSnapshot: async () => snapshot, readPage: async () => { throw Error('should not scan'); },
+  reserveScan: async () => { throw Error('should not reserve'); }, recordScanFailure: async () => {},
+  renderPoster: async () => { posterAttempts++; return Buffer.from('PNG'); }, formatReport: () => '摘要' });
+await quiet(() => resumed.wake());
+assert.equal(posterAttempts, 2);
+assert.equal(restart.messages.length, 1);
+assert.equal(restart.removed.length, 1);
+console.log('PASS: queued result survives a runner restart without re-scanning');
+
+const liveProgress = harness({ progressIntervalMs: 10,
   readPage: async (_wallet, budget) => {
-    budget.units += 40_000;
-    return { ready: false, progress: { through: ++calls, target: 99 } };
+    budget.units = 42;
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return { ready: true, snapshot };
+  } });
+await quiet(() => liveProgress.runner.wake());
+assert.ok(liveProgress.edits.some(edit => /42 \/ 100 估算 CU/.test(edit)));
+assert.match(liveProgress.edits.at(-1), /已完成/);
+console.log('PASS: in-flight status reports real estimated CU before delivery');
+
+const tenJobs = Array.from({ length: 10 }, (_, index) => ({
+  wallet: `0x${index.toString(16).padStart(40, '0')}`,
+  thread_id: `thread-${index}`, requester_id: requester,
+  status_id: `status-${index}`, failures: 0,
+}));
+const dailyQueue = [...tenJobs], dailyMessages = [], dailyDelayed = [], dailyRemoved = [];
+let dailyReservations = 0, dailyUnits = 0;
+const dailyThread = { isThread: () => true,
+  messages: { async fetch() { return { async edit() {} }; } },
+  async send(message) { dailyMessages.push(message); } };
+const dailyRunner = createScanRunner({
+  client: { channels: { async fetch() { return dailyThread; } } },
+  jobs: { async claim() { return dailyQueue.shift() || null; },
+    async reschedule(address, options) { dailyDelayed.push({ address, options }); },
+    async remove(address) { dailyRemoved.push(address); } },
+  readSnapshot: async () => null, readProgress: async () => null,
+  reserveScan: async () => { if (dailyReservations === 8) return false; dailyReservations++; return true; },
+  recordScanFailure: async () => { throw Error('No failures expected'); },
+  readPage: async (_address, budget) => {
+    budget.units = budget.maxUnits;
+    dailyUnits += budget.units;
+    return { ready: true, snapshot };
   },
-})(unfinished));
-assert.equal(calls, 2);
-assert.match(unfinished.edits.at(-1), /時間或 API 用量上限/);
-assert.ok(!unfinished.messages.some(value => String(value.content || '').includes(`<@${adminId}>`)));
-assert.ok(!unfinished.messages.some(value => value.files?.some(file => file.name === 'wallet-report.png')));
-console.log('PASS 6: incomplete history is saved without claiming two failures');
+  renderPoster: async () => Buffer.from('PNG'), formatReport: () => '摘要',
+});
+await quiet(() => dailyRunner.wake());
+assert.equal(dailyReservations, 8);
+assert.equal(dailyUnits, 8 * 80_000);
+assert.equal(dailyRemoved.length, 8);
+assert.equal(dailyMessages.length, 8);
+assert.equal(dailyDelayed.length, 2);
+assert.ok(dailyDelayed.every(item => item.options.nextRunAt > new Date()));
+console.log('PASS: ten simulated cold wallets cannot exceed eight daily reservations or 640,000 estimated CU');
 
-calls = 0;
-const budgetLimit = interaction();
-await quiet(() => createWalletHandler({ ...base,
-  readPage: async () => { calls++; throw Error('Alchemy sync budget reached; requests=1'); },
-})(budgetLimit));
-assert.equal(calls, 1);
-assert.match(budgetLimit.edits.at(-1), /時間或 API 用量上限/);
-assert.ok(!budgetLimit.messages.some(value => String(value.content || '').includes(`<@${adminId}>`)));
-console.log('PASS: budget exhaustion is not reported as two actual failures');
-
-for (const [name, address, overrides, expected] of [
-  ['invalid', 'invalid', {}, /請輸入有效/],
-  ['unconfigured', wallet, { configured: () => false }, /尚未完成設定/],
-  ['quota', wallet, { reserveScan: async () => false }, /額度已用完/],
-  ['cached', wallet, { readSnapshot: async () => snapshot }, /已完成/],
-]) {
-  let rpc = 0; const item = interaction(address);
-  await createWalletHandler({ ...base, ...overrides, readPage: async () => { rpc++; return { ready: true, snapshot }; } })(item);
-  assert.equal(rpc, 0, name); assert.match(item.edits.at(-1), expected);
-  if (name === 'cached') report(item);
-  console.log(`PASS 7-10 ${name}: no avoidable Alchemy scan`);
-}
 delete process.env.DISCORD_ADMIN_ID;
