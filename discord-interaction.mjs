@@ -119,8 +119,12 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         await editStatus('今日背景掃描額度已用完；已完成的進度會保留，請於 UTC 零點後再試。'); return;
       }
       const budget = { maxUnits: SCAN_MAX_UNITS, units: 0, deadline: commandStarted + SCAN_MAX_MS };
-      let result, lastError, through = -1, pages = 0;
+      let result, lastError, through = -1, pages = 0, failedAttempts = 0, limitReached = false;
       for (let attempt = 1; attempt <= SCAN_ATTEMPTS; attempt++) {
+        if (performance.now() >= budget.deadline || budget.units >= budget.maxUnits || pages >= 100) {
+          limitReached = true;
+          break;
+        }
         try {
           while (performance.now() < budget.deadline && budget.units < budget.maxUnits && pages < 100) {
             result = await readPage(wallet, budget);
@@ -133,26 +137,38 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
             console.info(`錢包掃描已保存第 ${pages} 頁`, `through=${through}`, `estimated_units=${budget.units}`);
           }
           if (result?.ready) break;
-          throw Error(`Wallet scan limit reached; pages=${pages} estimated_units=${budget.units}`);
+          limitReached = true;
+          break;
         } catch (error) {
           lastError = error;
+          if (/^Alchemy sync (?:budget|time limit) reached/.test(String(error?.message))) {
+            limitReached = true;
+            break;
+          }
+          failedAttempts++;
+          // A saved page is progress. Only an actual exception counts as a failed attempt.
+          console.error(`錢包掃描第 ${attempt} 次未完成`, error.code || error.name,
+            `pages=${pages}`, `estimated_units=${budget.units}`);
         }
-        // Incomplete Gavin pages are successful checkpoints, not failures.
-        // Only a stalled page or exhausted shared limit counts as a failed pass.
-        console.error(`錢包掃描第 ${attempt} 次未完成`, lastError.code || lastError.name,
-          `pages=${pages}`, `estimated_units=${budget.units}`);
       }
       if (!result?.ready) {
         failedWallets.set(wallet, today);
         try { await recordScanFailure(wallet); }
         catch (recordError) { console.error('無法保存掃描保護狀態', recordError.code || recordError.name); }
-        const adminId = process.env.DISCORD_ADMIN_ID?.trim();
-        await editStatus('兩次掃描仍未完成，已通知 MOD 協助；請勿重複送出。');
-        await thread.send({
-          content: `${adminId && /^\d{17,20}$/.test(adminId) ? `<@${adminId}>` : '@en'} 錢包 ${wallet} 連續兩次掃描未完成，請協助查核。`,
-          allowedMentions: { users: adminId && /^\d{17,20}$/.test(adminId) ? [adminId] : [] },
-        });
-        console.error('錢包查詢兩次失敗', lastError?.code || lastError?.name, safeError(lastError));
+        if (failedAttempts === SCAN_ATTEMPTS) {
+          const adminId = process.env.DISCORD_ADMIN_ID?.trim();
+          await editStatus('兩次掃描仍未完成，已通知 MOD 協助；請勿重複送出。');
+          await thread.send({
+            content: `${adminId && /^\d{17,20}$/.test(adminId) ? `<@${adminId}>` : '@en'} 錢包 ${wallet} 連續兩次掃描未完成，請協助查核。`,
+            allowedMentions: { users: adminId && /^\d{17,20}$/.test(adminId) ? [adminId] : [] },
+          });
+          console.error('錢包查詢兩次失敗', lastError?.code || lastError?.name, safeError(lastError));
+        } else if (limitReached) {
+          await editStatus('本次掃描已達時間或 API 用量上限，進度已保留；為避免重複消耗，請於 UTC 零點後再試。');
+          console.info('錢包掃描達上限', `pages=${pages}`, `estimated_units=${budget.units}`);
+        } else {
+          await editStatus('掃描未完成，尚未達兩次實際失敗；為避免重複消耗，請於 UTC 零點後再試。');
+        }
         return;
       }
       if (result.ready) {

@@ -104,9 +104,20 @@ await quiet(() => createWalletHandler({ ...base,
   },
 })(unfinished));
 assert.equal(calls, 2);
-assert.match(unfinished.messages.at(-1).content, /連續兩次掃描未完成/);
+assert.match(unfinished.edits.at(-1), /時間或 API 用量上限/);
+assert.ok(!unfinished.messages.some(value => String(value.content || '').includes(`<@${adminId}>`)));
 assert.ok(!unfinished.messages.some(value => value.files?.some(file => file.name === 'wallet-report.png')));
-console.log('PASS 6: incomplete history is never marked complete');
+console.log('PASS 6: incomplete history is saved without claiming two failures');
+
+calls = 0;
+const budgetLimit = interaction();
+await quiet(() => createWalletHandler({ ...base,
+  readPage: async () => { calls++; throw Error('Alchemy sync budget reached; requests=1'); },
+})(budgetLimit));
+assert.equal(calls, 1);
+assert.match(budgetLimit.edits.at(-1), /時間或 API 用量上限/);
+assert.ok(!budgetLimit.messages.some(value => String(value.content || '').includes(`<@${adminId}>`)));
+console.log('PASS: budget exhaustion is not reported as two actual failures');
 
 for (const [name, address, overrides, expected] of [
   ['invalid', 'invalid', {}, /請輸入有效/],

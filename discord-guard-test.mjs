@@ -93,6 +93,10 @@ for (let iteration=0; iteration<10; iteration++) {
   if (iteration===5) assert.match(test.edits.at(-1),/未完成/);
   if (iteration===6) assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png');
   if (iteration===7) assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png');
-  if (iteration>=8) { assert.equal(scans,2); assert.match(test.edits.at(-1),/兩次掃描仍未完成/); }
+  if (iteration>=8) {
+    assert.equal(scans,2);
+    if (iteration===8) assert.match(test.edits.at(-1),/時間或 API 用量上限/);
+    else assert.match(test.edits.at(-1),/兩次掃描仍未完成/);
+  }
   console.log(`PASS iteration ${iteration+1}: ack ${Math.round(test.ackAt-begin)}ms, scans ${scans}`);
 }
