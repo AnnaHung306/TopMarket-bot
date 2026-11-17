@@ -13,11 +13,10 @@
     "build": "bash scripts/build.sh",
     "validate": "node scripts/validate-artifact.mjs",
     "sync:history": "node scripts/sync-history.mjs",
-    "prestart": "node scripts/verify-cat-assets.mjs"
+    "prestart": "node scripts/verify-cat-assets.mjs && node scripts/verify-poster-browser.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",
-    "@sparticuz/chromium": "^153.0.0",
     "discord.js": "^14.28.1",
     "pg": "^8.23.1",
     "playwright-core": "^1.58.2"

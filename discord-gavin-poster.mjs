@@ -16,8 +16,10 @@ async function posterBrowser() {
     if (process.platform === 'win32' || process.platform === 'darwin') {
       return playwright.launch({ channel: 'chrome', headless: true });
     }
-    const { default: chromium } = await import('@sparticuz/chromium');
-    return playwright.launch({ args: chromium.args, executablePath: await chromium.executablePath(), headless: true });
+    return playwright.launch({
+      executablePath: process.env.POSTER_CHROME_PATH || '/usr/bin/chromium',
+      args: ['--no-sandbox', '--disable-dev-shm-usage'], headless: true,
+    });
   })().catch(error => { browserPromise = undefined; throw error; });
   return browserPromise;
 }
