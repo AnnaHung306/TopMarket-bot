@@ -65,8 +65,11 @@ for (let iteration=0; iteration<10; iteration++) {
     configured:()=>config,
     readSnapshot:async()=>iteration===2?snapshot:null,
     reserveScan:async()=>{ reservations++; return iteration!==3; },
-    readPage:async()=>{ scans++; if (iteration===4) return {waiting:true}; if (iteration===5) throw new Error('mock failure');
-      if (iteration===6) return {ready:true,snapshot}; return {ready:false,progress:{through:scans,target:100}}; },
+    readPage:async(_wallet,budget)=>{ scans++; if (iteration===4) return {waiting:true}; if (iteration===5) throw new Error('mock failure');
+      if (iteration===6 || iteration===7 && scans===2) return {ready:true,snapshot};
+      if (iteration===8) { budget.units+=40_000; return {ready:false,progress:{through:scans,target:100}}; }
+      if (iteration===9) return {ready:false,progress:null};
+      return {ready:false,progress:{through:scans,target:100}}; },
     renderPoster:()=>Buffer.from('PNG'), formatReport:()=> '摘要',
   };
   const begin=performance.now();
@@ -89,6 +92,7 @@ for (let iteration=0; iteration<10; iteration++) {
   if (iteration===4) assert.match(test.edits.at(-1),/兩次掃描仍未完成/);
   if (iteration===5) assert.match(test.edits.at(-1),/未完成/);
   if (iteration===6) assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png');
-  if (iteration>=7) { assert.equal(scans,2); assert.match(test.edits.at(-1),/兩次掃描仍未完成/); }
+  if (iteration===7) assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png');
+  if (iteration>=8) { assert.equal(scans,2); assert.match(test.edits.at(-1),/兩次掃描仍未完成/); }
   console.log(`PASS iteration ${iteration+1}: ack ${Math.round(test.ackAt-begin)}ms, scans ${scans}`);
 }

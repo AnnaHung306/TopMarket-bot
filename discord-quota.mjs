@@ -1,12 +1,12 @@
 // Reserve the full estimated budget before each scan. The shared daily limit
 // persists across restarts and is deliberately charged even for failed scans.
-// Two attempts share one daily reservation. Each attempt is independently
-// bounded, so a pathological wallet cannot create an open-ended PAYG bill.
-export const SCAN_MAX_UNITS = 40000;
+// One reservation covers all Gavin history pages and up to two failed passes.
+// A shared budget prevents every saved page from resetting the PAYG ceiling.
+export const SCAN_MAX_UNITS = 80000;
 export const SCAN_ATTEMPTS = 2;
-export const SCAN_MAX_MS = 22000;
+export const SCAN_MAX_MS = 52000;
 export const DAILY_SCAN_LIMIT = 8;
-const SCAN_ALGORITHM_VERSION = 2;
+const SCAN_ALGORITHM_VERSION = 3;
 // PAYG has no fixed eth_getLogs block-range cap on Base. The request budget,
 // deadline, result-size splitting, and daily reservations remain in force.
 export const SCAN_BLOCK_WINDOW = null;

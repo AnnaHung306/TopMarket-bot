@@ -126,7 +126,7 @@ export async function walletCachePage(sql, wallet, afterBlock, options = {}) {
     const reader = alchemy({
       maxUnits: options.maxUnits ?? WALLET_PARALLEL_PAGES * 120_000, maxMs: options.maxMs ?? 240_000,
       perSecond: options.perSecond ?? 6_000, maxInFlight: options.maxInFlight ?? 24,
-      beforeRequest: assertLock,
+      beforeRequest: assertLock, sharedBudget: options.sharedBudget,
     });
     const previous = saved?.version === CACHE_VERSION ? saved : null;
     const savedDraft = current.draft?.version === CACHE_VERSION ? current.draft : null;

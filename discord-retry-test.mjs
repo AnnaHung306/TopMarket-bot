@@ -24,8 +24,9 @@ const base = { configured: () => true, readSnapshot: async () => null,
   scanBlocked: async () => false, recordScanFailure: async () => {}, reserveScan: async () => true,
   readPage: async () => ({ ready: true, snapshot }), renderPoster: () => Buffer.from('PNG'), formatReport: () => '摘要' };
 async function quiet(work) {
-  const old = console.error; console.error = () => {};
-  try { return await work(); } finally { console.error = old; }
+  const oldError = console.error, oldInfo = console.info;
+  console.error = console.info = () => {};
+  try { return await work(); } finally { console.error = oldError; console.info = oldInfo; }
 }
 function report(item) {
   const message = item.messages.find(value => value.files?.some(file => file.name === 'wallet-report.png'));
@@ -97,7 +98,10 @@ console.log('PASS 5: saved checkpoint resumes automatically');
 calls = 0;
 const unfinished = interaction();
 await quiet(() => createWalletHandler({ ...base,
-  readPage: async () => ({ ready: false, progress: { through: ++calls, target: 99 } }),
+  readPage: async (_wallet, budget) => {
+    budget.units += 40_000;
+    return { ready: false, progress: { through: ++calls, target: 99 } };
+  },
 })(unfinished));
 assert.equal(calls, 2);
 assert.match(unfinished.messages.at(-1).content, /連續兩次掃描未完成/);

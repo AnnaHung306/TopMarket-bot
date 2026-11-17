@@ -18,6 +18,15 @@ try {
   assert.equal(requests, 2);
   console.log('PASS: Alchemy CU ceiling stops additional requests');
 
+  const sharedBudget = { maxUnits: 120, units: 0 };
+  await alchemy({ maxUnits: 120, maxMs: 1_000, sharedBudget }).rpc('eth_getLogs', [{}]);
+  await alchemy({ maxUnits: 120, maxMs: 1_000, sharedBudget }).rpc('eth_getLogs', [{}]);
+  await assert.rejects(alchemy({ maxUnits: 120, maxMs: 1_000, sharedBudget }).rpc('eth_getLogs', [{}]),
+    /Alchemy sync budget reached/);
+  assert.equal(sharedBudget.units, 120);
+  assert.equal(requests, 4);
+  console.log('PASS: saved pages share one Alchemy CU ceiling');
+
   globalThis.fetch = (_url, { signal }) => new Promise((_, reject) => {
     const timer = setTimeout(() => reject(Error('mock request hung')), 1_000);
     signal.addEventListener('abort', () => { clearTimeout(timer); reject(Error('mock request aborted')); }, { once: true });

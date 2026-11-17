@@ -14,6 +14,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function alchemy({
   maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infinity, maxInFlight = Infinity, beforeRequest = () => {},
+  sharedBudget = null,
 } = {}) {
   if (!process.env.ALCHEMY_API_KEY?.trim()) throw Error('Alchemy Base RPC is not configured');
   const stats = { units: 0, requests: 0, retries: 0, splits: 0, methods: {} };
@@ -26,8 +27,11 @@ export function alchemy({
     for (let attempt = 0; ; attempt++) {
       beforeRequest();
       if (Math.max(nextTime, performance.now()) >= deadline) throw Error(`Alchemy sync time limit reached; requests=${stats.requests} estimated_units=${stats.units}`);
-      if (stats.units + cost > maxUnits) throw Error(`Alchemy sync budget reached; requests=${stats.requests} estimated_units=${stats.units}`);
+      if (stats.units + cost > maxUnits || sharedBudget && sharedBudget.units + cost > sharedBudget.maxUnits) {
+        throw Error(`Alchemy sync budget reached; requests=${stats.requests} estimated_units=${sharedBudget?.units ?? stats.units}`);
+      }
       stats.units += cost;
+      if (sharedBudget) sharedBudget.units += cost;
       stats.requests++;
       for (const method of methods) stats.methods[method] = (stats.methods[method] || 0) + 1;
       const start = Math.max(nextTime, performance.now());

@@ -1,7 +1,7 @@
 import { MessageFlags, ThreadAutoArchiveDuration } from 'discord.js';
 import { readFile } from 'node:fs/promises';
 import { randomInt } from 'node:crypto';
-import { SCAN_ATTEMPTS } from './discord-quota.mjs';
+import { SCAN_ATTEMPTS, SCAN_MAX_MS, SCAN_MAX_UNITS } from './discord-quota.mjs';
 
 const assetsDirectory = new URL('./assets/tenor-cat-wait/', import.meta.url);
 const waitingText = '貓貓正在努力工作，請稍後... 完成後會拍拍通知';
@@ -55,6 +55,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
   const failedWallets = new Map();
   return async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'wallet') return;
+    const commandStarted = performance.now();
     const allowedChannel = process.env.DISCORD_WALLET_CHANNEL_ID?.trim();
     if (allowedChannel && interaction.channelId !== allowedChannel) {
       await interaction.reply({ content: '請在指定的 MOD 工具箱頻道使用此指令。', flags: MessageFlags.Ephemeral });
@@ -117,18 +118,29 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       if (!await reserveScan()) {
         await editStatus('今日背景掃描額度已用完；已完成的進度會保留，請於 UTC 零點後再試。'); return;
       }
-      let result, lastError;
+      const budget = { maxUnits: SCAN_MAX_UNITS, units: 0, deadline: commandStarted + SCAN_MAX_MS };
+      let result, lastError, through = -1, pages = 0;
       for (let attempt = 1; attempt <= SCAN_ATTEMPTS; attempt++) {
         try {
-          result = await readPage(wallet);
-          if (result.ready) break;
-          lastError = new Error(result.waiting ? 'Wallet scan is locked' : 'Wallet scan returned an incomplete checkpoint');
+          while (performance.now() < budget.deadline && budget.units < budget.maxUnits && pages < 100) {
+            result = await readPage(wallet, budget);
+            if (result?.ready) break;
+            if (result?.waiting) throw Error('Wallet scan is locked');
+            const next = Number(result?.progress?.through);
+            if (!Number.isSafeInteger(next) || next <= through) throw Error('Wallet scan made no checkpoint progress');
+            through = next;
+            pages++;
+            console.info(`錢包掃描已保存第 ${pages} 頁`, `through=${through}`, `estimated_units=${budget.units}`);
+          }
+          if (result?.ready) break;
+          throw Error(`Wallet scan limit reached; pages=${pages} estimated_units=${budget.units}`);
         } catch (error) {
           lastError = error;
         }
-        // Keep the first failed attempt inside the worker. The requester sees
-        // only the original progress message while the second attempt runs.
-        console.error(`錢包掃描第 ${attempt} 次未完成`, lastError.code || lastError.name);
+        // Incomplete Gavin pages are successful checkpoints, not failures.
+        // Only a stalled page or exhausted shared limit counts as a failed pass.
+        console.error(`錢包掃描第 ${attempt} 次未完成`, lastError.code || lastError.name,
+          `pages=${pages}`, `estimated_units=${budget.units}`);
       }
       if (!result?.ready) {
         failedWallets.set(wallet, today);

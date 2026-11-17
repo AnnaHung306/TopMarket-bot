@@ -25,8 +25,11 @@ client.once('ready', async () => {
 });
 client.on('interactionCreate', createWalletHandler({
   readSnapshot: address => readWalletSnapshot(database(), address),
-  readPage: address => walletCachePage(database(), address, undefined, { maxUnits: SCAN_MAX_UNITS, maxMs: SCAN_MAX_MS,
-    perSecond: 6_000, maxInFlight: 24, blockWindow: SCAN_BLOCK_WINDOW }),
+  readPage: (address, budget) => walletCachePage(database(), address, undefined, {
+    maxUnits: budget ? budget.maxUnits - budget.units : SCAN_MAX_UNITS,
+    maxMs: budget ? Math.min(20_000, Math.max(1, budget.deadline - performance.now())) : SCAN_MAX_MS,
+    perSecond: 6_000, maxInFlight: 24, blockWindow: SCAN_BLOCK_WINDOW, sharedBudget: budget,
+  }),
   reserveScan: () => reserveScan(database()),
   scanBlocked: address => scanBlocked(database(), address),
   recordScanFailure: address => recordScanFailure(database(), address),
