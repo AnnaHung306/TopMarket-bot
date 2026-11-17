@@ -16,7 +16,7 @@ function safeError(error) {
 function progressText(progress) {
   const through = Number(progress?.through), target = Number(progress?.target);
   if (!Number.isSafeInteger(through) || !Number.isSafeInteger(target) || target < through) {
-    return '歷史掃描仍在進行，尚未取得可保存的檢查點；完整報表完成後會在此通知。';
+    return '目前尚未取得可保存的檢查點；完整報表完成後會在此通知。';
   }
   const from = Number(progress.from);
   const percent = Number.isSafeInteger(from) && target >= from
