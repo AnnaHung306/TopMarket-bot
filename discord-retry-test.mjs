@@ -5,6 +5,7 @@ import { pageUnitLimit } from './discord-quota.mjs';
 
 const wallet = '0x' + 'a'.repeat(40);
 const requester = '123456789012345678', admin = '872351254536405093';
+const botId = '222222222222222222';
 const snapshot = { through: 99 };
 process.env.DISCORD_ADMIN_ID = admin;
 
@@ -13,14 +14,20 @@ function harness(overrides = {}) {
   const messages = [], edits = [], rescheduled = [], removed = [];
   let reserved = 0, released = 0, recorded = 0;
   const status = { async edit(value) { edits.push(value); } };
-  const thread = { isThread: () => true, messages: { async fetch() { return status; } },
+  const thread = { isThread: () => true, messages: { async fetch(query) {
+    if (typeof query === 'string') return status;
+    return new Map(messages.map((message, index) => [String(index), {
+      author: { id: botId }, content: message.content,
+      attachments: new Map((message.files || []).map((file, fileIndex) => [String(fileIndex), file])),
+    }]));
+  } },
     async send(value) { messages.push(value); return { id: 'result-123' }; } };
   const jobs = {
     async claim() { return queue.shift() || null; },
     async reschedule(address, options) { assert.equal(address, wallet); rescheduled.push(options); },
     async remove(address) { removed.push(address); },
   };
-  const base = { client: { channels: { async fetch() { return thread; } } }, jobs,
+  const base = { client: { user: { id: botId }, channels: { async fetch() { return thread; } } }, jobs,
     readSnapshot: async () => null, readProgress: async () => null,
     readPage: async () => ({ ready: true, snapshot }),
     reserveScan: async () => { reserved++; return true; },
@@ -30,7 +37,7 @@ function harness(overrides = {}) {
     maxMs: 5_000, maxUnits: 100,
   };
   const runner = createScanRunner({ ...base, ...overrides });
-  return { runner, queue, messages, edits, rescheduled, removed,
+  return { runner, queue, messages, edits, rescheduled, removed, jobs,
     counts: () => ({ reserved, released, recorded }), thread };
 }
 async function quiet(work) {
@@ -203,7 +210,7 @@ await quiet(() => restart.runner.wake());
 assert.equal(restart.rescheduled.length, 1);
 assert.equal(restart.messages.length, 0);
 restart.queue.push({ wallet, thread_id: 'thread-123', requester_id: requester, status_id: 'status-123', failures: 1 });
-const resumed = createScanRunner({ client: { channels: { async fetch() { return restart.thread; } } },
+const resumed = createScanRunner({ client: { user: { id: botId }, channels: { async fetch() { return restart.thread; } } },
   jobs: { claim: async () => restart.queue.shift() || null,
     reschedule: async () => { throw Error('should complete'); },
     remove: async () => restart.removed.push(wallet) },
@@ -215,6 +222,25 @@ assert.equal(posterAttempts, 2);
 assert.equal(restart.messages.length, 1);
 assert.equal(restart.removed.length, 1);
 console.log('PASS: queued result survives a runner restart without re-scanning');
+
+const dedupe = harness({ readSnapshot: async () => snapshot,
+  reserveScan: async () => { throw Error('delivery retry cannot reserve Alchemy'); } });
+const removeJob = dedupe.jobs.remove;
+let removeAttempts = 0;
+dedupe.jobs.remove = async address => {
+  if (++removeAttempts === 1) throw Error('database response lost after Discord send');
+  return removeJob(address);
+};
+await quiet(() => dedupe.runner.wake());
+assert.equal(dedupe.messages.length, 1);
+assert.equal(dedupe.rescheduled.length, 1);
+dedupe.queue.push({ wallet, thread_id: 'thread-123', requester_id: requester,
+  status_id: 'status-123', failures: 1 });
+await quiet(() => dedupe.runner.wake());
+assert.equal(dedupe.messages.length, 1);
+assert.equal(dedupe.removed.length, 1);
+assert.equal(dedupe.counts().reserved, 0);
+console.log('PASS: retry detects an already-posted report and avoids a duplicate ping');
 
 const liveProgress = harness({ progressIntervalMs: 10,
   readPage: async (_wallet, budget) => {
@@ -235,10 +261,11 @@ const tenJobs = Array.from({ length: 10 }, (_, index) => ({
 const dailyQueue = [...tenJobs], dailyMessages = [], dailyDelayed = [], dailyRemoved = [];
 let dailyReservations = 0, dailyUnits = 0;
 const dailyThread = { isThread: () => true,
-  messages: { async fetch() { return { async edit() {} }; } },
+  messages: { async fetch(query) { return typeof query === 'string'
+    ? { async edit() {} } : new Map(); } },
   async send(message) { dailyMessages.push(message); } };
 const dailyRunner = createScanRunner({
-  client: { channels: { async fetch() { return dailyThread; } } },
+  client: { user: { id: botId }, channels: { async fetch() { return dailyThread; } } },
   jobs: { async claim() { return dailyQueue.shift() || null; },
     async reschedule(address, options) { dailyDelayed.push({ address, options }); },
     async remove(address) { dailyRemoved.push(address); } },

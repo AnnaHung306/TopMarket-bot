@@ -57,12 +57,21 @@ export function createScanRunner({ client, jobs, readPage, readSnapshot, readPro
 
   async function deliver(job, thread, status, snapshot) {
     const note = job.after_block == null ? '' : '已更新快取至新的已確認區塊。';
-    const poster = await renderPoster(job.wallet, snapshot, note);
-    await thread.send({
-      content: `拍拍 <@${job.requester_id}>\n${formatReport(job.wallet, snapshot, note)}`,
-      allowedMentions: { users: [job.requester_id] },
-      files: [{ attachment: poster, name: 'wallet-report.png' }],
-    });
+    const content = `拍拍 <@${job.requester_id}>\n${formatReport(job.wallet, snapshot, note)}`;
+    // A send can succeed just before a restart or a database error. Check the
+    // actual thread before retrying so the requester is not pinged twice.
+    const recent = await thread.messages.fetch({ limit: 25 });
+    const alreadySent = [...recent.values()].some(message =>
+      message.author?.id === client.user.id && message.content === content &&
+      [...message.attachments.values()].some(file => file.name === 'wallet-report.png'));
+    if (!alreadySent) {
+      const poster = await renderPoster(job.wallet, snapshot, note);
+      await thread.send({
+        content,
+        allowedMentions: { users: [job.requester_id] },
+        files: [{ attachment: poster, name: 'wallet-report.png' }],
+      });
+    }
     await jobs.remove(job.wallet);
     await status.edit('已完成：文字報表與 PNG 海報已傳到此討論串。')
       .catch(error => console.error('無法更新完成狀態', error.code || error.name));
