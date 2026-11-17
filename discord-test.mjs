@@ -33,7 +33,7 @@ const interaction = {
 };
 const handler = createWalletHandler({ readSnapshot: async () => updated, reserveScan: async () => { throw Error('cache must not consume quota'); }, readPage: async () => { throw Error('cache must not call RPC'); }, renderPoster, formatReport, configured: () => true });
 await handler(interaction);
-assert.match(responses[0].content, /已收到/);
+assert.equal(responses[0].content, '貓貓正在努力工作，請稍後...');
 assert.equal(responses[0].files[0].name, 'cat-wait.gif');
 assert.deepEqual([...responses[0].files[0].attachment.subarray(0, 6)], [71, 73, 70, 56, 57, 97]);
 assert.equal(threadMessages[0].files[0].name, 'cat-wait.gif');

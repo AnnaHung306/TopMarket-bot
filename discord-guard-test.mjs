@@ -73,7 +73,7 @@ for (let iteration=0; iteration<10; iteration++) {
   const oldError=console.error; console.error=()=>{};
   try { await createWalletHandler(options)(test); } finally { console.error=oldError; }
   assert.ok(test.ackAt-begin < 3000, `iteration ${iteration}: initial response exceeded 3s`);
-  assert.match(test.first.content,/已收到/);
+  assert.equal(test.first.content,'貓貓正在努力工作，請稍後...');
   assert.equal(test.first.files[0].name,'cat-wait.gif');
   assert.equal(test.messages[0].files[0].name,'cat-wait.gif');
   assert.ok(scans <= 1 && reservations <= 1, `iteration ${iteration}: scan limit exceeded`);

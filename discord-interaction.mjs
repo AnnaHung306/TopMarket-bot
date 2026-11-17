@@ -22,13 +22,12 @@ async function waitingAsset(chooseIndex = randomInt) {
     }
     try {
       const gif = await readFile(new URL(entry.file, assetsDirectory));
-      const credit = `\n\nGIF 來源：${entry.source}`;
-      return { files: [{ attachment: gif, name: 'cat-wait.gif' }], credit };
+      return { files: [{ attachment: gif, name: 'cat-wait.gif' }] };
     } catch (error) {
       console.error('無法讀取等待動畫', entry.file, error.code || error.name);
     }
   }
-  return { files: [], credit: '' };
+  return { files: [] };
 }
 
 const validWallet = wallet => /^0x[0-9a-f]{40}$/.test(wallet);
@@ -51,15 +50,13 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       return;
     }
     const wallet = interaction.options.getString('address', true).trim().toLowerCase();
-    let status, ownsBusy = false, credit = '';
-    const withCredit = message => message + credit;
+    let status, ownsBusy = false;
     const editStatus = message => status.edit(message);
     try {
       await interaction.deferReply();
       const animation = await waitingAsset(chooseWaitingIndex);
-      credit = animation.credit;
       await interaction.editReply({
-        content: withCredit('已收到 `/wallet` 查詢，貓咪正在開啟討論串；進度與報表會在串內更新。'),
+        content: '貓貓正在努力工作，請稍後...',
         files: animation.files,
       });
       let thread;
@@ -72,19 +69,19 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         });
       } catch (error) {
         console.error('無法建立錢包討論串', error.code || error.name);
-        await interaction.editReply(withCredit('已收到查詢，但無法建立討論串。請確認機器人在此頻道有「建立公開討論串」及「在討論串傳送訊息」權限。'));
+        await interaction.editReply('已收到查詢，但無法建立討論串。請確認機器人在此頻道有「建立公開討論串」及「在討論串傳送訊息」權限。');
         return;
       }
       try {
         await thread.send({
-          content: withCredit('🐈 貓咪陪你等報表。'),
+          content: '貓貓正在努力工作，請稍後...',
           files: animation.files,
         });
         status = await thread.send('正在檢查地址與已儲存報表。');
       }
       catch (error) {
         console.error('無法在錢包討論串回覆', error.code || error.name);
-        await interaction.editReply(withCredit('討論串已建立，但機器人無法在串內回覆。請確認「在討論串傳送訊息」及「附加檔案」權限。'));
+        await interaction.editReply('討論串已建立，但機器人無法在串內回覆。請確認「在討論串傳送訊息」及「附加檔案」權限。');
         return;
       }
       if (!validWallet(wallet)) {
@@ -145,7 +142,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         ? '錢包掃描未完成。為避免重複消耗 API，這個錢包暫停掃描至 UTC 零點；若先前有保存進度，會從保存的位置繼續。'
         : '錢包查詢未完成，請稍後再試；若已有保存的掃描進度，將從上次進度繼續。';
       if (status) await editStatus(message).catch(() => {});
-      else if (interaction.replied || interaction.deferred) await interaction.editReply(withCredit(message)).catch(() => {});
+      else if (interaction.replied || interaction.deferred) await interaction.editReply(message).catch(() => {});
       else await interaction.reply({ content: message }).catch(() => {});
     } finally { if (ownsBusy) busy = false; }
   };
