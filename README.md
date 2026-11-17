@@ -4,6 +4,8 @@
 
 討論串命名為「用戶名 錢包報表查詢」，優先使用伺服器顯示名稱；報表完成時只標記發起指令的用戶，不標記角色或所有人。
 
+每次 `/wallet` 查詢會從 `assets/cat-wait/manifest.json` 隨機選取一張 GIF，頻道與討論串使用同一張；需要署名的素材會在圖片訊息中顯示作者、來源、授權與修改說明。部署時必須將 `assets/cat-wait/`（含 GIF、manifest.json 和 ATTRIBUTION.md）及 `scripts/verify-cat-assets.mjs` 一併納入 Git 提交；`npm start` 前會驗證所有清單素材及雜湊，若缺檔會停止啟動。素材授權詳見 `assets/cat-wait/ATTRIBUTION.md`。
+
 機器人提供 `/wallet address:錢包地址`，直接在 Discord 回覆收支摘要與 PNG 海報，無需開啟網站。指令會先在頻道公開回覆「已收到」及貓咪等待 GIF，並從該訊息建立公開討論串；討論串內也有等待 GIF，進度、文字報表和 PNG 都在串內。能看到頻道及討論串的人也能看到錢包地址與結果。已有摘要直接使用快取，不自動更新或呼叫 Alchemy。首次掃描會嘗試讀取完整歷史，僅保存已完成的連續區塊進度。Discord 路徑會使用 Alchemy 的錢包轉帳索引查 USDC 入帳和支出，並以交易收據逐筆核對；其他歷史事件仍需掃描 log。每次指令最多預留一次掃描，全服務每天 UTC 最多四次，每次限制最多 25,000 個估算 CU、240 秒；失敗也消耗一次預留，同一錢包當天不會再次掃描。Pay as you go 沒有免費方案的 10 區塊 log 範圍限制，但完整報表與 PNG 仍須以真實錢包驗收；請勿把收到「已收到」視為報表完成。報表只包含可識別的收支，不包含持倉估值。為控制鏈上查詢量，同一個機器人程序一次處理一個查詢。
 
 需要 Node.js 22+、Discord Bot、Alchemy Base API key，以及 PostgreSQL 資料庫。使用 Railway PostgreSQL 時設定 `DATABASE_DRIVER=postgres` 並將 `DATABASE_URL` 指向資料庫服務；未設定此選項時沿用 Neon。設定 `DISCORD_TOKEN`、`DISCORD_CLIENT_ID`、`ALCHEMY_API_KEY`、`DATABASE_URL`；可選 `DISCORD_GUILD_ID`，讓指令在指定伺服器較快出現。設定 `DISCORD_WALLET_CHANNEL_ID` 後，其他頻道的 `/wallet` 會立即私密拒絕，不消耗掃描額度。Token 與資料庫連線字串應保存為 Railway 變數，切勿提交或貼在公開訊息中。

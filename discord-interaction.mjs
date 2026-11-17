@@ -1,15 +1,37 @@
 import { MessageFlags, ThreadAutoArchiveDuration } from 'discord.js';
 import { readFile } from 'node:fs/promises';
+import { randomInt } from 'node:crypto';
 
-let waitingGifPromise;
-const waitingFiles = async () => {
-  waitingGifPromise ??= readFile(new URL('./assets/cat-wait.gif', import.meta.url)).catch(error => {
-    console.error('無法讀取等待動畫', error.code || error.name);
-    return null;
-  });
-  const gif = await waitingGifPromise;
-  return gif ? [{ attachment: gif, name: 'cat-wait.gif' }] : [];
-};
+const assetsDirectory = new URL('./assets/cat-wait/', import.meta.url);
+let waitingAssetsPromise;
+
+async function waitingAsset(chooseIndex = randomInt) {
+  waitingAssetsPromise ??= readFile(new URL('manifest.json', assetsDirectory), 'utf8')
+    .then(JSON.parse).catch(error => {
+      console.error('無法讀取等待動畫清單', error.code || error.name);
+      waitingAssetsPromise = undefined;
+      return [];
+    });
+  const candidates = [...await waitingAssetsPromise];
+  while (candidates.length) {
+    const [entry] = candidates.splice(chooseIndex(candidates.length), 1);
+    if (!entry || !/^[a-z0-9-]+\.gif$/.test(entry.file) ||
+        !['CC0 1.0', 'CC BY 2.5', 'CC BY-SA 4.0'].includes(entry.license) ||
+        !entry.author || !entry.source?.startsWith('https://') || !entry.license_url?.startsWith('https://') || !entry.changes) {
+      console.error('等待動畫授權資料不完整，已略過');
+      continue;
+    }
+    try {
+      const gif = await readFile(new URL(entry.file, assetsDirectory));
+      const credit = entry.license === 'CC0 1.0' ? '' :
+        `\n\n動畫：${entry.author}｜${entry.license}\n來源：${entry.source}\n授權：${entry.license_url}\n變更：未修改（僅更名）`;
+      return { files: [{ attachment: gif, name: 'cat-wait.gif' }], credit };
+    } catch (error) {
+      console.error('無法讀取等待動畫', entry.file, error.code || error.name);
+    }
+  }
+  return { files: [], credit: '' };
+}
 
 const validWallet = wallet => /^0x[0-9a-f]{40}$/.test(wallet);
 const threadName = interaction => {
@@ -20,7 +42,7 @@ const threadName = interaction => {
 };
 
 export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanBlocked = async () => false,
-  recordScanFailure = async () => {}, renderPoster, formatReport, configured }) {
+  recordScanFailure = async () => {}, renderPoster, formatReport, configured, chooseWaitingIndex = randomInt }) {
   let busy = false;
   const failedWallets = new Map();
   return async interaction => {
@@ -31,12 +53,16 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       return;
     }
     const wallet = interaction.options.getString('address', true).trim().toLowerCase();
-    let status, ownsBusy = false;
+    let status, ownsBusy = false, credit = '';
+    const withCredit = message => message + credit;
+    const editStatus = message => status.edit(message);
     try {
       await interaction.deferReply();
+      const animation = await waitingAsset(chooseWaitingIndex);
+      credit = animation.credit;
       await interaction.editReply({
-        content: '已收到 `/wallet` 查詢，貓咪正在開啟討論串；進度與報表會在串內更新。',
-        files: await waitingFiles(),
+        content: withCredit('已收到 `/wallet` 查詢，貓咪正在開啟討論串；進度與報表會在串內更新。'),
+        files: animation.files,
       });
       let thread;
       try {
@@ -48,28 +74,28 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         });
       } catch (error) {
         console.error('無法建立錢包討論串', error.code || error.name);
-        await interaction.editReply('已收到查詢，但無法建立討論串。請確認機器人在此頻道有「建立公開討論串」及「在討論串傳送訊息」權限。');
+        await interaction.editReply(withCredit('已收到查詢，但無法建立討論串。請確認機器人在此頻道有「建立公開討論串」及「在討論串傳送訊息」權限。'));
         return;
       }
       try {
         await thread.send({
-          content: '🐈 貓咪陪你等報表。',
-          files: await waitingFiles(),
+          content: withCredit('🐈 貓咪陪你等報表。'),
+          files: animation.files,
         });
         status = await thread.send('正在檢查地址與已儲存報表。');
       }
       catch (error) {
         console.error('無法在錢包討論串回覆', error.code || error.name);
-        await interaction.editReply('討論串已建立，但機器人無法在串內回覆。請確認「在討論串傳送訊息」及「附加檔案」權限。');
+        await interaction.editReply(withCredit('討論串已建立，但機器人無法在串內回覆。請確認「在討論串傳送訊息」及「附加檔案」權限。'));
         return;
       }
       if (!validWallet(wallet)) {
-        await status.edit('請輸入有效的 Base 錢包地址（0x 開頭，後接 40 個十六進位字元）。'); return;
+        await editStatus('請輸入有效的 Base 錢包地址（0x 開頭，後接 40 個十六進位字元）。'); return;
       }
       if (!configured()) {
-        await status.edit('機器人已連線，但錢包資料來源尚未完成設定，目前無法產生報表。'); return;
+        await editStatus('機器人已連線，但錢包資料來源尚未完成設定，目前無法產生報表。'); return;
       }
-      if (busy) { await status.edit('目前有查詢進行中，請稍後再試。'); return; }
+      if (busy) { await editStatus('目前有查詢進行中，請稍後再試。'); return; }
       busy = true; ownsBusy = true;
       const cached = await readSnapshot(wallet);
       if (cached) {
@@ -77,17 +103,17 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         const poster = renderPoster(wallet, cached, note);
         await thread.send({ content: `<@${interaction.user.id}>\n${formatReport(wallet, cached, note)}`,
           allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
-        await status.edit('已完成：文字報表與 PNG 海報已傳到此討論串。');
+        await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
         return;
       }
       const today = new Date().toISOString().slice(0, 10);
       for (const [key, day] of failedWallets) if (day !== today) failedWallets.delete(key);
       if (failedWallets.has(wallet) || await scanBlocked(wallet)) {
-        await status.edit('此錢包今天的掃描曾失敗，為避免重複消耗 API，暫停重試至 UTC 零點。已儲存的進度不受影響。'); return;
+        await editStatus('此錢包今天的掃描曾失敗，為避免重複消耗 API，暫停重試至 UTC 零點。已儲存的進度不受影響。'); return;
       }
-      await status.edit('找不到已儲存報表，正在掃描歷史資料；本次消耗設有上限，請稍候。');
+      await editStatus('找不到已儲存報表，正在掃描歷史資料；本次消耗設有上限，請稍候。');
       if (!await reserveScan()) {
-        await status.edit('今日背景掃描額度已用完；已完成的進度會保留，請於 UTC 零點後再試。'); return;
+        await editStatus('今日背景掃描額度已用完；已完成的進度會保留，請於 UTC 零點後再試。'); return;
       }
       let result;
       try { result = await readPage(wallet); }
@@ -101,12 +127,12 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         const poster = renderPoster(wallet, result.snapshot, '');
         await thread.send({ content: `<@${interaction.user.id}>\n${formatReport(wallet, result.snapshot, '')}`,
           allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
-        await status.edit('已完成：文字報表與 PNG 海報已傳到此討論串。');
+        await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
         return;
       }
-      if (result.waiting) { await status.edit('這個錢包正由其他查詢處理，請稍後再試。'); return; }
+      if (result.waiting) { await editStatus('這個錢包正由其他查詢處理，請稍後再試。'); return; }
       const p = result.progress;
-      await status.edit(p ? `本次掃描已處理至區塊 ${p.through} / ${p.target}；進度已保存，稍後可再次使用指令繼續。`
+      await editStatus(p ? `本次掃描已處理至區塊 ${p.through} / ${p.target}；進度已保存，稍後可再次使用指令繼續。`
         : '本次掃描尚未取得進度，請稍後再試。');
     } catch (error) {
       let detail = String(error.message || 'Unknown error');
@@ -120,8 +146,8 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       const message = failedWallets.has(wallet)
         ? '錢包掃描未完成。為避免重複消耗 API，這個錢包暫停掃描至 UTC 零點；若先前有保存進度，會從保存的位置繼續。'
         : '錢包查詢未完成，請稍後再試；若已有保存的掃描進度，將從上次進度繼續。';
-      if (status) await status.edit(message).catch(() => {});
-      else if (interaction.replied || interaction.deferred) await interaction.editReply(message).catch(() => {});
+      if (status) await editStatus(message).catch(() => {});
+      else if (interaction.replied || interaction.deferred) await interaction.editReply(withCredit(message)).catch(() => {});
       else await interaction.reply({ content: message }).catch(() => {});
     } finally { if (ownsBusy) busy = false; }
   };
