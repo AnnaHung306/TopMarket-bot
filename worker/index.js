@@ -13,11 +13,11 @@ function rpcError(message,defaultMessage){
   const text=typeof message==='string'&&message?message:defaultMessage;
   return Error(ALCHEMY_KEY?text.replaceAll(ALCHEMY_KEY,'[redacted]'):text);
 }
-async function rpcRequest(payload,timeoutMs=20000){
+async function rpcRequest(payload){
   const headers={'content-type':'application/json'};
   if(ALCHEMY_KEY) headers.authorization='Bearer '+ALCHEMY_KEY;
   try{
-    const response=await fetch(RPC,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(timeoutMs)});
+    const response=await fetch(RPC,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(20000)});
     if(!response.ok){
       const body=await response.json().catch(()=>null);
       const error=rpcError(body?.error?.message,'Base RPC HTTP '+response.status);

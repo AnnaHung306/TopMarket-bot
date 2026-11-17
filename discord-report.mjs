@@ -29,26 +29,3 @@ export function formatReport(wallet, snapshot, note = '') {
     `${!t.raffleKnown || snapshot.rebuildRequired ? '\n⚠️ 舊版摘要，部分分類待更新。' : ''}` +
     `\n僅統計可識別的鏈上活動；不含持倉估值。${note ? `\n${note}` : ''}`;
 }
-
-export async function getReport(wallet, readPage, onProgress, now = () => Date.now()) {
-  const deadline = now() + 12 * 60_000;
-  let snapshot = null, afterBlock;
-  let refresh = false;
-  while (now() < deadline) {
-    const result = await readPage(wallet, afterBlock);
-    if (result.ready) {
-      snapshot = result.snapshot;
-      if (refresh) return { snapshot, note: '' };
-      if (!result.cached) return { snapshot, note: '' };
-      await onProgress('已讀取儲存的摘要，正在核對最新區塊…');
-      afterBlock = snapshot.through;
-      refresh = true;
-      continue;
-    }
-    const p = result.progress;
-    await onProgress(p ? `正在核對區塊 ${p.through} / ${p.target}，請稍候…` : '另一個查詢正在處理這個錢包，請稍候…');
-    if (result.waiting) await new Promise(resolve => setTimeout(resolve, 3000));
-  }
-  if (snapshot) return { snapshot, note: '⚠️ 更新未完成，顯示先前已存摘要；請稍後再查詢。' };
-  throw new Error('查詢時間較長，進度已保存。請稍後再次使用指令繼續。');
-}

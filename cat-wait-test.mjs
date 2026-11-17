@@ -20,7 +20,7 @@ for (const [index, entry] of entries.entries()) {
   const initial = replies[0];
   assert.equal(createHash('sha256').update(initial.files[0].attachment).digest('hex'), entry.sha256);
   assert.equal(replies[1].content, `${initial.content}\n進度與報表請見 <#thread-123>`);
-  assert.deepEqual(messages, ['正在檢查地址與已儲存報表。']);
+  assert.deepEqual(messages, ['正在核對錢包收支，完成後會在此通知。']);
   assert.match(edits[0], /有效的 Base 錢包地址/);
   assert.equal(initial.content, '貓貓正在努力工作，請稍後... 完成後會拍拍通知');
   assert.ok(!/https?:\/\//.test(replies[1].content), `${entry.file} exposed an external link`);
