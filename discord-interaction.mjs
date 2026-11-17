@@ -1,6 +1,12 @@
 import { ThreadAutoArchiveDuration } from 'discord.js';
 
 const validWallet = wallet => /^0x[0-9a-f]{40}$/.test(wallet);
+const threadName = interaction => {
+  const username = String(interaction.member?.displayName || interaction.user.displayName || interaction.user.username)
+    .replace(/[\u0000-\u001f\u007f]/g, ' ').trim() || '用戶';
+  const suffix = ' 錢包報表查詢';
+  return username.slice(0, 100 - suffix.length) + suffix;
+};
 
 export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanBlocked = async () => false,
   recordScanFailure = async () => {}, renderPoster, formatReport, configured }) {
@@ -16,7 +22,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       try {
         const starter = await interaction.fetchReply();
         thread = await starter.startThread({
-          name: `錢包報表 · ${validWallet(wallet) ? wallet.slice(0, 8) + '…' + wallet.slice(-6) : '地址檢查'}`,
+          name: threadName(interaction),
           autoArchiveDuration: ThreadAutoArchiveDuration.OneHour,
           reason: 'Top.Market wallet report',
         });
@@ -43,7 +49,8 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       if (cached) {
         const note = '顯示已儲存的摘要，未自動查詢最新區塊。';
         const poster = renderPoster(wallet, cached, note);
-        await thread.send({ content: formatReport(wallet, cached, note), files: [{ attachment: poster, name: 'wallet-report.png' }] });
+        await thread.send({ content: `<@${interaction.user.id}>\n${formatReport(wallet, cached, note)}`,
+          allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
         await status.edit('已完成：文字報表與 PNG 海報已傳到此討論串。');
         return;
       }
@@ -66,7 +73,8 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       }
       if (result.ready) {
         const poster = renderPoster(wallet, result.snapshot, '');
-        await thread.send({ content: formatReport(wallet, result.snapshot, ''), files: [{ attachment: poster, name: 'wallet-report.png' }] });
+        await thread.send({ content: `<@${interaction.user.id}>\n${formatReport(wallet, result.snapshot, '')}`,
+          allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
         await status.edit('已完成：文字報表與 PNG 海報已傳到此討論串。');
         return;
       }

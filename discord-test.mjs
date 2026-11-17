@@ -26,12 +26,15 @@ const responses = [], threadMessages = [], statusEdits = [];
 const thread = { async send(payload) { threadMessages.push(payload); return { async edit(value) { statusEdits.push(value); } }; } };
 const interaction = {
   isChatInputCommand: () => true, commandName: 'wallet', options: { getString: () => wallet },
+  user: { id: '123456789012345678', username: 'test-user' }, member: { displayName: '測試用戶' },
   async reply(options) { this.replied = true; responses.push(options); },
-  async fetchReply() { return { async startThread(options) { assert.match(options.name, /錢包報表/); return thread; } }; },
+  async fetchReply() { return { async startThread(options) { assert.equal(options.name, '測試用戶 錢包報表查詢'); return thread; } }; },
 };
 const handler = createWalletHandler({ readSnapshot: async () => updated, reserveScan: async () => { throw Error('cache must not consume quota'); }, readPage: async () => { throw Error('cache must not call RPC'); }, renderPoster, formatReport, configured: () => true });
 await handler(interaction);
 assert.match(responses[0].content, /已收到/);
+assert.match(threadMessages[1].content, /^<@123456789012345678>\n/);
+assert.deepEqual(threadMessages[1].allowedMentions, { users: ['123456789012345678'] });
 assert.match(threadMessages[1].content, /3\.765433 USDC/);
 assert.equal(threadMessages[1].files[0].name, 'wallet-report.png');
 assert.deepEqual([...threadMessages[1].files[0].attachment.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);

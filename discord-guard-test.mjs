@@ -4,7 +4,8 @@ import { createWalletHandler } from './discord-interaction.mjs';
 function interaction(address) {
   const edits = [], messages = [];
   const thread = { async send(payload) { messages.push(payload); return { async edit(value) { edits.push(value); } }; } };
-  return { commandName:'wallet', isChatInputCommand:()=>true, options:{ getString:()=>address }, edits, messages,
+  return { commandName:'wallet', isChatInputCommand:()=>true, options:{ getString:()=>address },
+    user:{ id:'123456789012345678', username:'test-user' }, member:{ displayName:'測試用戶' }, edits, messages,
     async reply(payload) { this.replied = true; this.first = payload; this.ackAt = performance.now(); },
     async fetchReply() { return { async startThread() { return thread; } }; },
     async editReply(payload) { edits.push(payload); } };
@@ -68,6 +69,10 @@ for (let iteration=0; iteration<10; iteration++) {
   assert.ok(scans <= 1 && reservations <= 1, `iteration ${iteration}: scan limit exceeded`);
   if (iteration <= 3) assert.equal(scans,0);
   if (iteration===2) { assert.equal(reservations,0); assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png'); }
+  if (iteration===2 || iteration===6) {
+    assert.match(test.messages.at(-1).content, /^<@123456789012345678>\n/);
+    assert.deepEqual(test.messages.at(-1).allowedMentions, { users:['123456789012345678'] });
+  }
   if (iteration===3) assert.match(test.edits.at(-1),/額度已用完/);
   if (iteration===4) assert.match(test.edits.at(-1),/其他查詢處理/);
   if (iteration===5) assert.match(test.edits.at(-1),/未完成/);
