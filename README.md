@@ -4,13 +4,13 @@
 
 討論串命名為「用戶名 錢包報表查詢」，優先使用伺服器顯示名稱；報表完成時只標記發起指令的用戶，不標記角色或所有人。
 
-機器人提供 `/wallet address:錢包地址`，直接在 Discord 回覆收支摘要與 PNG 海報，無需開啟網站。指令會先在頻道公開回覆「已收到」，並從該訊息建立公開討論串；進度、文字報表和 PNG 都在串內，能看到頻道及討論串的人也能看到錢包地址與結果。已有摘要直接使用快取，不自動更新或呼叫 Alchemy。首次掃描會嘗試讀取完整歷史，僅保存已完成的連續區塊進度。Discord 路徑會使用 Alchemy 的錢包轉帳索引查 USDC 入帳和支出，並以交易收據逐筆核對；其他歷史事件仍需掃描 log。每次指令最多預留一次掃描，全服務每天 UTC 最多四次，每次限制最多 25,000 個估算 CU、240 秒；失敗也消耗一次預留，同一錢包當天不會再次掃描。Pay as you go 沒有免費方案的 10 區塊 log 範圍限制，但完整報表與 PNG 仍須以真實錢包驗收；請勿把收到「已收到」視為報表完成。報表只包含可識別的收支，不包含持倉估值。為控制鏈上查詢量，同一個機器人程序一次處理一個查詢。
+機器人提供 `/wallet address:錢包地址`，直接在 Discord 回覆收支摘要與 PNG 海報，無需開啟網站。指令會先在頻道公開回覆「已收到」及貓咪等待 GIF，並從該訊息建立公開討論串；討論串內也有等待 GIF，進度、文字報表和 PNG 都在串內。能看到頻道及討論串的人也能看到錢包地址與結果。已有摘要直接使用快取，不自動更新或呼叫 Alchemy。首次掃描會嘗試讀取完整歷史，僅保存已完成的連續區塊進度。Discord 路徑會使用 Alchemy 的錢包轉帳索引查 USDC 入帳和支出，並以交易收據逐筆核對；其他歷史事件仍需掃描 log。每次指令最多預留一次掃描，全服務每天 UTC 最多四次，每次限制最多 25,000 個估算 CU、240 秒；失敗也消耗一次預留，同一錢包當天不會再次掃描。Pay as you go 沒有免費方案的 10 區塊 log 範圍限制，但完整報表與 PNG 仍須以真實錢包驗收；請勿把收到「已收到」視為報表完成。報表只包含可識別的收支，不包含持倉估值。為控制鏈上查詢量，同一個機器人程序一次處理一個查詢。
 
-需要 Node.js 22+、Discord Bot、Alchemy Base API key，以及 PostgreSQL 資料庫。使用 Railway PostgreSQL 時設定 `DATABASE_DRIVER=postgres` 並將 `DATABASE_URL` 指向資料庫服務；未設定此選項時沿用 Neon。設定 `DISCORD_TOKEN`、`DISCORD_CLIENT_ID`、`ALCHEMY_API_KEY`、`DATABASE_URL`；可選 `DISCORD_GUILD_ID`，讓指令在指定伺服器較快出現。Token 與資料庫連線字串應保存為 Railway 變數，切勿提交或貼在公開訊息中。
+需要 Node.js 22+、Discord Bot、Alchemy Base API key，以及 PostgreSQL 資料庫。使用 Railway PostgreSQL 時設定 `DATABASE_DRIVER=postgres` 並將 `DATABASE_URL` 指向資料庫服務；未設定此選項時沿用 Neon。設定 `DISCORD_TOKEN`、`DISCORD_CLIENT_ID`、`ALCHEMY_API_KEY`、`DATABASE_URL`；可選 `DISCORD_GUILD_ID`，讓指令在指定伺服器較快出現。設定 `DISCORD_WALLET_CHANNEL_ID` 後，其他頻道的 `/wallet` 會立即私密拒絕，不消耗掃描額度。Token 與資料庫連線字串應保存為 Railway 變數，切勿提交或貼在公開訊息中。
 
 1. 在 Discord Developer Portal 建立 Application 與 Bot，取得 Application ID 和 Bot Token。使用 OAuth2 URL Generator 勾選 `bot` 和 `applications.commands`，並給機器人「檢視頻道」「傳送訊息」「建立公開討論串」「在討論串傳送訊息」「附加檔案」權限，再邀請到伺服器。這個機器人不需要訊息內容等 privileged intents。
 2. 在 Railway 建立從本儲存庫部署的服務，設定上述變數。Railway 使用 `npm start` 執行常駐程序；請維持單一實例。可使用 Railway PostgreSQL，並以服務參照提供 `DATABASE_URL`。不需要公開網域或 HTTP 服務。
-3. 等待部署成功，在 Discord 輸入 `/wallet` 並填入 Base 地址。若使用全域指令，Discord 的指令同步可能需要一些時間。
+3. 若使用私人 MOD 頻道，讓 `@everyone` 無法檢視頻道，允許 MOD 身分組，並單獨允許機器人檢視、發言、建立公開討論串與附加檔案；將頻道 ID 設為 `DISCORD_WALLET_CHANNEL_ID`。置頂使用說明後，等待部署成功，在該頻道輸入 `/wallet` 並填入 Base 地址。若使用全域指令，Discord 的指令同步可能需要一些時間。
 
 本機執行：複製 `.env.example` 為 `.env` 並填入設定，然後執行 `npm ci` 和 `npm start`。停止程序可按 Ctrl+C。執行 `npm run test:discord` 測試報表格式與快取更新流程。
 

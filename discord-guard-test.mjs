@@ -6,9 +6,9 @@ function interaction(address) {
   const thread = { async send(payload) { messages.push(payload); return { async edit(value) { edits.push(value); } }; } };
   return { commandName:'wallet', isChatInputCommand:()=>true, options:{ getString:()=>address },
     user:{ id:'123456789012345678', username:'test-user' }, member:{ displayName:'測試用戶' }, edits, messages,
-    async reply(payload) { this.replied = true; this.first = payload; this.ackAt = performance.now(); },
+    async deferReply() { this.deferred = true; this.ackAt = performance.now(); },
     async fetchReply() { return { async startThread() { return thread; } }; },
-    async editReply(payload) { edits.push(payload); } };
+    async editReply(payload) { if (!this.first) this.first = payload; else edits.push(payload); this.replied = true; } };
 }
 
 const wallet='0x'+'a'.repeat(40), snapshot={ through: 99 };
@@ -49,6 +49,14 @@ try {
 } finally { console.error = previousError; }
 assert.equal(deniedScans, 0);
 assert.match(denied.edits.at(-1), /建立公開討論串/);
+process.env.DISCORD_WALLET_CHANNEL_ID = 'allowed-channel';
+const wrongChannel = interaction(wallet);
+wrongChannel.channelId = 'other-channel';
+wrongChannel.reply = async function(payload) { this.first = payload; };
+await createWalletHandler(options)(wrongChannel);
+assert.match(wrongChannel.first.content, /MOD 工具箱頻道/);
+assert.equal(wrongChannel.ackAt, undefined);
+delete process.env.DISCORD_WALLET_CHANNEL_ID;
 for (let iteration=0; iteration<10; iteration++) {
   let scans=0, reservations=0;
   const test = interaction(iteration===0 ? 'invalid' : wallet);
@@ -66,6 +74,8 @@ for (let iteration=0; iteration<10; iteration++) {
   try { await createWalletHandler(options)(test); } finally { console.error=oldError; }
   assert.ok(test.ackAt-begin < 3000, `iteration ${iteration}: initial response exceeded 3s`);
   assert.match(test.first.content,/已收到/);
+  assert.equal(test.first.files[0].name,'cat-wait.gif');
+  assert.equal(test.messages[0].files[0].name,'cat-wait.gif');
   assert.ok(scans <= 1 && reservations <= 1, `iteration ${iteration}: scan limit exceeded`);
   if (iteration <= 3) assert.equal(scans,0);
   if (iteration===2) { assert.equal(reservations,0); assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png'); }

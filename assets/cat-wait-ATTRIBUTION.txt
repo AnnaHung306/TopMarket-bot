@@ -1,0 +1,8 @@
+cat-wait.gif
+Creator: vibegif / direct-img
+Source: https://github.com/direct-img/vibegif.direct-img.link/tree/main/public/loading/cat
+License: CC0 1.0 Universal (public domain dedication)
+License URL: https://creativecommons.org/publicdomain/zero/1.0/
+Changes: Original GIF renamed from vibegif-loading-cat.gif to cat-wait.gif.
+
+The animation is bundled locally and sent as a Discord attachment during /wallet queries.

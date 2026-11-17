@@ -27,16 +27,20 @@ const thread = { async send(payload) { threadMessages.push(payload); return { as
 const interaction = {
   isChatInputCommand: () => true, commandName: 'wallet', options: { getString: () => wallet },
   user: { id: '123456789012345678', username: 'test-user' }, member: { displayName: '測試用戶' },
-  async reply(options) { this.replied = true; responses.push(options); },
+  async deferReply() { this.deferred = true; },
+  async editReply(options) { this.replied = true; responses.push(options); },
   async fetchReply() { return { async startThread(options) { assert.equal(options.name, '測試用戶 錢包報表查詢'); return thread; } }; },
 };
 const handler = createWalletHandler({ readSnapshot: async () => updated, reserveScan: async () => { throw Error('cache must not consume quota'); }, readPage: async () => { throw Error('cache must not call RPC'); }, renderPoster, formatReport, configured: () => true });
 await handler(interaction);
 assert.match(responses[0].content, /已收到/);
-assert.match(threadMessages[1].content, /^<@123456789012345678>\n/);
-assert.deepEqual(threadMessages[1].allowedMentions, { users: ['123456789012345678'] });
-assert.match(threadMessages[1].content, /3\.765433 USDC/);
-assert.equal(threadMessages[1].files[0].name, 'wallet-report.png');
-assert.deepEqual([...threadMessages[1].files[0].attachment.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+assert.equal(responses[0].files[0].name, 'cat-wait.gif');
+assert.deepEqual([...responses[0].files[0].attachment.subarray(0, 6)], [71, 73, 70, 56, 57, 97]);
+assert.equal(threadMessages[0].files[0].name, 'cat-wait.gif');
+assert.match(threadMessages[2].content, /^<@123456789012345678>\n/);
+assert.deepEqual(threadMessages[2].allowedMentions, { users: ['123456789012345678'] });
+assert.match(threadMessages[2].content, /3\.765433 USDC/);
+assert.equal(threadMessages[2].files[0].name, 'wallet-report.png');
+assert.deepEqual([...threadMessages[2].files[0].attachment.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 assert.match(statusEdits[0], /已完成/);
 console.log('Discord report tests passed');
