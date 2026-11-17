@@ -14,7 +14,6 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function alchemy({
   maxUnits = 8_000_000, perSecond = 6_000, maxMs = Infinity, maxInFlight = Infinity, beforeRequest = () => {},
-  indexedWalletTransfers = false,
 } = {}) {
   if (!process.env.ALCHEMY_API_KEY?.trim()) throw Error('Alchemy Base RPC is not configured');
   const stats = { units: 0, requests: 0, retries: 0, splits: 0, methods: {} };
@@ -38,9 +37,9 @@ export function alchemy({
       try {
         return await rpcRequest(payload, Math.max(1, Math.floor(Math.min(20_000, deadline - performance.now()))));
       } catch (error) {
-        if (attempt === 5 || ![429, 500, 502, 503, 504].includes(error.status)) throw error;
+        if (attempt === 2 || ![429, 500, 502, 503, 504].includes(error.status)) throw error;
         stats.retries++;
-        await delay(Math.min(1000 * (2 ** attempt) + Math.floor(Math.random() * 250), Math.max(0, deadline - performance.now())));
+        await delay(Math.min(500 * (2 ** attempt), Math.max(0, deadline - performance.now())));
       }
     }
   }
@@ -65,7 +64,7 @@ export function alchemy({
 
   async function batch(calls, allowReverts = false) {
     const chunks = [];
-    for (let i = 0; i < calls.length; i += 8) chunks.push(calls.slice(i, i + 8));
+    for (let i = 0; i < calls.length; i += 25) chunks.push(calls.slice(i, i + 25));
     const results = [];
     for (let i = 0; i < chunks.length; i += 8) {
       const pages = await Promise.all(chunks.slice(i, i + 8).map(async chunk => {
@@ -84,7 +83,7 @@ export function alchemy({
     }
     return results;
   }
-  return { rpc, batch, stats, parallelLogSplits: Number.isFinite(maxInFlight), indexedWalletTransfers };
+  return { rpc, batch, stats, parallelLogSplits: Number.isFinite(maxInFlight) };
 }
 
 export async function getFilteredLogs(reader, filter, from, to) {

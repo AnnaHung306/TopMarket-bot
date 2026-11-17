@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node discord-bot.mjs",
-    "test:discord": "node scripts/verify-cat-assets.mjs && node cat-wait-test.mjs && node discord-test.mjs && node discord-guard-test.mjs && node discord-retry-test.mjs && node alchemy-budget-test.mjs && node wallet-transfers-test.mjs && node wallet-state-cache-test.mjs",
+    "test:discord": "node scripts/verify-cat-assets.mjs && node cat-wait-test.mjs && node discord-test.mjs && node discord-guard-test.mjs && node discord-retry-test.mjs && node alchemy-budget-test.mjs",
     "dev": "node dev.mjs",
     "test": "node test.mjs && node integration-test.mjs && node refund-test.mjs && node treasury-integration-test.mjs && node export-test.mjs && node rewards-cost-test.mjs && node acquisition-integration-test.mjs && node output-consistency-test.mjs",
     "build": "bash scripts/build.sh",

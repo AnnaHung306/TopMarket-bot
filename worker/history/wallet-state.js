@@ -26,20 +26,16 @@ const auditedBeacons = new Map([
 const ordered = (a, b) => Number(a.blockNumber) - Number(b.blockNumber) || Number(a.logIndex) - Number(b.logIndex);
 const addressWord = value => typeof value === 'string' && /^0x0{24}[0-9a-f]{40}$/i.test(value) && BigInt(value) !== 0n ? addr(value) : null;
 
-export async function walletStateHistory(reader, addresses, from, to, previous = null) {
+export async function walletStateHistory(reader, addresses, from, to) {
   const at = hex(to);
   const trusted = [...auditedBeacons.keys()];
-  const nextFrom = previous ? previous.through + 1 : from;
-  if (previous && (previous.through < from - 1 || previous.through >= to)) throw Error('Invalid cached wallet configuration range');
-  const [slots, current, newUpdates, newUpgrades, implementations] = await Promise.all([
+  const [slots, current, updates, upgrades, implementations] = await Promise.all([
     reader.batch(addresses.map(box => ['eth_getStorageAt', [box, BEACON_SLOT, at]])),
     reader.batch(addresses.map(to => ['eth_call', [{ to, data: TREASURY }, at]]), true),
-    addresses.length ? getFilteredLogs(reader, { address: addresses, topics: [[SIG.treasuryUpdated, SIG.feeRecipientUpdated]] }, nextFrom, to) : [],
-    getFilteredLogs(reader, { address: trusted, topics: [UPGRADED] }, nextFrom, to),
+    addresses.length ? getFilteredLogs(reader, { address: addresses, topics: [[SIG.treasuryUpdated, SIG.feeRecipientUpdated]] }, from, to) : [],
+    getFilteredLogs(reader, { address: trusted, topics: [UPGRADED] }, from, to),
     reader.batch(trusted.map(to => ['eth_call', [{ to, data: '0x5c60da1b' }, at]]), true),
   ]);
-  const updates = [...(previous?.updates ?? []), ...newUpdates];
-  const upgrades = [...(previous?.upgrades ?? []), ...newUpgrades];
   const beacons = new Map(addresses.map((box, index) => [box, addressWord(slots[index])]));
   const timelines = new Map(trusted.map((beacon, index) => {
     const versions = upgrades.filter(log => log.address === beacon).sort(ordered);
@@ -90,7 +86,7 @@ export async function walletStateHistory(reader, addresses, from, to, previous =
       return start !== null && start < block;
     });
   }
-  return { through: to, updates, upgrades, payers, isTreasury, epoch, audited };
+  return { updates, payers, isTreasury, epoch, audited };
 }
 
 export async function readWalletHistoricalCalls(reader, calls, history) {
