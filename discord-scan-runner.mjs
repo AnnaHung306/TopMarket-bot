@@ -1,8 +1,10 @@
 import { SCAN_ATTEMPTS, SCAN_BLOCK_WINDOW, SCAN_MAX_MS, SCAN_MAX_UNITS } from './discord-quota.mjs';
 import { nextUtcMidnight } from './discord-scan-jobs.mjs';
+import { notifyAdminFailure } from './discord-failure.mjs';
 
 const waitUntil = ms => new Date(Date.now() + ms);
 const budgetLimit = error => /^Alchemy sync (?:budget|time limit) reached/.test(String(error?.message));
+const narrowWindow = window => window ? Math.max(10_000, Math.floor(window / 5)) : SCAN_BLOCK_WINDOW;
 function safeError(error) {
   let detail = String(error?.message || error?.name || 'Unknown error');
   for (const key of ['ALCHEMY_API_KEY', 'DATABASE_URL', 'DISCORD_TOKEN', 'ETHERSCAN_API_KEY']) {
@@ -48,19 +50,16 @@ export function createScanRunner({ client, jobs, readPage, readSnapshot, readPro
     await status.edit(stalled
       ? '多段掃描仍無法保存新進度，已停止耗用 API 額度並通知 MOD；已保存的進度不受影響。'
       : '兩次掃描仍未完成，已通知 MOD 協助；已保存的進度不受影響。');
-    const adminId = process.env.DISCORD_ADMIN_ID?.trim();
-    const mention = adminId && /^\d{17,20}$/.test(adminId) ? `<@${adminId}>` : '@en';
-    await thread.send({
-      content: `${mention} 錢包 ${job.wallet}${stalled ? ' 多段掃描無法保存新進度' : ' 連續兩次掃描未完成'}，請協助查核。`,
-      allowedMentions: { users: mention.startsWith('<@') ? [adminId] : [] },
-    });
+    await notifyAdminFailure(thread, job.wallet,
+      stalled ? '多段掃描無法保存新進度' : '連續兩次掃描未完成');
     await jobs.remove(job.wallet);
   }
 
   async function deliver(job, thread, status, snapshot) {
-    const poster = await renderPoster(job.wallet, snapshot, '');
+    const note = job.after_block == null ? '' : '已更新快取至新的已確認區塊。';
+    const poster = await renderPoster(job.wallet, snapshot, note);
     await thread.send({
-      content: `拍拍 <@${job.requester_id}>\n${formatReport(job.wallet, snapshot, '')}`,
+      content: `拍拍 <@${job.requester_id}>\n${formatReport(job.wallet, snapshot, note)}`,
       allowedMentions: { users: [job.requester_id] },
       files: [{ attachment: poster, name: 'wallet-report.png' }],
     });
@@ -100,17 +99,28 @@ export function createScanRunner({ client, jobs, readPage, readSnapshot, readPro
           Error('Previous two wallet scan attempts failed'));
         return;
       }
+      const refreshFrom = Number.isSafeInteger(job.after_block) ? job.after_block : null;
       const saved = await readSnapshot(job.wallet);
-      if (saved) { await deliver(job, thread, status, saved); return; }
+      if (saved && (refreshFrom === null || saved.through > refreshFrom)) {
+        await deliver(job, thread, status, saved);
+        return;
+      }
+      // A completed cache row may have been evicted while queued. In that case
+      // rebuild from the full history instead of failing the refresh checkpoint.
+      const afterBlock = refreshFrom !== null && saved ? refreshFrom : undefined;
       let lastProgress = await readProgress(job.wallet);
       if (!await reserveScan()) {
         await status.edit(`${progressText(lastProgress)}\n今日鏈上掃描額度已用完；會在 UTC 零點後自動續掃。`);
         await jobs.reschedule(job.wallet, { nextRunAt: nextUtcMidnight() });
         return;
       }
-      await status.edit('正在核對完整歷史；每段掃描設有時間與 API 用量上限。');
+      await status.edit(afterBlock === undefined
+        ? '正在核對完整歷史；每段掃描設有時間與 API 用量上限。'
+        : '正在更新已存報表；每段掃描設有時間與 API 用量上限。');
+      // Gavin's first page searches the entire remaining history. Keep that
+      // fast path until a segment stalls, then persist a smaller window.
       const budget = { maxUnits, units: 0, deadline: performance.now() + maxMs,
-        blockWindow: Number(job.block_window) || SCAN_BLOCK_WINDOW };
+        blockWindow: Number(job.stalls) > 0 ? Number(job.block_window) || SCAN_BLOCK_WINDOW : 0 };
       let lastThrough = Number(lastProgress?.through ?? -1), pages = 0, failures = Number(job.failures);
       progressTimer = setInterval(() => {
         const message = `${progressText(lastProgress)}\n本段已送出約 ${Math.round(budget.units).toLocaleString()} / ${maxUnits.toLocaleString()} 估算 CU 的鏈上請求。`;
@@ -121,9 +131,19 @@ export function createScanRunner({ client, jobs, readPage, readSnapshot, readPro
       while (performance.now() < budget.deadline && budget.units < maxUnits && pages < 100) {
         let result;
         try {
-          result = await readPage(job.wallet, budget);
+          result = await readPage(job.wallet, budget, afterBlock);
         } catch (error) {
-          if (budgetLimit(error)) break;
+          if (budgetLimit(error)) {
+            const nextWindow = narrowWindow(budget.blockWindow);
+            if (nextWindow !== budget.blockWindow &&
+                budget.deadline - performance.now() >= 8_000 && budget.units < maxUnits) {
+              console.info('錢包掃描達單次上限，於同段縮小範圍重試',
+                `block_window=${nextWindow}`, `estimated_units=${budget.units}`);
+              budget.blockWindow = nextWindow;
+              continue;
+            }
+            break;
+          }
           failures++;
           console.error(`錢包掃描第 ${failures} 次未完成`, error.code || error.name,
             `pages=${pages}`, `estimated_units=${budget.units}`);
@@ -172,7 +192,7 @@ export function createScanRunner({ client, jobs, readPage, readSnapshot, readPro
               { code: 'NO_CHECKPOINT' }));
           return;
         }
-        const blockWindow = Math.max(10_000, Math.floor(budget.blockWindow / 5));
+        const blockWindow = narrowWindow(budget.blockWindow);
         await status.edit(`${progressText(lastProgress)}\n本段未能保存新進度；下段會縮小區塊範圍後重試。`);
         await jobs.reschedule(job.wallet, { failures, stalls, blockWindow, nextRunAt: waitUntil(1_000) });
         console.info('錢包掃描未能保存檢查點，縮小範圍', `stalls=${stalls}`,

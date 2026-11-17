@@ -8,7 +8,7 @@ const wallet = '0x' + 'a'.repeat(40);
 const totals = summarizeWalletEvents([]);
 totals.pack = '1234567'; totals.sales = '5000000'; totals.pendingPacks = '1';
 const old = { start: 1, through: 10, asOf: '2026-01-01', totals };
-const updated = { ...old, through: 20 };
+const updated = { ...old, through: 20, asOf: new Date().toISOString() };
 const calls = [];
 const pages = [{ ready: true, cached: true, snapshot: old }, { ready: false, progress: { through: 15, target: 20 } }, { ready: true, cached: false, snapshot: updated }];
 const result = await getReport(wallet, async (address, after) => { calls.push([address, after]); return pages.shift(); }, async () => {});

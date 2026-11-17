@@ -8,10 +8,18 @@ export const SCAN_MAX_MS = 52000;
 export const DAILY_SCAN_LIMIT = 8;
 // Version 3 also blocked wallets after a normal time/CU checkpoint. Those
 // records must not prevent the corrected background queue from resuming.
-const SCAN_ALGORITHM_VERSION = 4;
+const SCAN_ALGORITHM_VERSION = 5;
 // Smaller checkpoints make long-running background scans resumable after a
 // timeout or deployment restart. The shared CU and daily caps still apply.
 export const SCAN_BLOCK_WINDOW = 500_000;
+
+// Leave room inside the same reservation to retry a dense Gavin full-range
+// query with a smaller block window, without raising the service CU ceiling.
+export function pageUnitLimit(budget) {
+  const remaining = Math.max(0, budget.maxUnits - budget.units);
+  return budget.blockWindow === 0
+    ? Math.min(remaining, Math.floor(budget.maxUnits * 5 / 8)) : remaining;
+}
 
 async function ensureFailures(sql) {
   await sql`CREATE TABLE IF NOT EXISTS discord_scan_failures (

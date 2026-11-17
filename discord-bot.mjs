@@ -5,7 +5,7 @@ import { readWalletSnapshot, readWalletProgress, walletCachePage } from './worke
 import { formatReport } from './discord-report.mjs';
 import { renderGavinPoster as renderPoster } from './discord-gavin-poster.mjs';
 import { createWalletHandler } from './discord-interaction.mjs';
-import { reserveScan, releaseUnusedScan, scanBlocked, recordScanFailure, SCAN_BLOCK_WINDOW } from './discord-quota.mjs';
+import { reserveScan, releaseUnusedScan, scanBlocked, recordScanFailure, SCAN_BLOCK_WINDOW, pageUnitLimit } from './discord-quota.mjs';
 import { claimScanJob, enqueueScanJob, removeScanJob, renewScanLease, rescheduleScanJob } from './discord-scan-jobs.mjs';
 import { createScanRunner } from './discord-scan-runner.mjs';
 
@@ -23,12 +23,25 @@ const jobs = {
   renew: wallet => renewScanLease(database(), wallet),
   remove: wallet => removeScanJob(database(), wallet),
 };
-const readPage = (address, budget) => walletCachePage(database(), address, undefined, {
-  maxUnits: budget.maxUnits - budget.units,
-  maxMs: Math.min(20_000, Math.max(1, budget.deadline - performance.now())),
-  perSecond: 6_000, maxInFlight: 24, blockWindow: budget.blockWindow ?? SCAN_BLOCK_WINDOW,
-  sharedBudget: budget,
-});
+const readPage = async (address, budget, afterBlock) => {
+  const started = performance.now(), before = budget.units;
+  const unitLimit = pageUnitLimit(budget);
+  let outcome = 'error';
+  try {
+    const result = await walletCachePage(database(), address, afterBlock, {
+      maxUnits: unitLimit,
+      maxMs: Math.min(20_000, Math.max(1, budget.deadline - performance.now())),
+      perSecond: 6_000, maxInFlight: 24, blockWindow: budget.blockWindow ?? SCAN_BLOCK_WINDOW,
+      sharedBudget: budget,
+    });
+    outcome = result.ready ? 'ready' : result.waiting ? 'waiting' : `checkpoint-${result.progress?.through ?? 'none'}`;
+    return result;
+  } finally {
+    console.info('錢包頁面讀取', `outcome=${outcome}`,
+      `window=${budget.blockWindow || 'full'}`, `elapsed_ms=${Math.round(performance.now() - started)}`,
+      `estimated_units=${budget.units - before}`, `unit_limit=${unitLimit}`);
+  }
+};
 const runner = createScanRunner({ client, jobs, readPage,
   readSnapshot: address => readWalletSnapshot(database(), address),
   readProgress: address => readWalletProgress(database(), address),

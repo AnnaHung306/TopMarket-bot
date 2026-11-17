@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createScanRunner } from './discord-scan-runner.mjs';
 import { nextUtcMidnight } from './discord-scan-jobs.mjs';
+import { pageUnitLimit } from './discord-quota.mjs';
 
 const wallet = '0x' + 'a'.repeat(40);
 const requester = '123456789012345678', admin = '872351254536405093';
@@ -99,22 +100,52 @@ await quiet(() => limit.runner.wake());
 assert.equal(limit.rescheduled.length, 1);
 assert.equal(limit.counts().recorded, 0);
 assert.match(limit.edits.at(-1), /尚未取得可保存的檢查點/);
-assert.equal(limit.rescheduled[0].blockWindow, 100_000);
+assert.equal(limit.rescheduled[0].blockWindow, 500_000);
 assert.equal(limit.rescheduled[0].stalls, 1);
 console.log('PASS: a time limit narrows the block range without false failure');
 
 limit.queue.push({ wallet, thread_id: 'thread-123', requester_id: requester,
-  status_id: 'status-123', failures: 0, stalls: 1, block_window: 100_000 });
+  status_id: 'status-123', failures: 0, stalls: 1, block_window: 500_000 });
 await quiet(() => limit.runner.wake());
-assert.equal(limit.rescheduled[1].blockWindow, 20_000);
+assert.equal(limit.rescheduled[1].blockWindow, 100_000);
 assert.equal(limit.rescheduled[1].stalls, 2);
 limit.queue.push({ wallet, thread_id: 'thread-123', requester_id: requester,
-  status_id: 'status-123', failures: 0, stalls: 2, block_window: 20_000 });
+  status_id: 'status-123', failures: 0, stalls: 2, block_window: 100_000 });
 await quiet(() => limit.runner.wake());
 assert.deepEqual(limit.counts(), { reserved: 3, released: 0, recorded: 1 });
 assert.equal(limit.removed.length, 1);
 assert.match(limit.messages[0].content, new RegExp(`<@${admin}>`));
 console.log('PASS: three no-progress segments stop further Alchemy spend and alert MOD');
+
+const windows = [];
+const fastFallback = harness({ maxMs: 50_000, readPage: async (_wallet, budget) => {
+  windows.push(budget.blockWindow);
+  if (windows.length === 1) throw Error('Alchemy sync time limit reached; requests=1');
+  return { ready: true, snapshot };
+} });
+await quiet(() => fastFallback.runner.wake());
+assert.deepEqual(windows, [0, 500_000]);
+assert.deepEqual(fastFallback.counts(), { reserved: 1, released: 0, recorded: 0 });
+assert.equal(fastFallback.rescheduled.length, 0);
+assert.equal(fastFallback.messages.length, 1);
+console.log('PASS: Gavin full-range path narrows inside the same reservation after timeout');
+
+assert.equal(pageUnitLimit({ maxUnits: 80_000, units: 0, blockWindow: 0 }), 50_000);
+assert.equal(pageUnitLimit({ maxUnits: 80_000, units: 50_000, blockWindow: 500_000 }), 30_000);
+assert.equal(pageUnitLimit({ maxUnits: 80_000, units: 80_000, blockWindow: 500_000 }), 0);
+const costWindows = [];
+const costFallback = harness({ maxMs: 50_000, readPage: async (_wallet, budget) => {
+  costWindows.push(budget.blockWindow);
+  if (costWindows.length === 1) {
+    budget.units = 50;
+    throw Error('Alchemy sync budget reached; requests=1');
+  }
+  return { ready: true, snapshot };
+} });
+await quiet(() => costFallback.runner.wake());
+assert.deepEqual(costWindows, [0, 500_000]);
+assert.deepEqual(costFallback.counts(), { reserved: 1, released: 0, recorded: 0 });
+console.log('PASS: Gavin path keeps 3/8 of CU reservation for a same-segment fallback');
 
 const locked = harness({ readPage: async () => ({ ready: false, waiting: true }) });
 await quiet(() => locked.runner.wake());
@@ -138,6 +169,31 @@ await quiet(() => cached.runner.wake());
 assert.equal(cached.messages.length, 1);
 assert.equal(cached.removed.length, 1);
 console.log('PASS: completed snapshot delivers without another Alchemy reservation');
+
+const refreshedSnapshot = { through: 100 };
+let refreshAfter;
+const refresh = harness({ readSnapshot: async () => snapshot,
+  readPage: async (_wallet, _budget, afterBlock) => {
+    refreshAfter = afterBlock;
+    return { ready: true, snapshot: refreshedSnapshot };
+  },
+  formatReport: (_wallet, _snapshot, note) => note,
+});
+refresh.queue[0].after_block = 99;
+await quiet(() => refresh.runner.wake());
+assert.equal(refreshAfter, 99);
+assert.equal(refresh.counts().reserved, 1);
+assert.match(refresh.messages[0].content, /已更新快取至新的已確認區塊/);
+assert.match(refresh.messages[0].content, new RegExp(`^拍拍 <@${requester}>`));
+console.log('PASS: stale snapshot refreshes from its saved checkpoint and pings requester');
+
+const alreadyUpdated = harness({ readSnapshot: async () => refreshedSnapshot,
+  reserveScan: async () => { throw Error('already updated cache must not reserve Alchemy'); } });
+alreadyUpdated.queue[0].after_block = 99;
+await quiet(() => alreadyUpdated.runner.wake());
+assert.equal(alreadyUpdated.messages.length, 1);
+assert.equal(alreadyUpdated.removed.length, 1);
+console.log('PASS: newer snapshot avoids duplicate refresh spend');
 
 let posterAttempts = 0;
 const restart = harness({ readSnapshot: async () => snapshot,

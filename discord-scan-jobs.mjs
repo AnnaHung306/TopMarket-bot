@@ -10,6 +10,7 @@ async function initialize(sql) {
     thread_id text NOT NULL,
     requester_id text NOT NULL,
     status_id text NOT NULL,
+    after_block integer,
     failures integer NOT NULL DEFAULT 0,
     stalls integer NOT NULL DEFAULT 0,
     block_window integer NOT NULL DEFAULT 500000,
@@ -21,6 +22,8 @@ async function initialize(sql) {
     ADD COLUMN IF NOT EXISTS stalls integer NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE discord_scan_jobs
     ADD COLUMN IF NOT EXISTS block_window integer NOT NULL DEFAULT 500000`;
+  await sql`ALTER TABLE discord_scan_jobs
+    ADD COLUMN IF NOT EXISTS after_block integer`;
   await sql`CREATE INDEX IF NOT EXISTS discord_scan_jobs_due_idx
     ON discord_scan_jobs (next_run_at, created_at)`;
 }
@@ -30,13 +33,16 @@ function ready(sql) {
   return schemaReady;
 }
 
-export async function enqueueScanJob(sql, { wallet, threadId, requesterId, statusId }) {
+export async function enqueueScanJob(sql, { wallet, threadId, requesterId, statusId, afterBlock = null }) {
   await ready(sql);
+  if (afterBlock !== null && (!Number.isSafeInteger(afterBlock) || afterBlock < 0)) {
+    throw Error('Invalid wallet refresh checkpoint');
+  }
   for (let attempt = 0; attempt < 3; attempt++) {
     const [existing] = await sql`SELECT thread_id FROM discord_scan_jobs WHERE wallet = ${wallet}`;
     if (existing) return { accepted: false, existingThreadId: existing.thread_id };
-    const rows = await sql`INSERT INTO discord_scan_jobs (wallet, slot, thread_id, requester_id, status_id)
-      SELECT ${wallet}, slots.slot, ${threadId}, ${requesterId}, ${statusId}
+    const rows = await sql`INSERT INTO discord_scan_jobs (wallet, slot, thread_id, requester_id, status_id, after_block)
+      SELECT ${wallet}, slots.slot, ${threadId}, ${requesterId}, ${statusId}, ${afterBlock}
       FROM generate_series(1, ${MAX_JOBS}) AS slots(slot)
       WHERE NOT EXISTS (SELECT 1 FROM discord_scan_jobs occupied WHERE occupied.slot = slots.slot)
       ORDER BY slots.slot LIMIT 1
@@ -54,9 +60,9 @@ export async function claimScanJob(sql) {
     WHERE wallet = (
       SELECT wallet FROM discord_scan_jobs
       WHERE next_run_at <= now() AND (lease_until IS NULL OR lease_until <= now())
-      ORDER BY next_run_at, created_at FOR UPDATE SKIP LOCKED LIMIT 1
+      ORDER BY (after_block IS NOT NULL), next_run_at, created_at FOR UPDATE SKIP LOCKED LIMIT 1
     )
-    RETURNING wallet, thread_id, requester_id, status_id, failures, stalls, block_window`;
+    RETURNING wallet, thread_id, requester_id, status_id, after_block, failures, stalls, block_window`;
   return job || null;
 }
 
