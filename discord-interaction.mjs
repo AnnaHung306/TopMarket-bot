@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { randomInt } from 'node:crypto';
 
 const assetsDirectory = new URL('./assets/tenor-cat-wait/', import.meta.url);
+const waitingText = '貓貓正在努力工作，請稍後... 完成後會拍拍通知';
 let waitingAssetsPromise;
 
 async function waitingAsset(chooseIndex = randomInt) {
@@ -56,7 +57,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       await interaction.deferReply();
       const animation = await waitingAsset(chooseWaitingIndex);
       await interaction.editReply({
-        content: '貓貓正在努力工作，請稍後...',
+        content: waitingText,
         files: animation.files,
       });
       let thread;
@@ -74,7 +75,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       }
       try {
         await thread.send({
-          content: '貓貓正在努力工作，請稍後...',
+          content: waitingText,
           files: animation.files,
         });
         status = await thread.send('正在檢查地址與已儲存報表。');
@@ -96,7 +97,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       if (cached) {
         const note = '顯示已儲存的摘要，未自動查詢最新區塊。';
         const poster = renderPoster(wallet, cached, note);
-        await thread.send({ content: `<@${interaction.user.id}>\n${formatReport(wallet, cached, note)}`,
+        await thread.send({ content: `拍拍 <@${interaction.user.id}>\n${formatReport(wallet, cached, note)}`,
           allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
         await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
         return;
@@ -120,7 +121,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       }
       if (result.ready) {
         const poster = renderPoster(wallet, result.snapshot, '');
-        await thread.send({ content: `<@${interaction.user.id}>\n${formatReport(wallet, result.snapshot, '')}`,
+        await thread.send({ content: `拍拍 <@${interaction.user.id}>\n${formatReport(wallet, result.snapshot, '')}`,
           allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
         await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
         return;

@@ -73,14 +73,14 @@ for (let iteration=0; iteration<10; iteration++) {
   const oldError=console.error; console.error=()=>{};
   try { await createWalletHandler(options)(test); } finally { console.error=oldError; }
   assert.ok(test.ackAt-begin < 3000, `iteration ${iteration}: initial response exceeded 3s`);
-  assert.equal(test.first.content,'貓貓正在努力工作，請稍後...');
+  assert.equal(test.first.content,'貓貓正在努力工作，請稍後... 完成後會拍拍通知');
   assert.equal(test.first.files[0].name,'cat-wait.gif');
   assert.equal(test.messages[0].files[0].name,'cat-wait.gif');
   assert.ok(scans <= 1 && reservations <= 1, `iteration ${iteration}: scan limit exceeded`);
   if (iteration <= 3) assert.equal(scans,0);
   if (iteration===2) { assert.equal(reservations,0); assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png'); }
   if (iteration===2 || iteration===6) {
-    assert.match(test.messages.at(-1).content, /^<@123456789012345678>\n/);
+    assert.match(test.messages.at(-1).content, /^拍拍 <@123456789012345678>\n/);
     assert.deepEqual(test.messages.at(-1).allowedMentions, { users:['123456789012345678'] });
   }
   if (iteration===3) assert.match(test.edits.at(-1),/額度已用完/);

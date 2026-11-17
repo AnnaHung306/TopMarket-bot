@@ -22,7 +22,7 @@ for (const [index, entry] of entries.entries()) {
   assert.deepEqual(initial.files[0].attachment, threadMessage.files[0].attachment);
   assert.match(edits[0], /有效的 Base 錢包地址/);
   for (const text of [initial.content, threadMessage.content]) {
-    assert.equal(text, '貓貓正在努力工作，請稍後...');
+    assert.equal(text, '貓貓正在努力工作，請稍後... 完成後會拍拍通知');
     assert.ok(!/https?:\/\//.test(text), `${entry.file} exposed a link`);
   }
 }
