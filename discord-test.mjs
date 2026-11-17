@@ -23,24 +23,25 @@ const image = renderPoster(wallet, updated);
 assert.deepEqual([...image.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 assert.ok(image.length > 10000);
 const responses = [], threadMessages = [], statusEdits = [];
-const thread = { async send(payload) { threadMessages.push(payload); return { async edit(value) { statusEdits.push(value); } }; } };
+const thread = { id: 'thread-123', async send(payload) { threadMessages.push(payload); return { async edit(value) { statusEdits.push(value); } }; } };
 const interaction = {
   isChatInputCommand: () => true, commandName: 'wallet', options: { getString: () => wallet },
   user: { id: '123456789012345678', username: 'test-user' }, member: { displayName: '測試用戶' },
   async deferReply() { this.deferred = true; },
   async editReply(options) { this.replied = true; responses.push(options); },
-  async fetchReply() { return { async startThread(options) { assert.equal(options.name, '測試用戶 錢包報表查詢'); return thread; } }; },
+  channel: { threads: { async create(options) { assert.equal(options.name, '測試用戶 錢包報表查詢'); return thread; } } },
 };
 const handler = createWalletHandler({ readSnapshot: async () => updated, reserveScan: async () => { throw Error('cache must not consume quota'); }, readPage: async () => { throw Error('cache must not call RPC'); }, renderPoster, formatReport, configured: () => true });
 await handler(interaction);
 assert.equal(responses[0].content, '貓貓正在努力工作，請稍後... 完成後會拍拍通知');
 assert.equal(responses[0].files[0].name, 'cat-wait.gif');
 assert.deepEqual([...responses[0].files[0].attachment.subarray(0, 6)], [71, 73, 70, 56, 57, 97]);
-assert.equal(threadMessages[0].files[0].name, 'cat-wait.gif');
-assert.match(threadMessages[2].content, /^拍拍 <@123456789012345678>\n/);
-assert.deepEqual(threadMessages[2].allowedMentions, { users: ['123456789012345678'] });
-assert.match(threadMessages[2].content, /3\.765433 USDC/);
-assert.equal(threadMessages[2].files[0].name, 'wallet-report.png');
-assert.deepEqual([...threadMessages[2].files[0].attachment.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+assert.equal(responses[1].content, `${responses[0].content}\n進度與報表請見 <#thread-123>`);
+assert.equal(threadMessages[0], '正在檢查地址與已儲存報表。');
+assert.match(threadMessages[1].content, /^拍拍 <@123456789012345678>\n/);
+assert.deepEqual(threadMessages[1].allowedMentions, { users: ['123456789012345678'] });
+assert.match(threadMessages[1].content, /3\.765433 USDC/);
+assert.equal(threadMessages[1].files[0].name, 'wallet-report.png');
+assert.deepEqual([...threadMessages[1].files[0].attachment.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 assert.match(statusEdits[0], /已完成/);
 console.log('Discord report tests passed');

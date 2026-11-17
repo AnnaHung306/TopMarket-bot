@@ -62,22 +62,18 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       });
       let thread;
       try {
-        const starter = await interaction.fetchReply();
-        thread = await starter.startThread({
+        thread = await interaction.channel.threads.create({
           name: threadName(interaction),
           autoArchiveDuration: ThreadAutoArchiveDuration.OneHour,
           reason: 'Top.Market wallet report',
         });
+        await interaction.editReply({ content: `${waitingText}\n進度與報表請見 <#${thread.id}>` });
       } catch (error) {
         console.error('無法建立錢包討論串', error.code || error.name);
         await interaction.editReply('已收到查詢，但無法建立討論串。請確認機器人在此頻道有「建立公開討論串」及「在討論串傳送訊息」權限。');
         return;
       }
       try {
-        await thread.send({
-          content: waitingText,
-          files: animation.files,
-        });
         status = await thread.send('正在檢查地址與已儲存報表。');
       }
       catch (error) {

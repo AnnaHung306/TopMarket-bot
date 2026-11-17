@@ -13,17 +13,16 @@ for (const [index, entry] of entries.entries()) {
     user: { id: '123', username: 'test' },
     async deferReply() { this.deferred = true; },
     async editReply(payload) { replies.push(payload); this.replied = true; },
-    async fetchReply() { return { async startThread() { return thread; } }; },
+    channel: { threads: { async create() { return { ...thread, id: 'thread-123' }; } } },
   };
   const handler = createWalletHandler({ chooseWaitingIndex: () => index, configured: () => true });
   await handler(interaction);
-  const initial = replies[0], threadMessage = messages[0];
+  const initial = replies[0];
   assert.equal(createHash('sha256').update(initial.files[0].attachment).digest('hex'), entry.sha256);
-  assert.deepEqual(initial.files[0].attachment, threadMessage.files[0].attachment);
+  assert.equal(replies[1].content, `${initial.content}\n進度與報表請見 <#thread-123>`);
+  assert.deepEqual(messages, ['正在檢查地址與已儲存報表。']);
   assert.match(edits[0], /有效的 Base 錢包地址/);
-  for (const text of [initial.content, threadMessage.content]) {
-    assert.equal(text, '貓貓正在努力工作，請稍後... 完成後會拍拍通知');
-    assert.ok(!/https?:\/\//.test(text), `${entry.file} exposed a link`);
-  }
+  assert.equal(initial.content, '貓貓正在努力工作，請稍後... 完成後會拍拍通知');
+  assert.ok(!/https?:\/\//.test(replies[1].content), `${entry.file} exposed an external link`);
 }
-console.log(`PASS: ${entries.length} choices, matching GIF attachments without links`);
+console.log(`PASS: ${entries.length} GIF choices only in the channel reply`);

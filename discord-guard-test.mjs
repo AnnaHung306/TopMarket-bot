@@ -3,11 +3,11 @@ import { createWalletHandler } from './discord-interaction.mjs';
 
 function interaction(address) {
   const edits = [], messages = [];
-  const thread = { async send(payload) { messages.push(payload); return { async edit(value) { edits.push(value); } }; } };
+  const thread = { id:'thread-123', async send(payload) { messages.push(payload); return { async edit(value) { edits.push(value); } }; } };
   return { commandName:'wallet', isChatInputCommand:()=>true, options:{ getString:()=>address },
     user:{ id:'123456789012345678', username:'test-user' }, member:{ displayName:'測試用戶' }, edits, messages,
     async deferReply() { this.deferred = true; this.ackAt = performance.now(); },
-    async fetchReply() { return { async startThread() { return thread; } }; },
+    channel: { threads: { async create() { return thread; } } },
     async editReply(payload) { if (!this.first) this.first = payload; else edits.push(payload); this.replied = true; } };
 }
 
@@ -41,7 +41,7 @@ try {
 } finally { console.error = originalError; }
 console.log('PASS persistent failure protection and cached report');
 const denied = interaction(wallet);
-denied.fetchReply = async () => { throw Object.assign(Error('missing thread permission'), { code: 50013 }); };
+denied.channel.threads.create = async () => { throw Object.assign(Error('missing thread permission'), { code: 50013 }); };
 let deniedScans = 0;
 const previousError = console.error; console.error = () => {};
 try {
@@ -75,7 +75,9 @@ for (let iteration=0; iteration<10; iteration++) {
   assert.ok(test.ackAt-begin < 3000, `iteration ${iteration}: initial response exceeded 3s`);
   assert.equal(test.first.content,'貓貓正在努力工作，請稍後... 完成後會拍拍通知');
   assert.equal(test.first.files[0].name,'cat-wait.gif');
-  assert.equal(test.messages[0].files[0].name,'cat-wait.gif');
+  assert.equal(test.messages[0],'正在檢查地址與已儲存報表。');
+  assert.equal(test.edits[0].content, `${test.first.content}\n進度與報表請見 <#thread-123>`);
+  assert.ok(test.messages.every(message => typeof message === 'string' || !message.files?.some(file => file.name === 'cat-wait.gif')));
   assert.ok(scans <= 1 && reservations <= 1, `iteration ${iteration}: scan limit exceeded`);
   if (iteration <= 3) assert.equal(scans,0);
   if (iteration===2) { assert.equal(reservations,0); assert.equal(test.messages.at(-1).files[0].name,'wallet-report.png'); }
