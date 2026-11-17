@@ -30,7 +30,8 @@ const readPage = async (address, budget, afterBlock) => {
   try {
     const result = await walletCachePage(database(), address, afterBlock, {
       maxUnits: unitLimit,
-      maxMs: Math.min(20_000, Math.max(1, budget.deadline - performance.now())),
+      maxMs: Math.min(budget.blockWindow === 0 ? 35_000 : 20_000,
+        Math.max(1, budget.deadline - performance.now())),
       perSecond: 6_000, maxInFlight: 24, blockWindow: budget.blockWindow ?? SCAN_BLOCK_WINDOW,
       sharedBudget: budget,
     });
