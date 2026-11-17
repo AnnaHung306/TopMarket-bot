@@ -3,7 +3,7 @@ import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'di
 import { database } from './worker/history/store.js';
 import { readWalletSnapshot, walletCachePage } from './worker/wallet-cache.js';
 import { formatReport } from './discord-report.mjs';
-import { renderPoster } from './discord-poster.mjs';
+import { renderGavinPoster as renderPoster } from './discord-gavin-poster.mjs';
 import { createWalletHandler } from './discord-interaction.mjs';
 import { reserveScan, scanBlocked, recordScanFailure, SCAN_MAX_UNITS, SCAN_BLOCK_WINDOW, SCAN_MAX_MS } from './discord-quota.mjs';
 

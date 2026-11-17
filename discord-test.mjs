@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { formatReport, getReport } from './discord-report.mjs';
 import { summarizeWalletEvents } from './worker/report/accounting.js';
-import { renderPoster } from './discord-poster.mjs';
+import { renderGavinPoster as renderPoster, closePosterBrowser } from './discord-gavin-poster.mjs';
 import { createWalletHandler } from './discord-interaction.mjs';
 
 const wallet = '0x' + 'a'.repeat(40);
@@ -19,7 +19,7 @@ assert.match(report, /抽卡花費（已核實）：1\.234567 USDC/);
 assert.match(report, /已識別淨收支：3\.765433 USDC/);
 assert.match(report, /1 筆事件待核對/);
 assert.match(report, /不含持倉估值/);
-const image = renderPoster(wallet, updated);
+const image = await renderPoster(wallet, updated);
 assert.deepEqual([...image.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 assert.ok(image.length > 10000);
 const responses = [], threadMessages = [], statusEdits = [];
@@ -45,3 +45,4 @@ assert.equal(threadMessages[1].files[0].name, 'wallet-report.png');
 assert.deepEqual([...threadMessages[1].files[0].attachment.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 assert.match(statusEdits[0], /已完成/);
 console.log('Discord report tests passed');
+await closePosterBrowser();

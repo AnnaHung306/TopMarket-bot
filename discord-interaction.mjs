@@ -101,7 +101,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
       const cached = await readSnapshot(wallet);
       if (cached) {
         const note = '顯示已儲存的摘要，未自動查詢最新區塊。';
-        const poster = renderPoster(wallet, cached, note);
+        const poster = await renderPoster(wallet, cached, note);
         await thread.send({ content: `拍拍 <@${interaction.user.id}>\n${formatReport(wallet, cached, note)}`,
           allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
         await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
@@ -172,7 +172,7 @@ export function createWalletHandler({ readPage, readSnapshot, reserveScan, scanB
         return;
       }
       if (result.ready) {
-        const poster = renderPoster(wallet, result.snapshot, '');
+        const poster = await renderPoster(wallet, result.snapshot, '');
         await thread.send({ content: `拍拍 <@${interaction.user.id}>\n${formatReport(wallet, result.snapshot, '')}`,
           allowedMentions: { users: [interaction.user.id] }, files: [{ attachment: poster, name: 'wallet-report.png' }] });
         await editStatus('已完成：文字報表與 PNG 海報已傳到此討論串。');
