@@ -30,7 +30,9 @@ Railway 日誌的 `wallet_query` 會記錄查詢時間、原生分頁數、RPC H
 
 **此機制不能保證平台 SIGKILL 前完成長掃描，也不是零停機承諾。** wallet 本來不是持久交付佇列，平台強制終止仍可能中斷正在計算或傳送的報表；已保存的 Gavin 分頁檢查點可由用戶重送原指令接續。正式部署須安排維護窗並確認 wallet 已 idle，不以「願意無限等待」替代平台期限。停機日誌只記錄 active wallet handler 數量與安全代碼，不記錄地址或憑證。
 
-Docker context 已排除 `activity/.runtime/`、`activity/.test-fixtures/` 與根目錄 `.local/`，避免 journal、測試收據與本機 runtime 被 `COPY . .` 放入 image。這只是 ignore 規則的靜態檢查，沒有宣稱 Docker image 已建置。持久 volume 的 root ownership／`USER node` 可寫 bootstrap 尚未實作，部署前仍須核對掛載權限與 fsync／重啟恢復，不能把容器暫存檔當持久保存。
+Docker context 已排除 `activity/.runtime/`、`activity/.test-fixtures/` 與根目錄 `.local/`，避免 journal、測試收據與本機 runtime 被 `COPY . .` 放入 image。已有保持 `USER node` 的本機 bootstrap 候選，必要初始化後立即降至 UID/GID1000，再執行原 prestart 與 Bot。它已在本機 Docker 的新 named volumes 驗證，但尚未部署 Railway；正式 mount／owner／fsync／重啟仍待外部驗收，不能把容器暫存檔當持久保存。完整設定、15項本機結果及精確清理範圍見 [activity-volume-verification.md](docs/activity-volume-verification.md)。
+
+root 已另行逐段 review 並獨立重建 image／重跑同一組 15/15 容器情境，exit0；清理後在 host 再核20個精確名稱，`remaining=[]`。純設定／lifecycle 也獨立通過7/7、0skip（1402.6471ms）。這些是本機覆驗證據，正式 Railway volume 與 live Bot 尚未驗收。`c4ee147` 是開始候選時的歷史基準；後續提交及最終 HEAD 以 [Bot Draft PR #1](https://github.com/AnnaHung306/TopMarket-bot/pull/1) 為準。
 
 請先閱讀 [CONTRACTS-DATA.md](CONTRACTS-DATA.md)。需要 Node.js 22+。
 

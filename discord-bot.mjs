@@ -7,6 +7,9 @@ import { createWalletQuery } from './discord-wallet-query.mjs';
 import { createActivityModule } from './activity/index.mjs';
 import { createWalletWorkDrain, createBotShutdown } from './discord-lifecycle.mjs';
 
+if (process.platform === 'linux' && (process.getuid() === 0 || process.geteuid() === 0)) {
+  throw Object.assign(Error('BOT_ROOT_RUNTIME_FORBIDDEN'), { code: 'BOT_ROOT_RUNTIME_FORBIDDEN' });
+}
 try { loadEnvFile(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 for (const key of ['DISCORD_TOKEN', 'DISCORD_CLIENT_ID']) {
   if (!process.env[key]?.trim()) throw Error(`缺少環境變數 ${key}`);
