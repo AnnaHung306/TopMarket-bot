@@ -1,0 +1,84 @@
+{
+  "protocol": "discord-source-barrier/v1",
+  "canonicalRules": "UTF-8; no BOM; JS UTF-16 key order; JSON.stringify strings; safe integer JSON numbers only; decimal sequence is a string; no whitespace",
+  "genesis": {
+    "input": {
+      "streamId": "10000000-0000-4000-8000-000000000001",
+      "guildId": "111111111111111111",
+      "scope": "test"
+    },
+    "canonical": "[\"top-market-source-stream/v1\",\"10000000-0000-4000-8000-000000000001\",\"111111111111111111\",\"test\",\"discord_interaction\"]",
+    "hash": "0xd49dfa1418654f536f614e67d44671936e2a8a2d5c7da2ca62ef192e818b2a4b"
+  },
+  "envelope": {
+    "input": {
+      "streamId": "10000000-0000-4000-8000-000000000001",
+      "sequence": "9007199254740993",
+      "previousHash": "0xd49dfa1418654f536f614e67d44671936e2a8a2d5c7da2ca62ef192e818b2a4b",
+      "kind": "edit-conflict",
+      "payload": {
+        "note": "中文",
+        "value": null,
+        "metadata": {
+          "𐀀": "astral",
+          "": "BMP"
+        },
+        "sequence": "9007199254740993",
+        "activityId": "20000000-0000-4000-8000-000000000001",
+        "observedPayload": {
+          "event_at": "2026-11-18T08:00:00+08:00"
+        }
+      }
+    },
+    "canonical": "{\"kind\":\"edit-conflict\",\"payload\":{\"activityId\":\"20000000-0000-4000-8000-000000000001\",\"metadata\":{\"𐀀\":\"astral\",\"\":\"BMP\"},\"note\":\"中文\",\"observedPayload\":{\"event_at\":\"2026-11-18T08:00:00+08:00\"},\"sequence\":\"9007199254740993\",\"value\":null},\"previousHash\":\"0xd49dfa1418654f536f614e67d44671936e2a8a2d5c7da2ca62ef192e818b2a4b\",\"sequence\":\"9007199254740993\",\"streamId\":\"10000000-0000-4000-8000-000000000001\"}",
+    "hash": "0x3cb4b5f1134891accb4e63bf77a2227a4b171bdf690aae3d7961d28492fc710c",
+    "announcement": {
+      "sequence": "9007199254740993",
+      "hash": "0x3cb4b5f1134891accb4e63bf77a2227a4b171bdf690aae3d7961d28492fc710c",
+      "kind": "edit-conflict",
+      "activityId": "20000000-0000-4000-8000-000000000001",
+      "eventAt": "2026-11-18T00:00:00.000Z"
+    }
+  },
+  "semanticFingerprint": {
+    "input": {
+      "source_event_id": "1493810399232000001",
+      "discord_user_id": "333333333333333333",
+      "activity_id": "20000000-0000-4000-8000-000000000001",
+      "task_id": "30000000-0000-4000-8000-000000000001",
+      "guild_id": "111111111111111111",
+      "channel_id": "222222222222222222",
+      "thread_id": null,
+      "event_at": "2026-11-18T00:00:00.000Z",
+      "content": "中文原文 🐈",
+      "evidence": [
+        {
+          "url": "https://cdn.discordapp.com/attachments/123/456/file.png?sig=example",
+          "filename": "圖片.png",
+          "content_type": "image/png"
+        }
+      ]
+    },
+    "normalizedCanonical": "{\"activity_id\":\"20000000-0000-4000-8000-000000000001\",\"channel_id\":\"222222222222222222\",\"content\":\"中文原文 🐈\",\"discord_user_id\":\"333333333333333333\",\"event_at\":\"2026-11-18T00:00:00.000Z\",\"evidence\":[{\"content_type\":\"image/png\",\"filename\":\"圖片.png\",\"url\":\"https://cdn.discordapp.com/attachments/123/456/file.png\"}],\"guild_id\":\"111111111111111111\",\"source_event_id\":\"1493810399232000001\",\"task_id\":\"30000000-0000-4000-8000-000000000001\",\"thread_id\":\"\"}",
+    "hash": "0x5c5b045e58a9d866289b5f18903829fc63d022aecfae2fd8b0994faebeb18c3c",
+    "equivalentUrlInput": {
+      "source_event_id": "1493810399232000001",
+      "discord_user_id": "333333333333333333",
+      "activity_id": "20000000-0000-4000-8000-000000000001",
+      "task_id": "30000000-0000-4000-8000-000000000001",
+      "guild_id": "111111111111111111",
+      "channel_id": "222222222222222222",
+      "thread_id": null,
+      "event_at": "2026-11-18T00:00:00.000Z",
+      "content": "中文原文 🐈",
+      "evidence": [
+        {
+          "url": "https://cdn.discordapp.com/attachments/123/456/file.png?sig=renewed&ex=example",
+          "filename": "圖片.png",
+          "content_type": "image/png"
+        }
+      ]
+    },
+    "changedContentHash": "0x4358191d106d150ac7f419de08e9333eb925fb5f6c483b0885d5b15fd5e04c51"
+  }
+}
