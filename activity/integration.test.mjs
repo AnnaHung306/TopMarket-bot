@@ -14,14 +14,15 @@ const repo = resolve(fileURLToPath(new URL('..', import.meta.url))), fixtureDir 
 const fixture = resolve(fixtureDir, 'activity-journal.ndjson');
 const G = '12345678901234567', C = '22345678901234567', R = '32345678901234567', U = '42345678901234567', OTHER = '52345678901234567', B = '62345678901234567', S = '92345678901234567';
 const T = '11111111-1111-4111-8111-111111111111', A = '22222222-2222-4222-8222-222222222222', RES = '33333333-3333-4333-8333-333333333333';
+const W1 = '0x' + '1'.repeat(40), W2 = '0x' + '2'.repeat(40), W3 = '0x' + '3'.repeat(40), POLICY = '0x' + 'a'.repeat(64);
 const env = { ACTIVITY_SCOPE: 'test', ACTIVITY_GUILD_ID: G, ACTIVITY_CHANNEL_ID: C, ACTIVITY_SUPPORT_CATEGORY_ID: S, ACTIVITY_MODERATOR_ROLE_ID: R,
   ACTIVITY_API_ORIGIN: 'http://127.0.0.1:8789', ACTIVITY_API_TOKEN: 'test-only-non-secret-token-at-least-32', ACTIVITY_PUBLIC_ORIGIN: 'http://127.0.0.1:8787' };
 const quiet = { warn() {}, error() {} };
 function harness() {
   let clock = Date.parse('2026-11-18T12:00:00Z'), count = 0;
   const cutoff = new Date(clock).toISOString();
-  const task = { id: T, activity_id: A, source: 'discord', enabled: true, guild_id: G, channel_id: C, name: 'Fixture task' };
-  const state = { offline: false, maintenance: false, requests: [], deliveries: [], coverage: [], reservations: new Map(), receipts: new Map(), accepted: '0', hash: null, lease: null, registeredAt: new Date(clock - 1000).toISOString(), status: 'queued', lostResponse: false, wrongScope: false, partialOnce: false };
+  const task = { id: T, activity_id: A, source: 'discord', enabled: true, guild_id: G, channel_id: C, name: 'Fixture task', counting_mode: 'per_user', wallet_limit: 3, counting_policy_hash: null };
+  const state = { offline: false, maintenance: false, requests: [], deliveries: [], coverage: [], reservations: new Map(), receipts: new Map(), accepted: '0', hash: null, lease: null, registeredAt: new Date(clock - 1000).toISOString(), status: 'queued', lostResponse: false, wrongScope: false, partialOnce: false, walletAddresses: [] };
   const channels = new Map();
   const parent = { id: C, type: 0, guildId: G, parentId: S, permissionsFor: () => ({ has: () => true }), threads: {
     create: async body => {
@@ -48,6 +49,11 @@ function harness() {
       return response(state.invalidAdmissionState ? {} : { accepting: !state.maintenance, observedAt: new Date(clock).toISOString() });
     }
     if (path === '/tasks') return response({ tasks: [task] });
+    if (path === '/activities/' + A + '/roster') {
+      assert.equal(new URL(url).searchParams.get('discord_user_id'), U);
+      if (state.rosterFailures > 0) { state.rosterFailures--; return response({ error: 'ACTIVITY_API_UNAVAILABLE' }, 503); }
+      return response({ activity_id: A, discord_user_id: state.rosterOwner ?? U, counting_mode: task.counting_mode, wallet_limit: task.wallet_limit, counting_policy_hash: task.counting_policy_hash, wallets: state.walletAddresses.map(address => ({ address })) });
+    }
     if (path === '/source/lease') {
       if (state.lease && state.lease.instanceId !== body.instanceId && Date.parse(state.lease.expiresAt) > clock) return response({ error: 'SOURCE_LEASE_BUSY' }, 409);
       if (BigInt(body.lastSequence) < BigInt(state.accepted)) return response({ error: 'SOURCE_JOURNAL_ROLLBACK' }, 409);
@@ -59,7 +65,7 @@ function harness() {
       if (state.maintenance) return response({ error: 'MAINTENANCE' }, 503);
       assert.equal(body.discord_user_id, U); assert.equal(body.guild_id, G); assert.equal(body.channel_id, C);
       const existing = state.reservations.get(RES);
-      const reservation = existing ? { ...existing, created: false, task } : { id: RES, state: 'creating', created: true, thread_id: null, task };
+      const reservation = existing ? { ...existing, created: false, task, wallet_addresses: [...state.walletAddresses] } : { id: RES, state: 'creating', created: true, thread_id: null, task, wallet_addresses: [...state.walletAddresses] };
       state.reservations.set(RES, reservation); return response({ reservation });
     }
     if (path === '/threads/' + RES + '/complete') { Object.assign(state.reservations.get(RES), { thread_id: body.thread_id, state: 'active' }); return response({ reservation: state.reservations.get(RES) }); }
@@ -98,7 +104,8 @@ function harness() {
     return value;
   }
   const open = async mod => { const i = interaction('start', { task: T }); await mod.handleInteraction(i); const thread = [...channels.values()].find(c => c.type === 12); assert.ok(thread, JSON.stringify(i.replies)); return thread; };
-  return { state, client, channels, module, interaction, open, fetchImpl, now: () => clock, advance: milliseconds => { clock += milliseconds; } };
+  const walletPolicy = (wallets = [W1, W2]) => { task.counting_mode = 'per_wallet'; task.counting_policy_hash = POLICY; state.walletAddresses = [...wallets]; };
+  return { state, task, walletPolicy, client, channels, module, interaction, open, fetchImpl, now: () => clock, advance: milliseconds => { clock += milliseconds; } };
 }
 function payload(id, content = 'Fixture submission') { return { source: 'discord', source_event_id: id, discord_user_id: U, activity_id: A, task_id: T, guild_id: G, channel_id: C, thread_id: '72345678901234568', event_at: '2026-11-18T12:00:00.000Z', content, evidence: [] }; }
 
@@ -314,6 +321,143 @@ test('existing-client activity host integration; isolated durable fixture only',
       const second = journal.admit(payload('maintenance-after-pause'), () => worker.canAdmit()); release();
       await first; await assert.rejects(second, error => error.code === 'ACTIVITY_SOURCE_NOT_READY'); assert.equal(journal.receipts.size, 1);
       await worker.flush(); assert.equal(journal.sourcePending().length, 0); assert.equal(h.state.receipts.size, 1); await worker.stop(); await journal.close();
+    });
+    await scenario('per-user submissions retain v1 and reject unnecessary wallet selection', async () => {
+      const h = harness(), mod = h.module(); await mod.start();
+      try {
+        const thread = await h.open(mod), bad = h.interaction('submit', { text: 'Must remain per user', wallet: W1 }); bad.channelId = thread.id;
+        await mod.handleInteraction(bad); assert.match(bad.replies.at(-1).content, /移除 wallet/); assert.equal(mod.state().pending, 0);
+        const good = h.interaction('submit', { text: 'One user submission' }); good.channelId = thread.id; await mod.handleInteraction(good); await mod.flush();
+        const event = h.state.deliveries[0].envelopes[0].payload;
+        for (const key of ['submission_version', 'wallet_address', 'policy_hash']) assert.equal(Object.hasOwn(event, key), false);
+      } finally { await mod.stop(); }
+    });
+    await scenario('per-wallet requires an explicit enrolled choice even with one wallet and binds v2 policy', async () => {
+      const h = harness(); h.walletPolicy([W1]); h.task.wallet_limit = 1; const mod = h.module(); await mod.start();
+      try {
+        const thread = await h.open(mod);
+        for (const [wallet, message] of [[undefined, /明確選擇/], [W3, /不在本人/]]) {
+          const bad = h.interaction('submit', { text: 'No automatic wallet', wallet }); bad.channelId = thread.id;
+          await mod.handleInteraction(bad); assert.match(bad.replies.at(-1).content, message); assert.equal(mod.state().pending, 0);
+        }
+        const good = h.interaction('submit', { text: 'Wallet specific original', wallet: W1.toUpperCase() }); good.channelId = thread.id;
+        await mod.handleInteraction(good); assert.match(good.replies.at(-1).content, new RegExp(W1)); await mod.flush();
+        const e = h.state.deliveries[0].envelopes[0]; assert.deepEqual(Object.keys(e).sort(), ['hash', 'kind', 'payload', 'previousHash', 'sequence', 'streamId']);
+        assert.equal(e.payload.submission_version, 2); assert.equal(e.payload.wallet_address, W1); assert.equal(e.payload.policy_hash, POLICY);
+      } finally { await mod.stop(); }
+    });
+    await scenario('roster preflight outage creates no reservation or intent; retry creates the original entry exactly once', async () => {
+      const h = harness(); h.walletPolicy(); h.state.rosterFailures = 1; const mod = h.module(); await mod.start();
+      try {
+        const first = h.interaction('start', { task: T }); await mod.handleInteraction(first);
+        assert.equal(h.state.reservations.size, 0, 'roster failure must occur before server reservation creation');
+        const frames = readFileSync(fixture, 'utf8').trim().split('\n').map(line => JSON.parse(line).record);
+        assert.equal(frames.some(frame => frame.op === 'thread-intent' || frame.op === 'thread-link'), false);
+        assert.equal([...h.channels.values()].filter(row => row.type === 12).length, 0); assert.equal(mod.state().pending, 0);
+        const thread = await h.open(mod); assert.ok(thread); assert.equal(h.state.reservations.size, 1);
+        assert.equal([...h.channels.values()].filter(row => row.type === 12).length, 1);
+        const again = await h.open(mod); assert.equal(again.id, thread.id); assert.equal([...h.channels.values()].filter(row => row.type === 12).length, 1);
+      } finally { await mod.stop(); }
+    });
+    await scenario('an existing unknown-create reservation remains fail-closed instead of blindly creating a second thread', async () => {
+      const h = harness(); h.walletPolicy(); h.state.reservations.set(RES, { id: RES, state: 'creating', created: false, thread_id: null, task: h.task, wallet_addresses: [...h.state.walletAddresses] });
+      const mod = h.module(); await mod.start();
+      try {
+        for (let attempt = 0; attempt < 2; attempt++) { const i = h.interaction('start', { task: T }); await mod.handleInteraction(i); assert.match(i.replies.at(-1).content, /核對/); }
+        assert.equal([...h.channels.values()].filter(row => row.type === 12).length, 0); assert.equal(h.state.reservations.size, 1);
+        assert.equal(h.state.reservations.get(RES).state, 'creating'); assert.equal(mod.state().pending, 0);
+      } finally { await mod.stop(); }
+    });
+    await scenario('foreign roster identity blocks before creating a thread', async () => {
+      const h = harness(); h.walletPolicy(); h.state.rosterOwner = OTHER; const mod = h.module(); await mod.start();
+      try {
+        const i = h.interaction('start', { task: T }); await mod.handleInteraction(i);
+        assert.match(i.replies.at(-1).content, /名冊/); assert.equal([...h.channels.values()].filter(c => c.type === 12).length, 0); assert.equal(mod.state().pending, 0);
+      } finally { await mod.stop(); }
+    });
+    await scenario('wallet autocomplete reveals only the owner roster and acknowledges blocked or maintenance requests once', async () => {
+      const h = harness(); h.walletPolicy(); h.state.noChallenges = true; const mod = h.module();
+      const auto = (threadId, owner = U) => { const i = h.interaction('submit'); i.channelId = threadId; i.user.id = owner; i.isChatInputCommand = () => false; i.isAutocomplete = () => true; i.options.getFocused = () => ({ name: 'wallet', value: '' }); i.choices = []; i.respond = async value => i.choices.push(value); return i; };
+      try {
+        const before = auto(C); await mod.handleInteraction(before); assert.deepEqual(before.choices, [[]]);
+        await mod.start(); const thread = await h.open(mod), own = auto(thread.id); await mod.handleInteraction(own);
+        assert.deepEqual(own.choices, [[{ name: W1, value: W1 }, { name: W2, value: W2 }]]);
+        const other = auto(thread.id, OTHER); await mod.handleInteraction(other); assert.deepEqual(other.choices, [[]]);
+        const parent = auto(C); await mod.handleInteraction(parent); assert.deepEqual(parent.choices, [[]]);
+        h.state.maintenance = true; await mod.flush(); const paused = auto(thread.id); await mod.handleInteraction(paused); assert.deepEqual(paused.choices, [[]]);
+        const blocked = h.interaction('submit', { text: 'Maintenance must not admit', wallet: W1 }); blocked.channelId = thread.id;
+        await mod.handleInteraction(blocked); assert.match(blocked.replies.at(-1).content, /維護/); assert.equal(mod.state().pending, 0);
+        await mod.stop(); const stopped = auto(thread.id); await mod.handleInteraction(stopped); assert.deepEqual(stopped.choices, [[]]);
+      } finally { await mod.stop(); }
+    });
+    await scenario('per-wallet modal nonce binds original owner, thread, wallet and policy; option tampering cannot switch it', async () => {
+      const h = harness(); h.walletPolicy(); const mod = h.module(); await mod.start();
+      try {
+        const thread = await h.open(mod), form = h.interaction('submit', { wallet: W2 }); form.channelId = thread.id; await mod.handleInteraction(form);
+        assert.equal(form.replies[0].modal.title, '提交活動任務');
+        const submit = h.interaction('submit', { wallet: W1 }); submit.channelId = thread.id; submit.isModalSubmit = () => true; submit.isChatInputCommand = () => false;
+        submit.customId = form.replies[0].modal.custom_id; submit.fields = { getTextInputValue: () => 'First wallet modal original' };
+        submit.user.id = OTHER; await mod.handleInteraction(submit); assert.equal(mod.state().pending, 0);
+        submit.user.id = U; await mod.handleInteraction(submit); assert.equal(mod.state().pending, 1);
+        await mod.handleInteraction(submit); assert.equal(mod.state().pending, 1); assert.match(submit.replies.at(-1).content, /過期/);
+        await mod.flush(); const saved = h.state.deliveries[0].envelopes[0].payload;
+        assert.equal(saved.wallet_address, W2); assert.equal(saved.policy_hash, POLICY);
+      } finally { await mod.stop(); }
+    });
+    await scenario('weekly wallet scope survives offline fsync, restart and replay without reloading or substituting roster/policy', async () => {
+      const h = harness(); h.walletPolicy(); h.task.kind = 'weekly'; h.task.target_count = 3; h.state.noChallenges = true;
+      let mod = h.module(); await mod.start(); const thread = await h.open(mod); h.state.offline = true;
+      for (const [wallet, text] of [[W1, 'A interaction one'], [W1, 'A interaction two'], [W2, 'B interaction one']]) {
+        const i = h.interaction('submit', { wallet, text }); i.channelId = thread.id; await mod.handleInteraction(i);
+      }
+      assert.equal(mod.state().pending, 3);
+      const saved = readFileSync(fixture, 'utf8').trim().split('\n').map(line => JSON.parse(line).record).filter(row => row.op === 'admitted').map(row => row.envelope);
+      const rosterReads = h.state.requests.filter(row => row.path.endsWith('/roster')).length; await mod.stop();
+      h.advance(91_000); h.state.offline = false; h.state.walletAddresses = [W3]; h.task.counting_policy_hash = '0x' + 'b'.repeat(64);
+      mod = h.module(); await mod.start();
+      try {
+        await mod.flush(); assert.equal(mod.state().pending, 0); assert.deepEqual(h.state.deliveries.flatMap(row => row.envelopes), saved);
+        assert.deepEqual(saved.map(row => row.payload.wallet_address), [W1, W1, W2]); assert.ok(saved.every(row => row.payload.policy_hash === POLICY));
+        assert.equal(h.state.requests.filter(row => row.path.endsWith('/roster')).length, rosterReads);
+        const reopen = h.interaction('start', { task: T }); await mod.handleInteraction(reopen); assert.match(reopen.replies.at(-1).content, /政策.*不一致/);
+        // The Bot transports wallet scopes; the real backend, not this fixture,
+        // determines weekly progress and rewards. No local GP is manufactured.
+        assert.ok(!JSON.stringify(saved).includes('gp_delta'));
+      } finally { await mod.stop(); }
+    });
+    await scenario('legacy metadata refresh keeps the original reservation, owner, thread, genesis and admitted v1 envelope', async () => {
+      const h = harness(), thread = await h.channels.get(C).threads.create({ name: 'tm-' + RES });
+      const legacy = { reservationId: RES, discordUserId: U, taskId: T, activityId: A, guildId: G, parentChannelId: C };
+      h.state.reservations.set(RES, { id: RES, state: 'active', thread_id: thread.id, task: h.task, wallet_addresses: [] });
+      const oldJournal = new ActivityJournal(fixture, { guildId: G, scope: 'test' });
+      await oldJournal.register(h.state.registeredAt); await oldJournal.intent(legacy); await oldJournal.link({ ...legacy, threadId: thread.id }); await oldJournal.confirmThread(RES);
+      const envelope = (await oldJournal.admit({ ...payload('legacy-pre-policy'), thread_id: thread.id })).receipt.envelope;
+      const genesis = oldJournal.stream.genesis; await oldJournal.close();
+      const mod = h.module(); await mod.start();
+      try {
+        const pending = h.interaction('submit', { text: 'Needs explicit metadata refresh' }); pending.channelId = thread.id; await mod.handleInteraction(pending);
+        assert.match(pending.replies.at(-1).content, /重新使用 \/activity start/); assert.equal(mod.state().pending, 1);
+        const recovered = await h.open(mod); assert.equal(recovered.id, thread.id); assert.equal([...h.channels.values()].filter(row => row.type === 12).length, 1);
+        const frames = readFileSync(fixture, 'utf8').trim().split('\n').map(line => JSON.parse(line).record);
+        assert.equal(frames.filter(row => row.op === 'stream').length, 1); assert.equal(frames.find(row => row.op === 'stream').genesis, genesis);
+        assert.deepEqual(frames.find(row => row.op === 'admitted').envelope, envelope);
+        const linked = frames.filter(row => row.op === 'thread-link').at(-1).value;
+        assert.equal(linked.reservationId, RES); assert.equal(linked.discordUserId, U); assert.equal(linked.threadId, thread.id); assert.equal(linked.countingMode, 'per_user');
+        const next = h.interaction('submit', { text: 'Refreshed legacy thread' }); next.channelId = thread.id; await mod.handleInteraction(next); assert.equal(mod.state().pending, 2);
+        await mod.flush(); assert.deepEqual(h.state.deliveries[0].envelopes[0], envelope);
+      } finally { await mod.stop(); }
+    });
+    await scenario('mixed v1/v2 journal replay preserves first wallet and policy and rejects all attempted replacements', async () => {
+      let journal = new ActivityJournal(fixture, { guildId: G, scope: 'test' });
+      const old = (await journal.admit(payload('legacy-first'))).receipt.envelope;
+      const original = { ...payload('wallet-first'), submission_version: 2, wallet_address: W1, policy_hash: POLICY };
+      const wallet = (await journal.admit(original)).receipt.envelope;
+      for (const changed of [{ ...original, wallet_address: W2 }, { ...original, policy_hash: '0x' + 'b'.repeat(64) }, payload('wallet-first')]) await assert.rejects(journal.admit(changed), error => error.code === 'ACTIVITY_ORIGINAL_CONFLICT');
+      await assert.rejects(journal.admit({ ...payload('unknown'), submission_version: 3, wallet_address: W1, policy_hash: POLICY }), /Unsupported/);
+      assert.equal(journal.head.sequence, '2'); const before = readFileSync(fixture, 'utf8'); await journal.close();
+      journal = new ActivityJournal(fixture, { guildId: G, scope: 'test' });
+      assert.deepEqual(journal.sourcePending().map(row => row.envelope), [old, wallet]); assert.equal(wallet.previousHash, old.hash);
+      assert.equal((await journal.admit(original)).duplicate, true); await journal.close(); assert.equal(readFileSync(fixture, 'utf8'), before);
     });
     await scenario('permanent source rejection without event ID notifies once and stays acknowledged across restart', async () => {
       const h = harness(); h.state.noChallenges = true; let mod = h.module(); await mod.start(); const thread = await h.open(mod);

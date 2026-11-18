@@ -2,6 +2,8 @@
 
 ## Discord 機器人
 
+既有 `/activity` 模組支援按用戶及按固定報名錢包提交。按錢包活動先在網站選定本人已驗簽名冊，再於同一私人thread明確選擇 `wallet`；Bot保存payload v2與政策hash，離線重送保留首次選擇，不在本機發放GP。按人活動維持v1；所有錢包仍共用同活動最多一獎。契約、相容性及本機驗證邊界見 [activity-counting-protocol.md](docs/activity-counting-protocol.md)。
+
 Discord 的 PNG 由無畫面的 Chromium 離線執行 Gavin 原本的報表頁與 `renderWalletPoster` 產生，使用相同的版面、欄位與渲染程式；不為海報額外呼叫 Alchemy。Railway 以根目錄 `Dockerfile` 安裝 Chromium，執行環境使用 Node.js 22。
 
 討論串命名為「用戶名 錢包報表查詢」，優先使用伺服器顯示名稱；報表完成時只標記發起指令的用戶，不標記角色或所有人。

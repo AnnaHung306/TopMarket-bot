@@ -5,6 +5,7 @@ import { ActivityApi } from './api.mjs';
 import { ActivityJournal } from './journal.mjs';
 import { ActivityWorker } from './worker.mjs';
 import { isActivityStartupBlockCode } from './startup-context.mjs';
+import { readCountingPolicy, readRoster, readLinkPolicy, assertSamePolicy, submissionPolicy } from './policy.mjs';
 
 const noMentions = { parse: [], repliedUser: false };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -15,7 +16,7 @@ export const commandData = {
   options: [
     option('list', 'List available activity tasks', 1),
     option('start', 'Open your private task thread', 1, { options: [option('task', 'Task ID from /activity list', 3, { required: true })] }),
-    option('submit', 'Submit from your own private task thread', 1, { options: [option('text', 'Task content; leave empty to open a form', 3, { max_length: 6000 }), option('evidence', 'Evidence file', 11)] }),
+    option('submit', 'Submit from your own private task thread', 1, { options: [option('text', 'Task content; leave empty to open a form', 3, { max_length: 6000 }), option('evidence', 'Evidence file', 11), option('wallet', 'Enrolled wallet; required only for per-wallet activities', 3, { autocomplete: true, max_length: 42 })] }),
     option('status', 'Read only your own durable submission receipts', 1, { options: [option('receipt', 'Optional receipt ID or interaction ID', 3)] }),
   ],
 };
@@ -37,6 +38,12 @@ const errorText = code => ({
   ACTIVITY_ADMISSION_CLOSED: '這個活動已截止並關閉新提交，這次尚未受理。已取得收據的內容會繼續補送與驗證。',
   ACTIVITY_ORIGINAL_CONFLICT: '相同提交識別碼已有首次保存內容，不能覆寫。請聯絡管理員核對。',
   ACTIVITY_RECEIPT_NOT_FOUND: '找不到屬於你的這張收據。',
+  ACTIVITY_POLICY_UNAVAILABLE: '尚未取得此入口的計分政策，這次尚未受理。請重新使用 /activity start 開啟同一任務入口。',
+  ACTIVITY_POLICY_CHANGED: '入口保存的計分政策與伺服器不一致，這次尚未受理；請聯絡管理員核對，不會改寫既有收據。',
+  ACTIVITY_ROSTER_INVALID: '無法確認本人報名時固定的錢包名冊，這次尚未受理；請聯絡管理員。',
+  ACTIVITY_WALLET_REQUIRED: '此活動按報名錢包分別計次，請在 wallet 選項明確選擇一個本人已報名錢包；這次尚未受理。',
+  ACTIVITY_WALLET_NOT_ENROLLED: '這個錢包不在本人此活動的固定報名名冊，這次尚未受理；不能改用其他錢包累計。',
+  ACTIVITY_WALLET_NOT_APPLICABLE: '此活動按用戶計次，請移除 wallet 選項後重新提交；這次尚未受理。',
   identity_required: '請先在活動網站綁定 Discord 帳號。',
   enrollment_required: '請先在活動網站參加這個活動。',
 }[code] ?? '這項活動操作暫時未完成。若已取得收據，提交仍會保留；請稍後用 /activity status 查詢。');
@@ -126,10 +133,19 @@ export function createActivityModule({ client, env = process.env, logger = conso
     if (opening.has(key)) fail('ACTIVITY_THREAD_RECOVERY'); opening.add(key);
     try {
       const task = (await getTasks()).find(value => value.id === taskId); if (!task) fail('ACTIVITY_TASK_UNAVAILABLE');
+      // Resolve fallible policy reads before allocating a server reservation.
+      // Once reserve succeeds, retain the existing unknown-create recovery gate.
+      const rosterPolicy = readRoster(await api.roster(task.activity_id, interaction.user.id), task.activity_id, interaction.user.id);
+      assertSamePolicy(rosterPolicy, readCountingPolicy(task, rosterPolicy.walletAddresses));
       const remote = await api.reserve(interaction.user.id, task);
       if (!remote?.id || !remote.task || remote.task.id !== task.id || remote.task.guild_id !== config.guildId || remote.task.channel_id !== config.channelId) fail('ACTIVITY_THREAD_RECOVERY');
-      const intent = { reservationId: remote.id, discordUserId: interaction.user.id, taskId: task.id, activityId: task.activity_id, guildId: config.guildId, parentChannelId: config.channelId };
-      if (!journal.intents.has(remote.id)) await journal.intent(intent);
+      const policy = readCountingPolicy(remote.task, remote.wallet_addresses);
+      assertSamePolicy(policy, readCountingPolicy(task, remote.wallet_addresses));
+      assertSamePolicy(policy, rosterPolicy);
+      const intent = { reservationId: remote.id, discordUserId: interaction.user.id, taskId: task.id, activityId: task.activity_id, guildId: config.guildId, parentChannelId: config.channelId, ...policy };
+      const prior = journal.intents.get(remote.id);
+      if (prior?.countingMode !== undefined) assertSamePolicy(readLinkPolicy(prior), policy);
+      if (!prior || prior.countingMode === undefined) await journal.intent(intent);
       let thread;
       if (remote.created === true && !remote.thread_id && ![...journal.links.values()].some(value => value.reservationId === remote.id)) {
         try { thread = await parent.threads.create({ name: 'tm-' + remote.id, type: ChannelType.PrivateThread, invitable: false, autoArchiveDuration: 1440, reason: 'Top Market activity private task reservation' }); }
@@ -143,10 +159,10 @@ export function createActivityModule({ client, env = process.env, logger = conso
       if (thread.archived) await thread.setArchived(false, 'Resume activity private task');
       await thread.setInvitable(false);
       await thread.members.add(interaction.user.id); await bindThread(intent, thread);
-      await privateReply(interaction, `已建立你的私人任務入口：${thread.url}\n請在串內使用 /activity submit 提交。開啟入口本身不會取得 GP。`);
+      await privateReply(interaction, `已建立你的私人任務入口：${thread.url}\n請在串內使用 /activity submit 提交。開啟入口本身不會取得 GP。${policy.countingMode === 'per_wallet' ? '\n本活動依報名時固定錢包各別累計；提交時必須明確選 wallet，相同內容不因換錢包而成為新任務證據。' : '\n本活動依用戶累計，提交不需 wallet 選項。'}`);
     } finally { opening.delete(key); }
   }
-  async function admit(interaction, link, content, attachment) {
+  async function admit(interaction, link, content, attachment, selectedPolicy) {
     assertAccepting();
     content = String(content ?? '').trim();
     if (!content && !attachment) fail('ACTIVITY_EMPTY_SUBMISSION');
@@ -161,9 +177,9 @@ export function createActivityModule({ client, env = process.env, logger = conso
     if (!Number.isFinite(created) || created < Date.parse(journal.registeredAt) || created > now() + 30_000) fail('ACTIVITY_SOURCE_NOT_READY');
     const { receipt } = await journal.admit({ source: 'discord', source_event_id: interaction.id, discord_user_id: interaction.user.id,
       activity_id: link.activityId, task_id: link.taskId, guild_id: config.guildId, channel_id: config.channelId, thread_id: link.threadId,
-      event_at: new Date(created).toISOString(), content, evidence }, assertAccepting);
+      event_at: new Date(created).toISOString(), content, evidence, ...selectedPolicy }, assertAccepting);
     try {
-      await privateReply(interaction, `已持久保存並受理；驗證結果與 GP 尚待處理。\n收據：${receipt.receiptId}\n可用 /activity status 查詢。通知失敗不會取消已保存的提交。`);
+      await privateReply(interaction, `已持久保存並受理；驗證結果與 GP 尚待處理。\n收據：${receipt.receiptId}${receipt.envelope.payload.submission_version === 2 ? '\n計分錢包：' + receipt.envelope.payload.wallet_address : ''}\n可用 /activity status 查詢。通知失敗不會取消已保存的提交。`);
       await journal.notify(receipt, 'sent');
     } catch { await journal.notify(receipt, 'unknown'); logger.warn?.('Activity receipt notification unknown; durable admission retained'); }
   }
@@ -180,9 +196,24 @@ export function createActivityModule({ client, env = process.env, logger = conso
       try { for (const status of await api.statuses(ids)) { const row = rows.find(item => item.eventId === status.id); if (row) await journal.recordStatus(row, status); } }
       catch (error) { logger.warn?.('Activity receipt refresh:', error?.code ?? 'ACTIVITY_API_UNAVAILABLE'); }
     }
-    await privateReply(interaction, rows.map(row => `收據：${row.receiptId}\n提交：${row.envelope.payload.source_event_id}\n狀態：${row.status ?? row.serverStatus}${row.diagnostic ? '\n診斷代碼：' + row.diagnostic : ''}`).join('\n\n'));
+    await privateReply(interaction, rows.map(row => `收據：${row.receiptId}\n提交：${row.envelope.payload.source_event_id}${row.envelope.payload.submission_version === 2 ? '\n計分錢包：' + row.envelope.payload.wallet_address : ''}\n狀態：${row.status ?? row.serverStatus}${row.diagnostic ? '\n診斷代碼：' + row.diagnostic : ''}`).join('\n\n'));
+  }
+  async function autocomplete(interaction) {
+    let choices = [];
+    try {
+      if (started && !stopped && journal && worker && !journal.faulted && !worker.fatal) {
+        assertAccepting();
+        const link = authorized(interaction, true), focused = interaction.options.getFocused(true);
+        if (interaction.options.getSubcommand() === 'submit' && focused?.name === 'wallet' && !closingActivities.has(link.activityId) && !journal.closedActivities.has(link.activityId)) {
+          const policy = readLinkPolicy(link), value = String(focused.value ?? '').toLowerCase();
+          if (policy.countingMode === 'per_wallet') choices = policy.walletAddresses.filter(wallet => wallet.includes(value)).map(wallet => ({ name: wallet, value: wallet }));
+        }
+      }
+    } catch { /* Unauthorized, unavailable and legacy entries reveal no roster. */ }
+    try { await interaction.respond(choices); } catch { logger.warn?.('ACTIVITY_AUTOCOMPLETE_UNAVAILABLE'); }
   }
   async function operation(interaction) {
+    if (interaction.isAutocomplete?.() && interaction.commandName === 'activity') { await autocomplete(interaction); return true; }
     const modal = interaction.isModalSubmit?.() && interaction.customId?.startsWith('tm-activity:');
     const command = interaction.isChatInputCommand?.() && interaction.commandName === 'activity';
     if (!modal && !command) return false;
@@ -191,7 +222,7 @@ export function createActivityModule({ client, env = process.env, logger = conso
         : config.errors.length ? ' 缺少或無效設定：' + config.errors.join(', ') : '';
       await interaction.reply({ content: '活動模組尚未啟動，這次尚未受理。' + details, ephemeral: true, allowedMentions: noMentions }); return true;
     }
-    let deferred = false, admissionTracked = false, finishAdmission, admissionActivity;
+    let deferred = false, admissionTracked = false, finishAdmission, admissionActivity, selectedPolicy;
     try {
       const sub = modal ? 'modal' : interaction.options.getSubcommand();
       if (sub === 'submit' || modal) { inFlightAdmissions++; admissionTracked = true; }
@@ -206,23 +237,26 @@ export function createActivityModule({ client, env = process.env, logger = conso
         const finish = finishAdmission; finishAdmission = () => { activityHandlers.get(admissionActivity).delete(pending); finish(); };
       }
       if (sub === 'submit' && !interaction.options.getString('text') && !interaction.options.getAttachment('evidence')) {
+        selectedPolicy = submissionPolicy(readLinkPolicy(link), interaction.options.getString('wallet'));
         const nonce = randomUUID();
         for (const [id, value] of modals) if (value.expiresAt < now()) modals.delete(id);
-        modals.set(nonce, { userId: interaction.user.id, guildId: interaction.guildId, threadId: interaction.channelId, expiresAt: now() + 15 * 60_000 });
+        modals.set(nonce, { userId: interaction.user.id, guildId: interaction.guildId, threadId: interaction.channelId, selectedPolicy, expiresAt: now() + 15 * 60_000 });
         await interaction.showModal({ custom_id: 'tm-activity:' + nonce, title: '提交活動任務', components: [{ type: 1, components: [{ type: 4, custom_id: 'content', label: '任務內容（證據附件請改用 slash evidence 選項）', style: 2, required: true, max_length: 4000 }] }] }); return true;
       }
       await interaction.deferReply({ ephemeral: true }); deferred = true;
       if (modal) {
         const nonce = interaction.customId.slice('tm-activity:'.length), form = modals.get(nonce);
         if (!form || form.expiresAt < now() || form.userId !== interaction.user.id || form.guildId !== interaction.guildId || form.threadId !== interaction.channelId) fail('ACTIVITY_MODAL_EXPIRED');
-        modals.delete(nonce); await admit(interaction, link, interaction.fields.getTextInputValue('content'), null);
+        const currentPolicy = submissionPolicy(readLinkPolicy(link), form.selectedPolicy.wallet_address);
+        if (JSON.stringify(currentPolicy) !== JSON.stringify(form.selectedPolicy)) fail('ACTIVITY_POLICY_CHANGED');
+        modals.delete(nonce); await admit(interaction, link, interaction.fields.getTextInputValue('content'), null, form.selectedPolicy);
       } else if (sub === 'list') {
         const tasks = await getTasks();
-        await privateReply(interaction, tasks.length ? tasks.map(task => `${task.name}\n/activity start task:${task.id}`).join('\n\n') : '目前沒有可參與的 Discord 任務。');
+        await privateReply(interaction, tasks.length ? tasks.map(task => `${task.name}${task.counting_mode === 'per_wallet' ? '\n依固定報名錢包分別累計' : task.counting_mode === 'per_user' ? '\n依用戶累計' : '\n計分政策尚未就緒，暫不可提交'}\n/activity start task:${task.id}`).join('\n\n') : '目前沒有可參與的 Discord 任務。');
       } else if (sub === 'start') {
         assertAccepting();
         await openThread(interaction, String(interaction.options.getString('task', true)).toLowerCase());
-      } else if (sub === 'submit') await admit(interaction, link, interaction.options.getString('text'), interaction.options.getAttachment('evidence'));
+      } else if (sub === 'submit') await admit(interaction, link, interaction.options.getString('text'), interaction.options.getAttachment('evidence'), submissionPolicy(readLinkPolicy(link), interaction.options.getString('wallet')));
       else if (sub === 'status') await showStatus(interaction, interaction.options.getString('receipt'));
       else fail('ACTIVITY_TASK_UNAVAILABLE');
     } catch (error) {

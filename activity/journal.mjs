@@ -66,6 +66,7 @@ export class ActivityJournal {
         this.registeredAt = record.registeredAt; break;
       case 'admitted': {
         const e = record.envelope, { hash, ...unsigned } = e;
+        submissionFingerprint(e.payload);
         if (!this.stream || e.streamId !== this.stream.streamId || BigInt(e.sequence) !== BigInt(this.head.sequence) + 1n || e.previousHash !== this.head.hash || hash !== sourceEnvelopeHash(unsigned) || e.kind !== 'submission' || this.interactions.has(e.payload.source_event_id)) throw Error('Activity source sequence or original payload was changed');
         const receipt = { envelope: e, receiptId: `${e.streamId}/${e.sequence}`, serverStatus: 'not_submitted', notify: 'pending' };
         this.receipts.set(e.sequence, receipt); this.interactions.set(e.payload.source_event_id, receipt); this.head = { sequence: e.sequence, hash }; break;
@@ -105,8 +106,9 @@ export class ActivityJournal {
   register(registeredAt) { return this.enqueue(async () => { if (!this.registeredAt) await this.persist({ op: 'registered', registeredAt }); else if (this.registeredAt !== registeredAt) throw Object.assign(Error('Source registration mismatch'), { code: 'ACTIVITY_REGISTRATION_MISMATCH' }); }); }
   admit(payload, guard = () => true) {
     return this.enqueue(async () => {
+    const fingerprint = submissionFingerprint(payload);
     const old = this.interactions.get(payload.source_event_id);
-    if (old) { if (submissionFingerprint(old.envelope.payload) !== submissionFingerprint(payload)) throw Object.assign(Error('An interaction ID cannot replace its first durable payload'), { code: 'ACTIVITY_ORIGINAL_CONFLICT' }); return { receipt: old, duplicate: true }; }
+    if (old) { if (submissionFingerprint(old.envelope.payload) !== fingerprint) throw Object.assign(Error('An interaction ID cannot replace its first durable payload'), { code: 'ACTIVITY_ORIGINAL_CONFLICT' }); return { receipt: old, duplicate: true }; }
     if (this.closedActivities.has(payload.activity_id)) throw Object.assign(Error('This activity has durably closed new admissions'), { code: 'ACTIVITY_ADMISSION_CLOSED' });
     if (!guard()) throw Object.assign(Error('Source lease no longer permits this admission'), { code: 'ACTIVITY_SOURCE_NOT_READY' });
     const frozenPayload = JSON.parse(canonicalize(payload));

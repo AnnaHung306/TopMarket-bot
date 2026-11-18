@@ -1,0 +1,71 @@
+{
+  "protocol": "discord-interaction-submission/v2",
+  "expected_source": "Independent Python stdlib JSON UTF-16-key-order / UTF-8 SHA256; v1 input from unchanged Bot 7e9ad8e activity/protocol.vectors.json; no JS implementation imported",
+  "genesis": {
+    "input": {
+      "streamId": "10000000-0000-4000-8000-000000000001",
+      "guildId": "111111111111111111",
+      "scope": "test"
+    },
+    "canonical": "[\"top-market-source-stream/v1\",\"10000000-0000-4000-8000-000000000001\",\"111111111111111111\",\"test\",\"discord_interaction\"]",
+    "hash": "0xd49dfa1418654f536f614e67d44671936e2a8a2d5c7da2ca62ef192e818b2a4b"
+  },
+  "semanticFingerprint": {
+    "input": {
+      "source_event_id": "1493810399232000001",
+      "discord_user_id": "333333333333333333",
+      "activity_id": "20000000-0000-4000-8000-000000000001",
+      "task_id": "30000000-0000-4000-8000-000000000001",
+      "guild_id": "111111111111111111",
+      "channel_id": "222222222222222222",
+      "thread_id": null,
+      "event_at": "2026-11-18T00:00:00.000Z",
+      "content": "中文原文 🐈",
+      "evidence": [
+        {
+          "url": "https://cdn.discordapp.com/attachments/123/456/file.png?sig=example",
+          "filename": "圖片.png",
+          "content_type": "image/png"
+        }
+      ],
+      "source": "discord",
+      "submission_version": 2,
+      "wallet_address": "0x1111111111111111111111111111111111111111",
+      "policy_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "normalizedCanonical": "[\"top-market-submission/v2\",{\"activity_id\":\"20000000-0000-4000-8000-000000000001\",\"channel_id\":\"222222222222222222\",\"content\":\"中文原文 🐈\",\"discord_user_id\":\"333333333333333333\",\"event_at\":\"2026-11-18T00:00:00.000Z\",\"evidence\":[{\"content_type\":\"image/png\",\"filename\":\"圖片.png\",\"url\":\"https://cdn.discordapp.com/attachments/123/456/file.png\"}],\"guild_id\":\"111111111111111111\",\"policy_hash\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source_event_id\":\"1493810399232000001\",\"task_id\":\"30000000-0000-4000-8000-000000000001\",\"thread_id\":\"\",\"wallet_address\":\"0x1111111111111111111111111111111111111111\"}]",
+    "hash": "0xf6d5150036cebd1b969374886eb0137f7fa18821c77a85946f641ee426a2ab5d"
+  },
+  "envelope": {
+    "input": {
+      "streamId": "10000000-0000-4000-8000-000000000001",
+      "sequence": "9007199254740994",
+      "previousHash": "0x3cb4b5f1134891accb4e63bf77a2227a4b171bdf690aae3d7961d28492fc710c",
+      "kind": "submission",
+      "payload": {
+        "source_event_id": "1493810399232000001",
+        "discord_user_id": "333333333333333333",
+        "activity_id": "20000000-0000-4000-8000-000000000001",
+        "task_id": "30000000-0000-4000-8000-000000000001",
+        "guild_id": "111111111111111111",
+        "channel_id": "222222222222222222",
+        "thread_id": null,
+        "event_at": "2026-11-18T00:00:00.000Z",
+        "content": "中文原文 🐈",
+        "evidence": [
+          {
+            "url": "https://cdn.discordapp.com/attachments/123/456/file.png?sig=example",
+            "filename": "圖片.png",
+            "content_type": "image/png"
+          }
+        ],
+        "source": "discord",
+        "submission_version": 2,
+        "wallet_address": "0x1111111111111111111111111111111111111111",
+        "policy_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "canonical": "{\"kind\":\"submission\",\"payload\":{\"activity_id\":\"20000000-0000-4000-8000-000000000001\",\"channel_id\":\"222222222222222222\",\"content\":\"中文原文 🐈\",\"discord_user_id\":\"333333333333333333\",\"event_at\":\"2026-11-18T00:00:00.000Z\",\"evidence\":[{\"content_type\":\"image/png\",\"filename\":\"圖片.png\",\"url\":\"https://cdn.discordapp.com/attachments/123/456/file.png?sig=example\"}],\"guild_id\":\"111111111111111111\",\"policy_hash\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source\":\"discord\",\"source_event_id\":\"1493810399232000001\",\"submission_version\":2,\"task_id\":\"30000000-0000-4000-8000-000000000001\",\"thread_id\":null,\"wallet_address\":\"0x1111111111111111111111111111111111111111\"},\"previousHash\":\"0x3cb4b5f1134891accb4e63bf77a2227a4b171bdf690aae3d7961d28492fc710c\",\"sequence\":\"9007199254740994\",\"streamId\":\"10000000-0000-4000-8000-000000000001\"}",
+    "hash": "0x8db5af10dce4d5bff40d2da5efd3eae170c21a01352298b4576b56cdfab149b5"
+  }
+}

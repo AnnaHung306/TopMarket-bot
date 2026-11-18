@@ -41,11 +41,18 @@ export function makeSourceEnvelope(input) {
   return { ...unsigned, hash: sourceEnvelopeHash(unsigned) };
 }
 export function submissionFingerprint(event) {
+  const v2 = event.submission_version === 2;
+  if (Object.hasOwn(event, 'submission_version') && !v2) throw Error('Unsupported activity submission version');
+  if (v2 ? !/^0x[0-9a-f]{40}$/.test(event.wallet_address ?? '') || !/^0x[0-9a-f]{64}$/.test(event.policy_hash ?? '')
+    : Object.hasOwn(event, 'wallet_address') || Object.hasOwn(event, 'policy_hash')) throw Error('Invalid activity submission policy');
   const evidence = (event.evidence ?? []).map(item => {
     const url = new URL(item.url);
     return { url: url.origin + url.pathname, filename: item.filename ?? '', content_type: item.content_type ?? '' };
   });
-  return sha256(canonicalize({ source_event_id: event.source_event_id, discord_user_id: event.discord_user_id,
+  const semantic = { source_event_id: event.source_event_id, discord_user_id: event.discord_user_id,
     activity_id: event.activity_id, task_id: event.task_id, guild_id: event.guild_id, channel_id: event.channel_id,
-    thread_id: event.thread_id ?? '', event_at: event.event_at, content: event.content, evidence }));
+    thread_id: event.thread_id ?? '', event_at: event.event_at, content: event.content, evidence };
+  // V1 bytes are unchanged. V2 is domain-separated and binds the exact wallet
+  // and frozen policy; renewed attachment URL queries remain semantically equal.
+  return sha256(canonicalize(v2 ? ['top-market-submission/v2', { ...semantic, wallet_address: event.wallet_address, policy_hash: event.policy_hash }] : semantic));
 }

@@ -27,6 +27,7 @@ export class ActivityApi {
   }
   async tasks() { const data = await this.request('/tasks'); if (!Array.isArray(data.tasks)) throw new ActivityApiError('ACTIVITY_TASKS_INVALID', 502); return data.tasks; }
   async reserve(discordUserId, task) { return (await this.request('/threads/reserve', { discord_user_id: discordUserId, task_id: task.id, guild_id: task.guild_id, channel_id: task.channel_id })).reservation; }
+  roster(activityId, discordUserId) { return this.request(`/activities/${encodeURIComponent(activityId)}/roster?` + new URLSearchParams({ discord_user_id: discordUserId })); }
   completeThread(id, threadId) { return this.request(`/threads/${id}/complete`, { thread_id: threadId }); }
   archiveThread(id) { return this.request(`/threads/${id}/archive`, {}); }
   failThread(id, reason) { return this.request(`/threads/${id}/fail`, { reason }); }
