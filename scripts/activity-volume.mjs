@@ -7,7 +7,12 @@ const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.con
 export class ActivityVolumeError extends Error {
   constructor(code) { super(code); this.name = 'ActivityVolumeError'; this.code = code; }
 }
+// Identity failures must never be mistaken for recoverable activity storage errors.
+export class ActivityIdentityError extends ActivityVolumeError {
+  constructor(code) { super(code); this.name = 'ActivityIdentityError'; }
+}
 const refuse = code => { throw new ActivityVolumeError(code); };
+const refuseIdentity = code => { throw new ActivityIdentityError(code); };
 const mode = stat => stat.mode & 0o7777;
 function statIfPresent(path) { try { return fs.lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } }
 function assertDirectory(path) {
@@ -83,18 +88,27 @@ function prepareScope(settings, device) {
   assertScope(settings.directory, device); assertJournal(settings.journalPath, device);
 }
 
-function dropToNode(env) {
-  if (process.getuid() === 0 || process.geteuid() === 0) {
-    if (env.RAILWAY_RUN_UID !== '0' || process.getuid() !== 0 || process.geteuid() !== 0) refuse('ACTIVITY_ROOT_INITIALIZATION_NOT_AUTHORIZED');
-    process.setgroups([]); process.setgid(GID); process.setuid(UID);
+/** Independent of volume health: either prove the node identity or stop the host. */
+export function ensureNodeIdentity(env = process.env) {
+  try {
+    if (process.platform !== 'linux') refuseIdentity('ACTIVITY_VOLUME_LINUX_REQUIRED');
+    if (process.getuid() === 0 || process.geteuid() === 0) {
+      if (env.RAILWAY_RUN_UID !== '0' || process.getuid() !== 0 || process.geteuid() !== 0) refuseIdentity('ACTIVITY_ROOT_INITIALIZATION_NOT_AUTHORIZED');
+      try { process.setgroups([]); process.setgid(GID); process.setuid(UID); }
+      catch { refuseIdentity('ACTIVITY_RUNTIME_PRIVILEGE_DROP_FAILED'); }
+    }
+    if (process.getuid() !== UID || process.geteuid() !== UID || process.getgid() !== GID || process.getegid() !== GID || process.getgroups().some(group => group !== GID)) refuseIdentity('ACTIVITY_RUNTIME_IDENTITY_INVALID');
+    const effectiveCaps = /^CapEff:\s*([0-9a-f]+)$/mi.exec(fs.readFileSync('/proc/self/status', 'utf8'))?.[1];
+    if (!effectiveCaps || BigInt('0x' + effectiveCaps) !== 0n) refuseIdentity('ACTIVITY_RUNTIME_CAPABILITIES_INVALID');
+    const home = fs.lstatSync('/home/node');
+    if (home.isSymbolicLink() || !home.isDirectory() || home.uid !== UID || home.gid !== GID) refuseIdentity('ACTIVITY_RUNTIME_HOME_INVALID');
+    process.env.HOME = '/home/node'; process.env.USER = 'node'; process.env.LOGNAME = 'node';
+    process.umask(0o077);
+    return { uid: UID, gid: GID };
+  } catch (error) {
+    if (error instanceof ActivityIdentityError) throw error;
+    throw new ActivityIdentityError('ACTIVITY_RUNTIME_IDENTITY_CHECK_FAILED');
   }
-  if (process.getuid() !== UID || process.geteuid() !== UID || process.getgid() !== GID || process.getegid() !== GID || process.getgroups().some(group => group !== GID)) refuse('ACTIVITY_RUNTIME_IDENTITY_INVALID');
-  const effectiveCaps = /^CapEff:\s*([0-9a-f]+)$/mi.exec(fs.readFileSync('/proc/self/status', 'utf8'))?.[1];
-  if (!effectiveCaps || BigInt('0x' + effectiveCaps) !== 0n) refuse('ACTIVITY_RUNTIME_CAPABILITIES_INVALID');
-  const home = assertDirectory('/home/node');
-  if (home.uid !== UID || home.gid !== GID) refuse('ACTIVITY_RUNTIME_HOME_INVALID');
-  process.env.HOME = '/home/node'; process.env.USER = 'node'; process.env.LOGNAME = 'node';
-  process.umask(0o077);
 }
 
 function durableProbe(directory) {
@@ -123,15 +137,15 @@ function durableProbe(directory) {
 /** Linux container startup only. Windows npm startup does not call this helper. */
 export function bootstrapActivityVolume(env = process.env) {
   try {
-    if (process.platform !== 'linux') refuse('ACTIVITY_VOLUME_LINUX_REQUIRED');
-    if (process.getuid() === 0 && env.RAILWAY_RUN_UID !== '0') refuse('ACTIVITY_ROOT_INITIALIZATION_NOT_AUTHORIZED');
+    if (process.platform !== 'linux') refuseIdentity('ACTIVITY_VOLUME_LINUX_REQUIRED');
+    if (process.getuid() === 0 && env.RAILWAY_RUN_UID !== '0') refuseIdentity('ACTIVITY_ROOT_INITIALIZATION_NOT_AUTHORIZED');
     const settings = activityVolumeSettings(env); let mount, device;
     if (settings.enabled) {
       mount = inspectActivityMount(fs.readFileSync('/proc/self/mountinfo', 'utf8'));
       safeAncestor('/data'); device = safeAncestor(ACTIVITY_VOLUME_ROOT).dev;
       prepareScope(settings, device);
     }
-    dropToNode(env);
+    ensureNodeIdentity(env);
     if (settings.enabled) {
       safeAncestor('/data'); safeAncestor(ACTIVITY_VOLUME_ROOT); assertScope(settings.directory, device);
       durableProbe(settings.directory);
@@ -143,5 +157,11 @@ export function bootstrapActivityVolume(env = process.env) {
       syncDirectory(settings.directory);
     }
     return { ...settings, mount, uid: process.getuid(), gid: process.getgid() };
-  } catch (error) { if (error instanceof ActivityVolumeError) throw error; throw new ActivityVolumeError('ACTIVITY_VOLUME_IO_FAILED'); }
+  } catch (error) {
+    if (error instanceof ActivityVolumeError) throw error;
+    // Native filesystem failures are activity storage failures. Programming or
+    // unknown failures stay fatal instead of silently degrading the host.
+    if (typeof error?.code === 'string' && typeof error?.syscall === 'string' && typeof error?.errno === 'number') throw new ActivityVolumeError('ACTIVITY_VOLUME_IO_FAILED');
+    throw error;
+  }
 }

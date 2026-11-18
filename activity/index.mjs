@@ -4,6 +4,7 @@ import { activityConfig } from './config.mjs';
 import { ActivityApi } from './api.mjs';
 import { ActivityJournal } from './journal.mjs';
 import { ActivityWorker } from './worker.mjs';
+import { isActivityStartupBlockCode } from './startup-context.mjs';
 
 const noMentions = { parse: [], repliedUser: false };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,9 +42,10 @@ const errorText = code => ({
 }[code] ?? '這項活動操作暫時未完成。若已取得收據，提交仍會保留；請稍後用 /activity status 查詢。');
 
 /** Host integration only. The host owns Client, login, intents and registration. */
-export function createActivityModule({ client, env = process.env, logger = console, fetchImpl = fetch, storagePath, now = Date.now }) {
+export function createActivityModule({ client, env = process.env, logger = console, fetchImpl = fetch, storagePath, now = Date.now, activityUnavailable = null }) {
+  if (activityUnavailable !== null && !isActivityStartupBlockCode(activityUnavailable)) fail('ACTIVITY_STARTUP_CONTEXT_INVALID');
   const config = activityConfig(env, storagePath), api = new ActivityApi(config, fetchImpl, now);
-  let journal, worker, timer, parent, stopped = false, started = false, startError = null, opening = new Set(), active = new Set(), inFlightAdmissions = 0;
+  let journal, worker, timer, parent, stopped = false, started = false, startError = activityUnavailable, opening = new Set(), active = new Set(), inFlightAdmissions = 0;
   const modals = new Map();
   const closingActivities = new Set(), activityHandlers = new Map();
   function assertAccepting() {
@@ -185,7 +187,8 @@ export function createActivityModule({ client, env = process.env, logger = conso
     const command = interaction.isChatInputCommand?.() && interaction.commandName === 'activity';
     if (!modal && !command) return false;
     if (!started || stopped || !journal || !worker || journal.faulted || worker.fatal) {
-      const details = config.errors.length ? ' 缺少或無效設定：' + config.errors.join(', ') : '';
+      const details = activityUnavailable ? ' 活動啟動檢查未通過，請聯絡管理員。診斷代碼：' + activityUnavailable
+        : config.errors.length ? ' 缺少或無效設定：' + config.errors.join(', ') : '';
       await interaction.reply({ content: '活動模組尚未啟動，這次尚未受理。' + details, ephemeral: true, allowedMentions: noMentions }); return true;
     }
     let deferred = false, admissionTracked = false, finishAdmission, admissionActivity;
@@ -263,6 +266,9 @@ export function createActivityModule({ client, env = process.env, logger = conso
   }
   async function start() {
     if (started) return; if (stopped) throw new ActivityOperationError('ACTIVITY_STOPPED');
+    // A storage-blocked container must never open a journal, call the API, or
+    // install the automatic recovery timer. Repair requires a verified restart.
+    if (activityUnavailable) throw new ActivityOperationError(activityUnavailable);
     if (config.errors.length) { logger.error?.('Activity configuration fields:', config.errors.join(', ')); throw new ActivityOperationError('ACTIVITY_CONFIG_INVALID'); }
     try {
       journal ??= new ActivityJournal(config.journalPath, config);

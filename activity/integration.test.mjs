@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, unlinkSync, rmdirSync, fsyncSync, readFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync, rmdirSync, fsyncSync, readFileSync, appendFileSync, lstatSync, readdirSync } from 'node:fs';
 import { resolve, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createActivityModule } from './index.mjs';
@@ -106,8 +106,14 @@ test('existing-client activity host integration; isolated durable fixture only',
   assert.ok(fixture.startsWith(repo + sep)); assert.equal(dirname(fixture), fixtureDir);
   if (existsSync(fixtureDir)) throw Error('Refusing to replace a pre-existing activity test fixture directory');
   mkdirSync(fixtureDir);
+  function cleanupFixture() {
+    assert.ok(fixtureDir.startsWith(repo + sep)); assert.equal(dirname(fixture), fixtureDir);
+    const directory = lstatSync(fixtureDir); assert.ok(directory.isDirectory() && !directory.isSymbolicLink());
+    assert.ok(readdirSync(fixtureDir).every(name => name === 'activity-journal.ndjson'));
+    if (existsSync(fixture)) { const file = lstatSync(fixture); assert.ok(file.isFile() && !file.isSymbolicLink() && file.nlink === 1); unlinkSync(fixture); }
+  }
   async function scenario(name, body) {
-    await t.test(name, async () => { try { await body(); } finally { if (existsSync(fixture)) unlinkSync(fixture); } });
+    await t.test(name, async () => { try { await body(); } finally { cleanupFixture(); } });
   }
   try {
     await scenario('disabled startup remains honest and unrelated /wallet is untouched', async () => {
@@ -318,5 +324,5 @@ test('existing-client activity host integration; isolated durable fixture only',
       assert.equal(h.state.deliveries[0].envelopes[0].payload.content, 'reject fixture'); await mod.stop(); h.advance(91_000);
       mod = h.module(); await mod.start(); await mod.flush(); assert.equal(mod.state().pending, 0); assert.equal(thread.sent.length, sent); assert.equal(h.state.deliveries.length, delivered); await mod.stop();
     });
-  } finally { if (existsSync(fixture)) unlinkSync(fixture); rmdirSync(fixtureDir); }
+  } finally { cleanupFixture(); rmdirSync(fixtureDir); }
 });

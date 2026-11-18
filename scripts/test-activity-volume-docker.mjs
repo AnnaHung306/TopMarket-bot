@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 
 const image = 'top-market-bot-volume-bootstrap:20261118-local';
 const volumes = Object.fromEntries(['ok', 'symlink', 'owner', 'journal'].map(kind => [kind, `top-market-activity-bootstrap-${kind}-20261118`]));
-const scenarios = ['initialize', 'restart', 'production', 'nonroot', 'reject-scope-link', 'reject-file-link', 'reject-owner', 'reject-root-owner', 'reject-journal-owner', 'reject-mode', 'readonly', 'missing-mount', 'outside-path', 'prestart', 'signal'];
+const scenarios = ['initialize', 'restart', 'production', 'nonroot', 'reject-scope-link', 'reject-file-link', 'reject-owner', 'reject-root-owner', 'reject-journal-owner', 'reject-mode', 'readonly', 'missing-mount', 'outside-path', 'prestart', 'signal', 'host-storage-blocked', 'host-identity-fatal'];
 const containerName = scenario => `top-market-activity-bootstrap-${scenario}-20261118`;
 const labels = { 'io.top-market.test': 'activity-volume-bootstrap', 'io.top-market.session': '20261118-local' };
 const labelArgs = Object.entries(labels).flatMap(([key, value]) => ['--label', `${key}=${value}`]);
@@ -49,6 +49,8 @@ try {
   run('reject-journal-owner', volumes.journal); run('reject-mode', volumes.journal, { scope: 'production' });
   run('readonly', volumes.ok, { readonly: true }); run('missing-mount'); run('outside-path', undefined, { journalPath: '/tmp/top-market-bootstrap-outside.ndjson' });
   run('prestart', volumes.ok);
+  run('host-storage-blocked', volumes.ok, { readonly: true });
+  run('host-identity-fatal', undefined, { user: '2000:2000' });
   const signal = create('signal', volumes.ok); docker(['container', 'start', signal.name]);
   for (let attempt = 0; attempt < 300; attempt++) {
     const logs = docker(['container', 'logs', signal.name]).stdout;

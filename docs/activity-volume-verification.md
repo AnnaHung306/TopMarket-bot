@@ -1,6 +1,6 @@
 # 活動持久磁碟 bootstrap：本機候選與驗證範圍
 
-狀態：**本機候選及 root 獨立覆驗通過；尚未雲端部署、正式 Bot 啟動或使用者驗收**。root 先向使用者告知下列資源與清理範圍後，作者與 root 各自在 Docker Desktop Linux engine 完成同一組 15/15 容器情境，並各自清理自己建立的 20 個資源。
+狀態：**本機候選已由 root 獨立覆驗：合併 Node 回歸38/38、容器情境17/17；尚未雲端部署、正式 Bot 啟動或使用者驗收**。原先作者與 root 各自完成15/15容器情境並清理20個資源；本次補強保留原15情境，新增2個 host 隔離情境。root 已先告知本次22個精確資源與清理範圍，完成後再次確認均無殘留。
 
 來源 checkout 為 `work/top-market-bot-activity`，分支 `codex/top-market-activity-20261118`，開始此候選時的歷史基準 HEAD 為 `c4ee147ab7d0c8daa1ec17307662194e4bbdff12`，main 基底為 `7d82136d085cc0fcffbc5ba60053e2730215d7ed`。作者首次完成本機測試並交 root 覆核時尚未 commit/push；後續提交、review 狀態及最終 HEAD 以 [Bot Draft PR #1](https://github.com/AnnaHung306/TopMarket-bot/pull/1) 為準，本文件的歷史基準不代表最新 PR head。
 
@@ -17,7 +17,11 @@ Docker 保留預設 `USER node`。Docker 專用薄 Node wrapper 在需要初始�
 
 必須核 `/proc/self/mountinfo` 的真正獨立 mount，拒絕缺 mount、唯讀或暫存檔案系統、路徑越界、symlink、hardlink、非預期 owner/mode 及不專用的 scope 目錄。root 不改 mount root 的 owner/mode，只能建立尚不存在的 scope 私有目錄，並只 chown 自己剛建立的該目錄；不做 recursive chown 或 chmod 777。既有 scope/journal 不符即拒絕，不自動修正、不換暫存 journal。
 
-降權後以新建自有 probe 做 write/fsync/readback，刪除該 probe 後 fsync 目錄；必要時只以 exclusive create 建立空的 0600 journal，不覆寫既有 journal。bootstrap 不讀寫既有 journal 內容。任何 I/O、權限或降權失敗均阻擋啟動，無法假裝持久受理成功。
+降權後以新建自有 probe 做 write/fsync/readback，刪除該 probe 後 fsync 目錄；必要時只以 exclusive create 建立空的 0600 journal，不覆寫既有 journal。bootstrap 不讀寫既有 journal 內容。`bootstrapActivityVolume()` 保持 strict API，任何儲存檢查失敗都會 throw，不能假裝持久受理成功。
+
+Docker wrapper 只隔離明列的活動儲存／路徑錯誤及 `ACTIVITY_ENABLED_INVALID`。若 strict 檢查在降權前失敗，wrapper 必須另執行獨立 `ensureNodeIdentity()`，核 UID/eUID/GID/eGID1000、supplementary groups、零 effective capabilities 與 node home；成功後才執行原兩個 prestart 和原 Bot。因此活動磁碟故障不會連帶關閉既有 wallet。root 授權、降權、身分驗證及未知程式錯誤仍使整個程序停止，prestart 失敗也維持原先的全程序阻擋。
+
+阻擋原因透過單次初始化、`Object.freeze` 的程序內 startup context 明確傳給 `createActivityModule`。`start()` 在 journal constructor 前拒絕，不建立 worker／重試 timer、不呼叫活動 API，活動指令回覆「尚未受理」與固定診斷代碼。已有收據不讀寫、不改 `ACTIVITY_ENABLED`，也不使用替代或暫存 journal。修復儲存後須重新啟動並再次通過檢查；此為既有模組故障隔離，沒有替換 wallet／Alchemy 方法。
 
 ## 精確本機資源與預定清理範圍
 
@@ -51,10 +55,12 @@ Docker 保留預設 `USER node`。Docker 專用薄 Node wrapper 在需要初始�
 - `top-market-activity-bootstrap-outside-path-20261118`
 - `top-market-activity-bootstrap-prestart-20261118`
 - `top-market-activity-bootstrap-signal-20261118`
+- `top-market-activity-bootstrap-host-storage-blocked-20261118`
+- `top-market-activity-bootstrap-host-identity-fatal-20261118`
 
-測試結束只清理本輪實際建立的上述 containers、四個 volumes 與候選 image tag；保留 source、regression tests、此報告及其他 image/cache/volume/container。容器中的 probe 和合成 journal 隨這四個測試 volumes 清除。沒有 host journal、正式 `.env`、正式 DB 或雲端資源在清理範圍內。
+本次共1 image、4 volumes、17 containers。測試結束只清理本輪實際建立的上述資源；保留 source、regression tests、此報告及其他 image/cache/volume/container。容器中的 probe 和合成 journal 隨四個測試 volumes 清除。沒有 host journal、正式 `.env`、正式 DB 或雲端資源在清理範圍內。
 
-## 已執行本機驗證
+## 原15項本機驗證與歷史覆驗
 
 1. 新 root-owned named volume：初始化私有 scope 後降至 UID/GID 1000、無 root supplementary group/capability，write+fsync 成功。
 2. 重新啟動容器讀回同一個合成 ActivityJournal；test 與 production 實際檔案及 source scope 分隔。
@@ -87,6 +93,38 @@ root 已逐段檢視 volume bootstrap、fixture、Docker harness、prestart 與 
 上述覆驗全為本機容器／合成資料，沒有 cloud、正式 Bot login、token、PG 或 RPC 操作。正式 Railway volume 的 owner、持久性及重啟流程仍列為外部驗收條件。
 
 可重現命令：`node scripts/test-activity-volume-docker.mjs`。它會在建立前拒絕同名資源，完成後只依已核對 label/identity 清理上述精確資源；重跑仍須先確認使用者已知該次建立／清理範圍。Docker engine 未開時明確失敗，不能將純 unit 或靜態檢查說成 image 驗證。
+
+## 活動故障隔離補強
+
+新增 `host-storage-blocked`：以原有效 journal 的 readonly mount 重現故障，wrapper 降權後執行真正原兩個 prestart，才進入依賴注入（DI）的 `loadBot`；以實際 Activity module 呼叫 start／interaction／flush／stop，攔截 journal filesystem 入口確認零存取，API／Discord fetch 也為零。wallet 部分使用真正 `createWalletWorkDrain` 搭配合成 handler，確認可受理並 settle，沒有執行原 wallet query、RPC 或 Discord login。原 journal SHA256、inode、owner、mode、size、mtime／ctime不變。此 loader 是無登入測試依賴，不能稱為 live Discord wallet 驗收。
+
+新增 `host-identity-fatal`：UID/GID2000配缺 mount，確認不能把前置儲存失敗當成保留不安全身分的理由；回固定 `ACTIVITY_RUNTIME_IDENTITY_INVALID`，不進 prestart／host loader。
+
+純回歸另驗原生 setgroups 失敗保留 fatal identity 類別、不帶底層敏感訊息；root authorization／platform／unknown failures 不列入隔離清單；錯誤活動啟用值明確阻擋活動而不改設定；startup context 不能清除或重設；blocked activity 在磁碟、API、Discord fetch 和 timer 前拒絕。
+
+本次作者結果、root 後續獨立覆驗需分開記錄；原15項 root 證據不直接當成新增2項已覆驗。既有活動整合 suite 使用已先告知的精確 host fixture `activity/.test-fixtures/activity-journal.ndjson`，每次建立前拒絕既有目錄，清理前核對 checkout 絕對範圍、非 symlink 與單一指定檔案，結束僅移除該檔與空目錄。
+
+| 本次補強證據 | 結果 |
+| --- | --- |
+| 最終 source 的純設定／identity／context／活動拒絕及既有 wallet lifecycle | 11/11 pass、0 skip，1431.0776ms；chunk `e7727c` |
+| 既有 Activity 模組整合回歸 | 27/27 pass（含外層）、0 skip，8858.6958ms；chunk `6e9682`；精確 fixture 及空目錄已清理 |
+| 最終 source 的 Docker image＋原15／新增2情境 | exit0；`passed:17, planned:17, resourcesCreated:22, cleanupAttempted:true, success:true`；session `7282`，最後 chunk `b5ca69` |
+| host 精確清理覆核 | 22個指定 image／volume／container 再次 inspect，`remaining:[], checked:22`；chunk `8de5f6` |
+| root 獨立合併 Node 回歸 | `node --test scripts/activity-volume.test.mjs discord-lifecycle.test.mjs activity/integration.test.mjs` exit0，38/38 pass、0 skip，8163.971ms；chunk `c98eb1` |
+| 本次 root 獨立 Docker 覆驗 | exit0，17/17；`resourcesCreated:22, cleanupAttempted:true, success:true`；session `31153`，最後 chunk `bdd1a3` |
+| 本次 root host 清理覆核 | 22個精確名稱再次 inspect，`remaining:[]`；兩個 host 測試目錄均不存在；chunk `442408` |
+
+上述各次 run 分開保留；root 的38項為獨立合併執行結果，不再加上作者11／27的歷史數量。
+
+以上維持 `--network none`、無 token、無 PG／RPC、不登入真正 Bot；沒有 cloud 部署或使用者驗收。host loader 只驗內部隔離與原 prestart，不能將其當成正常 Discord 指令實機驗收。
+
+重現命令：
+
+```sh
+node --test scripts/activity-volume.test.mjs discord-lifecycle.test.mjs
+node --test activity/integration.test.mjs
+node scripts/test-activity-volume-docker.mjs
+```
 
 ## 官方依據與邊界
 

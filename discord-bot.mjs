@@ -5,6 +5,7 @@ import { formatReport } from './discord-report.mjs';
 import { createWalletHandler } from './discord-interaction.mjs';
 import { createWalletQuery } from './discord-wallet-query.mjs';
 import { createActivityModule } from './activity/index.mjs';
+import { activityStartupContext } from './activity/startup-context.mjs';
 import { createWalletWorkDrain, createBotShutdown } from './discord-lifecycle.mjs';
 
 if (process.platform === 'linux' && (process.getuid() === 0 || process.geteuid() === 0)) {
@@ -23,7 +24,7 @@ const command = new SlashCommandBuilder().setName('wallet').setDescription('查�
   .addStringOption(option => option.setName('address').setDescription('Base 錢包地址').setRequired(true));
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const activity = process.env.ACTIVITY_ENABLED === 'true'
-  ? await createActivityModule({ client }) : undefined;
+  ? await createActivityModule({ client, activityUnavailable: activityStartupContext().activityUnavailable }) : undefined;
 const queryWallet = createWalletQuery((address, afterBlock) => walletCachePage(database(), address, afterBlock));
 const walletWork = createWalletWorkDrain({ handler: createWalletHandler({
   queryWallet, renderPoster, formatReport,
