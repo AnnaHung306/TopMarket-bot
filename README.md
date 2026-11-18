@@ -22,6 +22,16 @@ Railway 日誌的 `wallet_query` 會記錄查詢時間、原生分頁數、RPC H
 
 本機執行：複製 `.env.example` 為 `.env` 並填入設定，然後執行 `npm ci` 和 `npm start`。停止程序可按 Ctrl+C。執行 `npm run test:discord` 測試報表格式與快取更新流程。
 
+### 停機與部署維護
+
+收到 SIGINT／SIGTERM 後立即停止新的 `/wallet` 受理，之後送來的指令只嘗試回覆私密維護提示，不啟動查詢。原本已進入 handler 的工作包含 Discord 初始回覆、共享錢包查詢、PNG 及上傳／完成通知，會全部等待 settle；活動模組的 stop 同時進行。兩者收束後才關閉共用海報瀏覽器與 Discord Client。重複停機呼叫共用同一個 promise，錯誤僅輸出固定安全代碼。指令註冊或登入失敗也沿同一路徑清理。
+
+這沒有改動 Gavin 的查詢、分頁、Alchemy、同地址共享或資料來源策略，也沒有新增每日額度或公開管理 endpoint。PostgreSQL idle 連線失效由 pool 移除壞連線並記錄固定 `WALLET_DATABASE_IDLE_ERROR`，後續查詢可建立新連線；正在執行的 query 仍正常 reject，不會假成功或改用別的資料來源。
+
+**此機制不能保證平台 SIGKILL 前完成長掃描，也不是零停機承諾。** wallet 本來不是持久交付佇列，平台強制終止仍可能中斷正在計算或傳送的報表；已保存的 Gavin 分頁檢查點可由用戶重送原指令接續。正式部署須安排維護窗並確認 wallet 已 idle，不以「願意無限等待」替代平台期限。停機日誌只記錄 active wallet handler 數量與安全代碼，不記錄地址或憑證。
+
+Docker context 已排除 `activity/.runtime/`、`activity/.test-fixtures/` 與根目錄 `.local/`，避免 journal、測試收據與本機 runtime 被 `COPY . .` 放入 image。這只是 ignore 規則的靜態檢查，沒有宣稱 Docker image 已建置。持久 volume 的 root ownership／`USER node` 可寫 bootstrap 尚未實作，部署前仍須核對掛載權限與 fsync／重啟恢復，不能把容器暫存檔當持久保存。
+
 請先閱讀 [CONTRACTS-DATA.md](CONTRACTS-DATA.md)。需要 Node.js 22+。
 
 ```sh
@@ -35,7 +45,7 @@ Vercel Production 與本機報表需要伺服器環境變數 `ALCHEMY_API_KEY`�
 
 首次查詢從最早相關合約的部署區塊查到 Base 最新的最終確認區塊。按地址篩選 Top.Market 合約事件、已知付款方到錢包的 USDC 轉入及 ERC-721 轉出，並核對關聯收據。只有存在可配對的轉帳時才讀歷史金庫等合約狀態。
 
-PostgreSQL 每個已查錢包保存一列收支累計、已完整處理的區塊與 block hash，分頁工作進度可接續。網站按「分析錢包」會先顯示已存摘要，再自動核對檢查點之後的活動，更新到最新已確認區塊；Discord 只回覆已存摘要，不會自動刷新。舊版摘要會在網站背景重新核對完整歷史。摘要不儲存持倉、交易收據或完整逐筆明細，若需要這些資料，可在網站明確點選重新核對。本機與 Vercel 的摘要讀取使用同一套路由。
+PostgreSQL 每個已查錢包保存一列收支累計、已完整處理的區塊與 block hash，分頁工作進度可接續。網站按「分析錢包」會先顯示已存摘要，再自動核對檢查點之後的活動，更新到最新已確認區塊；Discord 的現行查詢同樣會接續已存摘要核對至最新已確認區塊，再交付報表。舊版摘要會在網站背景重新核對完整歷史。摘要不儲存持倉、交易收據或完整逐筆明細，若需要這些資料，可在網站明確點選重新核對。本機與 Vercel 的摘要讀取使用同一套路由。
 
 舊的全站回補已停止，既有資料保留。維護用的 `npm run sync:history` 是獨立工具，不會從網站啟動。
 

@@ -2,6 +2,15 @@ import { neon } from '@neondatabase/serverless';
 import pg from 'pg';
 
 let pool;
+export function createPostgresPool(connectionString, { logger = console } = {}) {
+  const connectionPool = new pg.Pool({ connectionString });
+  // pg-pool removes broken idle clients itself. Listen so that notification
+  // cannot become an uncaught process error; active query rejection is unchanged.
+  connectionPool.on('error', () => {
+    try { logger.error?.('WALLET_DATABASE_IDLE_ERROR'); } catch { /* Diagnostics cannot crash the pool. */ }
+  });
+  return connectionPool;
+}
 export function postgresSql(connectionPool) {
   function sql(strings, ...values) {
     const text = strings.reduce((result, part, index) => result + (index ? `$${index}` : '') + part, '');
@@ -27,7 +36,7 @@ export function postgresSql(connectionPool) {
 export function database() {
   if (!process.env.DATABASE_URL?.trim()) throw Error('DATABASE_URL is not configured');
   if (process.env.DATABASE_DRIVER === 'postgres') {
-    pool ||= new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    pool ||= createPostgresPool(process.env.DATABASE_URL);
     return postgresSql(pool);
   }
   return neon(process.env.DATABASE_URL);
