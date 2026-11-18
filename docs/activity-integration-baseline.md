@@ -18,4 +18,9 @@
 原有未追蹤素材與其他研究檔案仍保留在原始 checkout，沒有移動或刪除。
 活動模組應以現有 `/wallet` 指令回歸測試驗證相容性。
 
-尚未上傳、建立 PR 或部署；本機測試不能視為正式 Discord 驗收。
+使用者於 2026-11-18 明確授權 Git 上傳與 Draft PR 後，工作分支已推送至
+`AnnaHung306/TopMarket-bot`，並建立 [Draft PR #1](https://github.com/AnnaHung306/TopMarket-bot/pull/1)。
+網站、管理端與活動 API 由獨立私有 repo 的
+[活動系統 Draft PR #1](https://github.com/AnnaHung306/TopMarket-events/pull/1) 維護。
+既有 `main` 保持原基底；兩份 PR 尚未合併或部署，使用者最終驗收仍待完成。
+本機測試不能視為正式 Discord 驗收。
