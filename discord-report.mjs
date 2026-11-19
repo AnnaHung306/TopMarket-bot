@@ -23,7 +23,7 @@ export function formatReport(wallet, snapshot, note = '') {
   return `**Top.Market 錢包收支摘要**\n\`${wallet}\`\n` +
     rows.map(([label, amount]) => `${label}：${money(amount)} USDC`).join('\n') +
     `\n已識別淨收支：${money(t.net)} USDC` +
-    `\n區塊：${snapshot.start}–${snapshot.through}\n資料時間：${snapshot.asOf}` +
+    `\n資料時間：${snapshot.asOf}` +
     `${t.raffleCards ? `\n奪寶獎品：${t.raffleCards} 張卡` : ''}` +
     `${pending ? `\n⚠️ ${pending} 筆事件待核對，未計入已核實金額。` : ''}` +
     `${!t.raffleKnown || snapshot.rebuildRequired ? '\n⚠️ 舊版摘要，部分分類待更新。' : ''}` +

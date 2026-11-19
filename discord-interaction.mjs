@@ -52,9 +52,12 @@ export function createWalletHandler({ queryWallet, renderPoster, formatReport, c
   return async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'wallet') return;
     const startedAt = performance.now();
+    const inThread = interaction.channel?.isThread?.() ?? false;
     const allowedChannel = process.env.DISCORD_WALLET_CHANNEL_ID?.trim();
-    if (allowedChannel && interaction.channelId !== allowedChannel) {
-      await interaction.reply({ content: '請在指定的 MOD 工具箱頻道使用此指令。', flags: MessageFlags.Ephemeral });
+    const inToolbox = interaction.channelId === allowedChannel ||
+      (inThread && interaction.channel.parentId === allowedChannel);
+    if (allowedChannel && !inToolbox) {
+      await interaction.reply({ content: '請在指定的 MOD 工具箱頻道或其討論串使用此指令。', flags: MessageFlags.Ephemeral });
       return;
     }
     const wallet = interaction.options.getString('address', true).trim().toLowerCase();
@@ -62,29 +65,34 @@ export function createWalletHandler({ queryWallet, renderPoster, formatReport, c
     let stage = 'discord_setup';
     try {
       await interaction.deferReply();
-      const animation = await waitingAsset(chooseWaitingIndex);
-      await interaction.editReply({
-        content: waitingText,
-        files: animation.files,
-      });
-      try {
-        thread = await interaction.channel.threads.create({
-          name: threadName(interaction),
-          autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
-          reason: 'Top.Market wallet report',
+      if (inThread) {
+        thread = interaction.channel;
+        await interaction.editReply({ content: waitingText });
+      } else {
+        const animation = await waitingAsset(chooseWaitingIndex);
+        await interaction.editReply({
+          content: waitingText,
+          files: animation.files,
         });
-        await interaction.editReply({ content: `${waitingText}\n進度與報表請見 <#${thread.id}>` });
-      } catch (error) {
-        console.error('無法建立錢包討論串', error.code || error.name);
-        await interaction.editReply('已收到查詢，但無法建立討論串。請確認機器人在此頻道有「建立公開討論串」及「在討論串傳送訊息」權限。');
-        return;
+        try {
+          thread = await interaction.channel.threads.create({
+            name: threadName(interaction),
+            autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
+            reason: 'Top.Market wallet report',
+          });
+          await interaction.editReply({ content: `${waitingText}\n進度與報表請見 <#${thread.id}>` });
+        } catch (error) {
+          console.error('無法建立錢包討論串', error.code || error.name);
+          await interaction.editReply('已收到查詢，但無法建立討論串。請確認機器人在此頻道有「建立公開討論串」及「在討論串傳送訊息」權限。');
+          return;
+        }
       }
       try {
         status = await thread.send('正在核對錢包收支，完成後會在此通知。');
       }
       catch (error) {
         console.error('無法在錢包討論串回覆', error.code || error.name);
-        await interaction.editReply('討論串已建立，但機器人無法在串內回覆。請確認「在討論串傳送訊息」及「附加檔案」權限。');
+        await interaction.editReply('機器人無法在討論串內回覆。請確認「在討論串傳送訊息」及「附加檔案」權限。');
         return;
       }
       if (!validWallet(wallet)) {
