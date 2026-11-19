@@ -5,7 +5,11 @@ import { createScamTestHandler } from './discord-scam-test.mjs';
 import { acquireTrialLock } from './discord-trial-lock.mjs';
 
 if (!process.env.DISCORD_TOKEN?.trim()) throw new Error('DISCORD_TOKEN is required');
-const lock = await acquireTrialLock({ connectionString: process.env.TRIAL_DATABASE_URL });
+const lock = await acquireTrialLock({ connectionString: process.env.TRIAL_DATABASE_URL, deploymentId: process.env.RAILWAY_DEPLOYMENT_ID });
+if (!lock) {
+  console.log('Superseded private channel trial instance will not start');
+  process.exit(0);
+}
 const scamTestEnabled = process.env.DISCORD_SCAM_TEST_ENABLED === 'true';
 const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages];
 if (scamTestEnabled) intents.push(GatewayIntentBits.MessageContent);

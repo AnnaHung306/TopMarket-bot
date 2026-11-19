@@ -5,9 +5,19 @@ import { createScamTestHandler } from './discord-scam-test.mjs';
 import { createGreetingHandler } from './discord-greetings.mjs';
 
 let owner, waiter, waiterStarted;
+const generations = new Map();
 class FakeClient extends EventEmitter {
   async connect() {}
   async query(sql) {
+    if (typeof sql === 'string' && sql.includes('CREATE TABLE')) return { rows: [] };
+    if (typeof sql === 'object' && sql.text.includes('INSERT INTO')) {
+      const id = sql.values[0];
+      if (!generations.has(id)) generations.set(id, generations.size + 1);
+      return { rows: [{ generation: generations.get(id) }] };
+    }
+    if (typeof sql === 'object' && sql.text.includes('max(generation)')) {
+      return { rows: [{ active: sql.values[0] === Math.max(...generations.values()) }] };
+    }
     if (typeof sql === 'string' && sql.includes('pg_advisory_lock')) {
       if (owner) {
         await new Promise(resolve => { waiter = () => { owner = this; waiter = undefined; resolve(); }; waiterStarted(); });
@@ -15,21 +25,25 @@ class FakeClient extends EventEmitter {
       return { rows: [{}] };
     }
     if (owner !== this) throw Error('connection lost');
-    return { rows: [{ active: !waiter }] };
+    throw Error('unexpected query');
   }
   async end() { if (owner === this) { owner = undefined; if (waiter) waiter(); } this.emit('end'); }
 }
 const makeClient = () => new FakeClient();
 await assert.rejects(acquireTrialLock({ connectionString: '', makeClient }), /required/);
+await assert.rejects(acquireTrialLock({ connectionString: 'test', makeClient }), /DEPLOYMENT_ID/);
 const waitStarted = new Promise(resolve => { waiterStarted = resolve; });
-const first = await acquireTrialLock({ connectionString: 'test', makeClient });
-const secondPending = acquireTrialLock({ connectionString: 'test', makeClient });
+const first = await acquireTrialLock({ connectionString: 'test', deploymentId: 'old', makeClient });
+const secondPending = acquireTrialLock({ connectionString: 'test', deploymentId: 'new', makeClient });
 await waitStarted;
 assert.equal(await first.canAct(), false);
 assert.equal(first.superseded, true);
 await first.close();
 assert.equal(await first.canAct(), false);
 const second = await secondPending;
+assert.equal(await second.canAct(), true);
+const oldRestart = await acquireTrialLock({ connectionString: 'test', deploymentId: 'old', makeClient });
+assert.equal(oldRestart, null);
 assert.equal(await second.canAct(), true);
 await second.close();
 let deleted = false, sent = false, authorized = true;
