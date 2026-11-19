@@ -41,27 +41,28 @@ export function classifyScamTest(message) {
   return null;
 }
 
-export function createScamTestHandler({ checkLinks = createLinkChecker(), now = Date.now } = {}) {
+export function createScamTestHandler({ checkLinks = createLinkChecker(), now = Date.now, canAct = async () => true } = {}) {
   let lastUnavailableAlert = 0;
   return async message => {
-    if (!inScope(message)) return;
+    if (!inScope(message) || !await canAct()) return;
     const { hosts } = splitLinks(message.content.normalize('NFKC'));
     let lookup = { reason: null, unavailable: false };
     if (hosts.length) {
       try { lookup = await checkLinks(hosts); }
       catch { lookup = { reason: null, unavailable: true }; }
     }
-    if (lookup.unavailable && now() - lastUnavailableAlert >= 300000) {
+    if (lookup.unavailable && now() - lastUnavailableAlert >= 300000 && await canAct()) {
       lastUnavailableAlert = now();
       try { await message.channel.send({ content: '⚠️ 測試提醒：部分網域無法完成風險查詢，請 Mod 人工檢查；未查到不代表安全。', allowedMentions: { parse: [] } }); }
       catch (error) { console.error('Link lookup alert failed:', error.message); }
     }
     const reason = lookup.reason || classifyScamTest(message);
-    if (!reason) return;
+    if (!reason || !await canAct()) return;
     const title = reason === 'Cloudflare 分類為成人內容網域' ? '⚠️ 疑似成人內容測試提醒' : '⚠️ 疑似詐騙測試提醒';
     let result = '已刪除測試訊息';
     try { await message.delete(); }
     catch { result = '刪除失敗（訊息可能已刪除或權限不足）'; }
+    if (!await canAct()) return;
     try {
       await message.channel.send({
         content: `${title}\n使用者 ID：${message.author.id}\n原因：${reason}\n結果：${result}\n請由 Mod 人工確認；分類可能有誤。`,
