@@ -58,12 +58,13 @@ export function createScamTestHandler({ checkLinks = createLinkChecker(), now = 
     }
     const reason = lookup.reason || classifyScamTest(message);
     if (!reason) return;
+    const title = reason === 'Cloudflare 分類為成人內容網域' ? '⚠️ 疑似成人內容測試提醒' : '⚠️ 疑似詐騙測試提醒';
     let result = '已刪除測試訊息';
     try { await message.delete(); }
-    catch { result = '刪除失敗，請檢查權限'; }
+    catch { result = '刪除失敗（訊息可能已刪除或權限不足）'; }
     try {
       await message.channel.send({
-        content: `⚠️ 疑似詐騙測試提醒\n使用者 ID：${message.author.id}\n原因：${reason}\n結果：${result}\n請由 Mod 人工確認；此結果不代表已證實詐騙。`,
+        content: `${title}\n使用者 ID：${message.author.id}\n原因：${reason}\n結果：${result}\n請由 Mod 人工確認；分類可能有誤。`,
         allowedMentions: { parse: [] },
       });
     } catch (error) { console.error('Scam test alert failed:', error.message); }

@@ -50,4 +50,7 @@ assert.equal(lookupCalls, 0);
 let alerts = [];
 await createScamTestHandler({ checkLinks: async () => ({ reason: null, unavailable: true }) })({ ...base, content: 'https://example.com', delete: async () => { throw Error('must not delete'); }, channel: { send: async value => alerts.push(value) } });
 assert.match(alerts[0].content, /無法完成風險查詢/);
+await createScamTestHandler({ checkLinks: async () => ({ reason: 'Cloudflare 分類為成人內容網域', unavailable: false }) })({ ...base, content: 'https://example.com', delete: async () => {}, channel: { send: async value => { alert = value; } } });
+assert.match(alert.content, /疑似成人內容測試提醒/);
+assert.doesNotMatch(alert.content, /疑似詐騙/);
 console.log('Scam test scope, examples, deletion and alert tests passed');
