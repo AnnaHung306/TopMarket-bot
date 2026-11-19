@@ -1,0 +1,62 @@
+{
+  "format": "top-market-bot-v2-image-verification/v1",
+  "verifiedAt": "2026-11-18T16:27:55.112Z",
+  "executedBy": "root independent execution after reviewing harness source",
+  "toolOutputReferences": [
+    "70c859",
+    "1ae6ea"
+  ],
+  "source": {
+    "head": "9f1327b054ed45789f462a9a6d13696464b9ed02",
+    "sourceDirty": true,
+    "dirtyScope": "Only the new verification harness; product source unchanged from this commit",
+    "harness": "scripts/test-activity-v2-docker.mjs",
+    "sha256": "9e326088aa7f119b6ada4aab5dbfe81f236902eb89deb15798e8a00b55e0d969"
+  },
+  "imageId": "sha256:95b3b4bd06b2aa814444adfbe03cfbabad9fa422a6970507741b07c42188e24e",
+  "runtime": {
+    "node": "v22.23.5",
+    "uid": 1000,
+    "gid": 1000,
+    "noNewPrivileges": true,
+    "effectiveCapabilities": "0",
+    "network": "none",
+    "hostMounts": 0,
+    "credentials": "empty"
+  },
+  "tests": {
+    "tests": 53,
+    "pass": 53,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "exitCode": 0,
+    "containerElapsedMs": 20580
+  },
+  "prestart": {
+    "verifiedAssets": 8,
+    "posterBrowserReady": true,
+    "exitCode": 0,
+    "containerElapsedMs": 3438
+  },
+  "cleanup": [
+    {
+      "name": "top-market-bot-wallet-v2-prestart-20261119",
+      "removed": true
+    },
+    {
+      "name": "top-market-bot-wallet-v2-tests-20261119",
+      "removed": true
+    },
+    {
+      "name": "top-market-bot-wallet-v2:20261119-local",
+      "removed": true
+    }
+  ],
+  "success": true,
+  "limits": [
+    "Local Linux image only; no live Discord login, Alchemy RPC, Railway volume or cloud deployment.",
+    "Same 53 test cases overlap the host run and are not additional independent product requirements."
+  ]
+}

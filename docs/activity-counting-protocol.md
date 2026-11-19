@@ -69,7 +69,7 @@ Modal nonce同時綁user／guild／thread／wallet／policy，送出時只能使
 - 週目標case只證明Bot把A錢包兩筆／B錢包一筆的scope完整送到後端，沒有在fixture假造真PG的完成或GP規則驗收。後端需另以真PG核對獨立target／limit、跨wallet內容去重及單user抽獎entry。
 - 活動storage isolation／identity fatal保留：無法使用活動磁碟時，經確認降權後wallet仍可載入；Activity guard阻止journal／API／timer／受理。此處沒有改為臨時journal。
 
-本輪本機測試不登入真正Discord Bot、不使用token／PG／RPC，也沒有cloud／正式volume／使用者驗收。前一輪Docker17的證據屬當時版本；本輪不能自動沿用成新payload已經live或image驗收。
+本輪本機測試不登入真正Discord Bot、不使用token／PG／RPC，也沒有cloud／正式volume／使用者驗收。先前 `7e9` 的Docker17保留為bootstrap／故障隔離歷史證據，不移作新版v2 runtime驗證；新版image的獨立覆驗另列於下節。
 
 作者在第一個凍結版本合併執行下列命令，51/51 pass、0 skip、9639.4065ms，exit0（session `36408`，最後chunk `b88f21`）。此數字包含34個Activity整合子項及外層、5個policy／向量項、5個既有wallet lifecycle項和6個storage／identity項；不重複加總先前15／34的中途run。精確host fixture及空目錄已在suite finally內清理。root獨立覆驗、真後端聯合驗證與live Discord仍須分開記錄。
 
@@ -79,10 +79,32 @@ Modal nonce同時綁user／guild／thread／wallet／policy，送出時只能使
 
 修正後同一合併命令53/53 pass、0 skip、9869.3272ms，exit0（session `32310`，最後chunk `062698`）；這是含兩項新增回歸的單次結果，不加總51。fixture及空目錄已清理，未知creation仍fail closed。
 
-root 隨後獨立執行同一命令，53/53 pass、0 skip、9213.9714ms，exit0（session `56065`，最後chunk `e3749f`）。活動 repo 的正常本機網站已以真實 Discord 登入及既有 SIWE 錢包完成固定名冊報名、發布後鎖定與重新讀取；這不等於 Bot 已在 Discord 上線。新的 v2 payload 尚未重建 Docker image，也沒有 live Discord 或 RPC 驗收，舊版本 Docker17 的結果不移作本版證據。
+root 隨後獨立執行同一命令，53/53 pass、0 skip、9213.9714ms，exit0（session `56065`，最後chunk `e3749f`）。活動 repo 的正常本機網站已以真實 Discord 登入及既有 SIWE 錢包完成固定名冊報名、發布後鎖定與重新讀取；這不等於 Bot 已在 Discord 上線。新版image已另外完成下列Linux覆驗，live Discord／RPC及正式volume仍未驗收。
 
 覆驗命令：
 
 ```sh
 node --test activity/policy.test.mjs scripts/activity-volume.test.mjs discord-lifecycle.test.mjs activity/integration.test.mjs
 ```
+
+## root獨立新版Linux image覆驗
+
+root親閱專用harness後，使用現有Dockerfile實際建置產品來源 `9f1327b054ed45789f462a9a6d13696464b9ed02`。建置當時 `sourceDirty:true`，範圍只有新增驗證harness，產品程式未偏離該commit。完整image ID、harness SHA256、來源與原始結果保存在 [activity-v2-image-verification.json](activity-v2-image-verification.json)；執行紀錄為 `70c859` → `1ae6ea`。
+
+| 本輪獨立檢查 | 實際結果 |
+| --- | --- |
+| 原Dockerfile／Linux Node runtime | Node `v22.23.5`、UID/GID1000、CapEff0、NoNewPrivs1 |
+| 同四檔測試 | 53/53 pass、0 skip、exit0；容器執行20580ms |
+| 獨立prestart容器 | 原 `verify-cat-assets.mjs` 核8個素材、原 `verify-poster-browser.mjs` 的Gavin poster browser ready；exit0、3438ms |
+| 隔離範圍 | `--network none`、cap-drop ALL、no-new-privileges；無host mount、volume，Discord／DB／Alchemy憑證為空 |
+| 精確清理 | 1 image＋2 containers經run labels與ID核對後清理；root另以host第二次inspect，`remaining=[]`（`09cd76`） |
+
+這53項與前述host run相同，證明本版能在實際Linux image執行，不能加總成106項獨立需求。fixture只在容器writable layer內，沒有驗正式Railway持久volume；使用的Discord／API物件仍為測試fixture，沒有真正Bot login、Alchemy RPC或cloud部署，也不等於使用者已驗收。
+
+覆驗入口為 [scripts/test-activity-v2-docker.mjs](../scripts/test-activity-v2-docker.mjs)：
+
+```sh
+node scripts/test-activity-v2-docker.mjs
+```
+
+重跑會建立並清理精確image `top-market-bot-wallet-v2:20261119-local`、containers `top-market-bot-wallet-v2-tests-20261119` 與 `top-market-bot-wallet-v2-prestart-20261119`；建立前拒絕既有同名資源，finally僅核對本輪label及ID後清理，不使用prune。再次執行仍須沿用使用者已知的該輪資源／清理範圍。

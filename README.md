@@ -36,9 +36,11 @@ Docker context 已排除 `activity/.runtime/`、`activity/.test-fixtures/` 與�
 
 活動儲存／路徑檢查失敗時，strict bootstrap 仍會拒絕；wrapper 只有在獨立驗證已降成 node 後，才保留原 prestart 與 wallet 啟動。活動則以固定安全代碼顯示不可用，journal／worker／API／自動重試不會啟動，提交明示未受理；不改 `ACTIVITY_ENABLED` 或使用臨時 journal。身分、降權、root 授權及未知程式錯誤仍停止整個程序。新增兩個 host 隔離情境與原15個情境一起驗證，具體新舊證據分列在上述文件；尚未完成 live Bot／使用者驗收。
 
-本次作者最終版本 Docker17/17、純回歸11/11、既有活動整合27/27通過，0 skip。root 另獨立合併執行 Node suite 38/38、0 skip（8163.971ms），並重新建置 image、通過17/17容器情境；22個精確Docker名稱及host合成fixture再核皆無殘留。各輪結果分開保留，不重複加總。host測試使用 DI loader／合成 wallet handler，實際 Activity guard 與原兩個 prestart 直接執行，沒有真 wallet RPC 或 Discord login。
+先前 `7e9` 隔離版本的 Docker17/17、純回歸11/11、既有活動整合27/27通過，0 skip。root 另獨立合併執行 Node suite 38/38、0 skip（8163.971ms），並重新建置 image、通過17/17容器情境；22個精確Docker名稱及host合成fixture再核皆無殘留。這是舊版 bootstrap／故障隔離的歷史證據，不移作新版v2 runtime驗證。host測試使用 DI loader／合成 wallet handler，實際 Activity guard 與原兩個 prestart 直接執行，沒有真 wallet RPC 或 Discord login。
 
 先前 root 的15/15容器、20個資源清理及7/7設定／lifecycle（1402.6471ms）保留為歷史證據。正式 Railway volume 與 live Bot 尚未驗收。`c4ee147` 是開始候選時的歷史基準；後續提交及最終 HEAD 以 [Bot Draft PR #1](https://github.com/AnnaHung306/TopMarket-bot/pull/1) 為準。
+
+新版v2已由root使用原Dockerfile實建並獨立覆驗：產品來源 `9f1327b054ed45789f462a9a6d13696464b9ed02`，建置當時dirty範圍只有新增驗證harness。Linux Node `v22.23.5`、UID/GID1000、CapEff0、NoNewPrivs1下53/53、0 skip（容器20580ms）；另一容器執行原prestart，8個素材與Gavin poster browser通過（3438ms）。三個精確資源已依label／ID清理，root第二次inspect也為 `remaining=[]`。兩個測試容器無網路、host mount或volume，憑證為空；沒有真正Discord login／Alchemy RPC／cloud部署。53項與host同套測試重疊，不加總為106項。原始證據見 [image驗證JSON](docs/activity-v2-image-verification.json)，覆驗腳本為 [test-activity-v2-docker.mjs](scripts/test-activity-v2-docker.mjs)，範圍說明見 [活動協議文件](docs/activity-counting-protocol.md)。
 
 請先閱讀 [CONTRACTS-DATA.md](CONTRACTS-DATA.md)。需要 Node.js 22+。
 
