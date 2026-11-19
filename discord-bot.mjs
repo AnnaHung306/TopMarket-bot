@@ -4,6 +4,7 @@ import { database } from './worker/history/store.js';
 import { formatReport } from './discord-report.mjs';
 import { createWalletHandler } from './discord-interaction.mjs';
 import { createWalletQuery } from './discord-wallet-query.mjs';
+import { createDailyModule } from './daily/index.mjs';
 
 try { loadEnvFile(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 for (const key of ['DISCORD_TOKEN', 'DISCORD_CLIENT_ID']) {
@@ -17,6 +18,11 @@ const [{ walletCachePage }, { renderGavinPoster: renderPoster }] = await Promise
 const command = new SlashCommandBuilder().setName('wallet').setDescription('查詢 Top.Market 錢包收支摘要')
   .addStringOption(option => option.setName('address').setDescription('Base 錢包地址').setRequired(true));
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+let daily;
+if (process.env.DAILY_ENABLED === 'true') {
+  try { daily = createDailyModule({ client, sql: database() }); }
+  catch (error) { console.error('DAILY_CONFIGURATION_FAILED', error.message); }
+}
 const queryWallet = createWalletQuery((address, afterBlock) => walletCachePage(database(), address, afterBlock));
 client.once('clientReady', async () => {
   try {
@@ -24,6 +30,12 @@ client.once('clientReady', async () => {
     const app = process.env.DISCORD_CLIENT_ID;
     const route = process.env.DISCORD_GUILD_ID ? Routes.applicationGuildCommands(app, process.env.DISCORD_GUILD_ID) : Routes.applicationCommands(app);
     await rest.post(route, { body: command.toJSON() });
+    if (daily) {
+      try {
+        for (const body of daily.commands) await rest.post(Routes.applicationGuildCommands(app, daily.guildId), { body });
+        await daily.start();
+      } catch (error) { console.error('DAILY_START_FAILED', error.message); }
+    }
     console.log(`Discord bot ready: ${client.user.tag}`);
   } catch (error) { console.error('Discord 指令註冊失敗', error.message); process.exitCode = 1; client.destroy(); }
 });
@@ -31,4 +43,5 @@ client.on('interactionCreate', createWalletHandler({
   queryWallet, renderPoster, formatReport,
   configured: () => Boolean(process.env.ALCHEMY_API_KEY?.trim() && process.env.DATABASE_URL?.trim()),
 }));
+if (daily) client.on('interactionCreate', interaction => void daily.handle(interaction).catch(error => console.error('DAILY_INTERACTION_FAILED', error)));
 await client.login(process.env.DISCORD_TOKEN);

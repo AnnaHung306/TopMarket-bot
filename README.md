@@ -2,6 +2,20 @@
 
 ## Discord 機器人
 
+### 每日活動（僅供私人頻道測試）
+
+Giveaway 由 Giveaway Boat 處理；本程式不得建立、接受或結算 Giveaway。每日答題僅週一至週五台灣時間 12:00 開始，隔日 11:00 截止，週五的題目週六結算。每場獎項為 2U 兩名，由 MOD 人工發放。答題資格計算自該場開啟起指定聊天頻道的 10 則訊息，討論串及機器人訊息不計。資格只讀訊息中繼資料，不存訊息內容；已刪除、機器人無權讀取或 Discord 不再提供的訊息不能算入。
+
+MOD 在私人活動頻道使用 `/dailyquiz add`，填寫台灣時間日期、問題、A–D 選項及正確答案；12:00 後不能新增當天的題目。沒有預先準備題目時，機器人提醒 MOD 並略過當天。答案在截止前僅回覆提交者本人；每人每場只能提交一次，得獎者從答對者抽出。
+
+設定 `DAILY_ENABLED=true`、`DAILY_GUILD_ID`、`DAILY_CHANNEL_ID`、`DAILY_GROUP_CATEGORY_ID`、`DAILY_GROUP_CHANNEL_IDS`、`DAILY_MODERATOR_ROLE_ID`、`DAILY_BOT_ROLE_ID`、`DAILY_GIVEAWAY_BOAT_ID`。僅計入 `general-chat` 及 `chinese`，排除 `bot-mod-test`。私人頻道必須明確拒絕 @everyone 並允許 MOD 和指定機器人；使用者驗收並授權前不開放一般成員。
+
+Giveaway 資格橋接目前僅為單一測試者的測試模式：需要 `DAILY_GIVEAWAY_TEST_ENABLED=true`、`DAILY_GIVEAWAY_ROLE_ID`、`DAILY_GIVEAWAY_TEST_USER_ID`。週一至週五 10:00 啟動的活動以該場開始後的 20 則訊息授予測試身分組，該場隔日 09:00 截止。下一場開始時才移除上一場測試身分組，避免在開獎前撤銷資格。Bot 需要管理身分組權限；Giveaway Boat 需額外設定並驗證身分組要求、報名保留與私人活動設定。此模式尚未支援一般成員或自動建立 Giveaway，不得當成正式活動使用。
+
+排程使用常駐 Bot 程序，每 30 秒檢查；必須只執行一個實例，資料保存在 PostgreSQL。Bot 在活動時間中途恢復時會嘗試建立尚未發布的活動；已截止的既有活動會在恢復後結算。如果整場活動期間都離線，該場不會補辦。資料庫或 Discord 權限故障時不會以假資料接受報名。公告傳送後若程式中斷，重啟會先核對頻道中的機器人訊息再重試；頻道歷史不可讀或過多時需人工排查。
+
+此功能尚未經真實 Discord 活動流程驗收，未經使用者確認前勿公開使用。設定失敗時，每日活動不啟用，既有 `/wallet` 可繼續啟動；這是故障隔離，並非替代資料或備用活動流程。
+
 Discord 的 PNG 由無畫面的 Chromium 離線執行 Gavin 原本的報表頁與 `renderWalletPoster` 產生，使用相同的版面、欄位與渲染程式；不為海報額外呼叫 Alchemy。Railway 以根目錄 `Dockerfile` 安裝 Chromium，執行環境使用 Node.js 22。
 
 討論串命名為「用戶名 錢包報表查詢」，優先使用伺服器顯示名稱；報表完成時只標記發起指令的用戶，不標記角色或所有人。
