@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { MessageFlags } from 'discord.js';
 import { createWalletHandler } from './discord-interaction.mjs';
 import { createWalletQuery } from './discord-wallet-query.mjs';
 
@@ -6,28 +7,32 @@ const address = '0x' + 'a'.repeat(40);
 const snapshot = { through: 99, asOf: new Date().toISOString() };
 const poster = Buffer.from('test PNG');
 
-function interaction(wallet = address, userId = '123456789012345678') {
+function interaction(wallet = address, userId = '123456789012345678', inThread = false, parentId = 'allowed-channel') {
   const edits = [], messages = [], replies = [];
   const thread = {
     id: userId,
+    parentId,
+    isThread: () => true,
     async send(payload) {
       messages.push(payload);
       return { async edit(value) { edits.push(value); } };
     },
   };
-  return {
+  const request = {
     id: userId, commandName: 'wallet', isChatInputCommand: () => true,
-    options: { getString: () => wallet }, channelId: 'allowed-channel',
+    options: { getString: () => wallet }, channelId: inThread ? thread.id : 'allowed-channel',
     user: { id: userId, username: 'test-user' }, member: { displayName: '測試用戶' },
-    edits, messages, replies,
+    edits, messages, replies, createdThreads: 0,
     async deferReply() { this.deferred = true; },
-    channel: { threads: { async create(options) {
+    channel: inThread ? thread : { isThread: () => false, threads: { async create(options) {
+      request.createdThreads++;
       assert.equal(options.name, '測試用戶 錢包報表查詢');
       return thread;
     } } },
     async reply(payload) { replies.push(payload); },
     async editReply(payload) { assert.equal(this.deferred, true); replies.push(payload); },
   };
+  return request;
 }
 
 const base = { configured: () => true, chooseWaitingIndex: () => 0,
@@ -48,6 +53,35 @@ try {
   const missing = interaction();
   await createWalletHandler({ ...base, configured: () => false })(missing);
   assert.match(missing.edits.at(-1), /尚未完成設定/);
+
+  const outsideThread = interaction(address, 'outside-thread', true, 'other-channel');
+  await createWalletHandler(base)(outsideThread);
+  assert.equal(outsideThread.deferred, undefined);
+  assert.equal(outsideThread.messages.length, 0);
+  assert.equal(outsideThread.replies[0].flags, MessageFlags.Ephemeral);
+  assert.match(outsideThread.replies[0].content, /工具箱頻道或其討論串/);
+
+  const insideThread = interaction(address, 'existing-thread', true);
+  const handler = createWalletHandler({ ...base, queryWallet: async () => ({
+    snapshot, usage: { units: 0, requests: 0, retries: 0, splits: 0 }, pages: 0,
+  }) });
+  await handler(insideThread);
+  await handler(insideThread);
+  assert.equal(insideThread.createdThreads, 0);
+  assert.equal(insideThread.replies.length, 2);
+  assert.ok(insideThread.replies.every(reply => reply.content === '貓貓正在努力工作，請稍後... 完成後會拍拍通知'));
+  assert.equal(insideThread.messages.length, 4);
+  for (const report of [insideThread.messages[1], insideThread.messages[3]]) {
+    assert.equal(report.content, '拍拍 <@existing-thread>\n摘要');
+    assert.deepEqual(report.allowedMentions, { users: ['existing-thread'] });
+    assert.deepEqual(report.files, [{ attachment: poster, name: 'wallet-report.png' }]);
+  }
+  assert.ok(insideThread.edits.every(edit => /已完成/.test(edit)));
+
+  const badThreadAddress = interaction('invalid', 'invalid-thread', true);
+  await createWalletHandler(base)(badThreadAddress);
+  assert.match(badThreadAddress.edits.at(-1), /有效的 Base 錢包地址/);
+  assert.equal(badThreadAddress.createdThreads, 0);
 } finally {
   delete process.env.DISCORD_WALLET_CHANNEL_ID;
 }
@@ -59,6 +93,13 @@ try {
   console.error = () => {};
   await createWalletHandler(base)(denied);
   assert.match(denied.replies.at(-1), /建立公開討論串/);
+
+  const deniedThread = interaction(address, 'denied-thread', true);
+  deniedThread.channel.send = async () => { throw Object.assign(Error('missing thread send permission'), { code: 50013 }); };
+  await createWalletHandler(base)(deniedThread);
+  assert.match(deniedThread.replies.at(-1), /機器人無法在討論串內回覆/);
+  assert.equal(deniedThread.createdThreads, 0);
+  assert.equal(deniedThread.messages.length, 0);
 
   let attempts = 0;
   const failed = interaction();
@@ -109,6 +150,7 @@ pending.resolve();
 await Promise.all([firstDelivery, secondDelivery]);
 
 for (const request of [first, second, ...others]) {
+  assert.equal(request.createdThreads, 1);
   assert.equal(request.replies[0].content, '貓貓正在努力工作，請稍後... 完成後會拍拍通知');
   assert.equal(request.replies[0].files[0].name, 'cat-wait.gif');
   assert.ok(request.replies[1].content.includes('<#' + request.user.id + '>'));

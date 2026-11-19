@@ -11,4 +11,4 @@ COPY . .
 RUN chown -R node:node /app
 USER node
 
-CMD ["npm", "start"]
+CMD ["node", "scripts/container-start.mjs"]
