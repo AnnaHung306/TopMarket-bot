@@ -5,6 +5,7 @@ import { formatReport } from './discord-report.mjs';
 import { createWalletHandler } from './discord-interaction.mjs';
 import { createWalletQuery } from './discord-wallet-query.mjs';
 import { createGreetingHandler } from './discord-greetings.mjs';
+import { createScamTestHandler } from './discord-scam-test.mjs';
 
 try { loadEnvFile(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 for (const key of ['DISCORD_TOKEN', 'DISCORD_CLIENT_ID']) {
@@ -17,7 +18,10 @@ const [{ walletCachePage }, { renderGavinPoster: renderPoster }] = await Promise
 ]);
 const command = new SlashCommandBuilder().setName('wallet').setDescription('查詢 Top.Market 錢包收支摘要')
   .addStringOption(option => option.setName('address').setDescription('Base 錢包地址').setRequired(true));
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
+const scamTestEnabled = process.env.DISCORD_SCAM_TEST_ENABLED === 'true';
+const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages];
+if (scamTestEnabled) intents.push(GatewayIntentBits.MessageContent);
+const client = new Client({ intents });
 const queryWallet = createWalletQuery((address, afterBlock) => walletCachePage(database(), address, afterBlock));
 client.once('clientReady', async () => {
   try {
@@ -33,4 +37,5 @@ client.on('interactionCreate', createWalletHandler({
   configured: () => Boolean(process.env.ALCHEMY_API_KEY?.trim() && process.env.DATABASE_URL?.trim()),
 }));
 client.on('messageCreate', createGreetingHandler(client));
+if (scamTestEnabled) client.on('messageCreate', createScamTestHandler());
 await client.login(process.env.DISCORD_TOKEN);
