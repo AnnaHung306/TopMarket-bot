@@ -26,6 +26,7 @@ const first = await acquireTrialLock({ connectionString: 'test', makeClient });
 const secondPending = acquireTrialLock({ connectionString: 'test', makeClient });
 await waitStarted;
 assert.equal(await first.canAct(), false);
+assert.equal(first.superseded, true);
 await first.close();
 assert.equal(await first.canAct(), false);
 const second = await secondPending;

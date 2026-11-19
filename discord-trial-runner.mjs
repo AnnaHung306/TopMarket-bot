@@ -16,9 +16,9 @@ if (scamTestEnabled) client.on('messageCreate', createScamTestHandler({ canAct: 
 let shuttingDown = false;
 const heartbeat = setInterval(async () => {
   if (shuttingDown || await lock.canAct()) return;
-  console.error('Trial coordination connection lost; stopping this instance');
+  console.log(lock.superseded ? 'New private channel trial instance is taking over' : 'Trial coordination connection lost; stopping this instance');
   await shutdown();
-  process.exitCode = 1;
+  process.exitCode = lock.superseded ? 0 : 1;
 }, 5000);
 async function shutdown() {
   if (shuttingDown) return;
