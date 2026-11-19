@@ -60,9 +60,6 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
   // Reconstruct counts from the actual message history at admission, so reconnects
   // do not silently lose messages. Never store or inspect message contents.
   async function eligible(guild, userId, required, time) {
-    const channels = await guild.channels.fetch();
-    const visibleIds = [...channels.values()].filter(c => c?.parentId === groupCategoryId && c.type === ChannelType.GuildText).map(c => c.id);
-    if (visibleIds.some(id => !groupChannelIds.includes(id))) throw Error('DAILY_GROUP_CHANNEL_CONFIG_OUTDATED');
     const relevant = [];
     for (const id of groupChannelIds) {
       const channel = await guild.channels.fetch(id);
