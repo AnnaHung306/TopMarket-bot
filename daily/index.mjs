@@ -1,7 +1,9 @@
 import { randomInt, createHash } from 'node:crypto';
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, MessageFlags, MessageType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
-import { dateKey, midnight, qualificationStart, eventTimes } from './time.mjs';
-export { qualificationStart, eventTimes } from './time.mjs';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { dateKey, midnight, eventTimes, isActivityDay } from './time.mjs';
+import { hasMessages } from './eligibility.mjs';
+import { createGiveawayQualification } from './giveaway-qualification.mjs';
+export { eventTimes } from './time.mjs';
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const DAY = 86400000;
@@ -27,6 +29,11 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
   for (const id of groupChannelIds) ids('DAILY_GROUP_CHANNEL_IDS', id);
   const moderatorRoleId = ids('DAILY_MODERATOR_ROLE_ID', env.DAILY_MODERATOR_ROLE_ID);
   const botRoleId = ids('DAILY_BOT_ROLE_ID', env.DAILY_BOT_ROLE_ID);
+  const giveawayBoatId = ids('DAILY_GIVEAWAY_BOAT_ID', env.DAILY_GIVEAWAY_BOAT_ID);
+  const giveawayQualification = env.DAILY_GIVEAWAY_TEST_ENABLED === 'true' ? createGiveawayQualification({
+    guildId, roleId: env.DAILY_GIVEAWAY_ROLE_ID, testerId: env.DAILY_GIVEAWAY_TEST_USER_ID,
+    channelIds: groupChannelIds, categoryId: groupCategoryId, client, sql, now,
+  }) : null;
   let timer, ticking = false;
   const locks = new Map();
   async function locked(key, task) {
@@ -53,48 +60,23 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
     const moderator = channel.permissionOverwrites.cache.get(moderatorRoleId);
     if (!everyone?.deny.has(PermissionFlagsBits.ViewChannel) || !moderator?.allow.has(PermissionFlagsBits.ViewChannel)) throw Error('DAILY_PRIVATE_CHANNEL_REQUIRED');
     for (const overwrite of channel.permissionOverwrites.cache.values()) {
-      if (![moderatorRoleId, botRoleId, client.user.id].includes(overwrite.id) && overwrite.allow.has(PermissionFlagsBits.ViewChannel)) throw Error('DAILY_PRIVATE_CHANNEL_EXTRA_ACCESS');
+      if (![moderatorRoleId, botRoleId, client.user.id, giveawayBoatId].includes(overwrite.id) && overwrite.allow.has(PermissionFlagsBits.ViewChannel)) throw Error('DAILY_PRIVATE_CHANNEL_EXTRA_ACCESS');
     }
     return { guild, channel };
   }
   // Reconstruct counts from the actual message history at admission, so reconnects
   // do not silently lose messages. Never store or inspect message contents.
-  async function eligible(guild, userId, required, time) {
-    const relevant = [];
-    for (const id of groupChannelIds) {
-      const channel = await guild.channels.fetch(id);
-      if (!channel || channel.parentId !== groupCategoryId || channel.type !== ChannelType.GuildText) throw Error('DAILY_GROUP_CHANNELS_MISSING');
-      relevant.push(channel);
-    }
-    let count = 0;
-    for (const channel of relevant) {
-      const perms = channel.permissionsFor(guild.members.me);
-      if (!perms?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) throw Error('DAILY_GROUP_PERMISSIONS_MISSING');
-      let before;
-      while (true) {
-        const page = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
-        if (!page.size) break;
-        let oldest = Infinity;
-        for (const m of page.values()) {
-          oldest = Math.min(oldest, m.createdTimestamp);
-          if ([MessageType.Default, MessageType.Reply].includes(m.type) && m.createdTimestamp >= qualificationStart(time) && m.createdTimestamp <= time && m.author.id === userId && !m.author.bot && !m.webhookId) count++;
-        }
-        if (count >= required) return true;
-        if (oldest < qualificationStart(time) || page.size < 100) break;
-        before = page.last().id;
-      }
-    }
-    return false;
+  async function eligible(guild, userId, required, time, start) {
+    return hasMessages({ guild, channelIds: groupChannelIds, categoryId: groupCategoryId, userId, start, end: time, required });
   }
   function buttons(day, kind, disabled = false) {
-    const labels = kind === 'giveaway' ? ['參加抽獎'] : ['A','B','C','D'];
+    const labels = ['A','B','C','D'];
     return [new ActionRowBuilder().addComponents(...labels.map((label, i) => new ButtonBuilder()
-      .setCustomId(`daily:${kind}:${day}:${kind === 'giveaway' ? 'join' : label}`)
+      .setCustomId(`daily:${kind}:${day}:${label}`)
       .setLabel(label).setStyle(i === 0 ? ButtonStyle.Primary : ButtonStyle.Secondary).setDisabled(disabled)))];
   }
   function content(event) {
     const end = Math.floor(eventTimes(event.day, event.kind).end / 1000);
-    if (event.kind === 'giveaway') return `🎁 **每日 Giveaway**\n獎項：2U × 2 名\n今日 group chat 發言滿 20 次可參加。\n截止：<t:${end}:F>`;
     return `📝 **每日答題**\n${event.question}\n${event.options.map((x,i) => `${'ABCD'[i]}. ${x}`).join('\n')}\n獎項：2U × 2 名；今日 group chat 發言滿 10 次可參加。\n每人只能回答一次，無法修改。截止：<t:${end}:F>`;
   }
   async function send(channel, payload, key) {
@@ -127,7 +109,7 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
         return;
       }
       await sql`INSERT INTO daily_events(day,kind,question,options,correct) VALUES (${day},${kind},${q.question},${JSON.stringify(q.options)}::jsonb,${q.correct}) ON CONFLICT DO NOTHING`;
-    } else await sql`INSERT INTO daily_events(day,kind) VALUES (${day},${kind}) ON CONFLICT DO NOTHING`;
+    }
     const [event] = await sql`SELECT * FROM daily_events WHERE day=${day} AND kind=${kind}`;
     if (!event.message_id) {
       const message = await send(channel, { content: content(event), components: buttons(day, kind) }, `open:${kind}:${day}`);
@@ -136,7 +118,7 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
   }
   async function close(event, channel) {
     if (!event.result) {
-      const entries = await sql`SELECT user_id FROM daily_entries WHERE day=${event.day} AND kind=${event.kind} AND (${event.kind}='giveaway' OR answer=${event.correct}) ORDER BY user_id`;
+      const entries = await sql`SELECT user_id FROM daily_entries WHERE day=${event.day} AND kind='quiz' AND answer=${event.correct} ORDER BY user_id`;
       const candidates = entries.map(x => x.user_id), winners = [];
       while (candidates.length && winners.length < 2) winners.push(candidates.splice(randomInt(candidates.length), 1)[0]);
       const result = { winners, candidates: entries.length };
@@ -145,9 +127,9 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
       else [event] = await sql`SELECT * FROM daily_events WHERE day=${event.day} AND kind=${event.kind}`;
     }
     if (!event.result_message_id) {
-      const title = event.kind === 'giveaway' ? '每日 Giveaway' : '每日答題';
+      const title = '每日答題';
       const winners = event.result.winners.map(id => `<@${id}>`).join('、') || '無';
-      const answer = event.kind === 'quiz' ? `\n正確答案：${event.correct}` : '';
+      const answer = `\n正確答案：${event.correct}`;
       const msg = await send(channel, { content: `🏆 **${event.day} ${title}結果**${answer}\n得獎者：${winners}\n獎項：每人 2U；未產生名額：${2-event.result.winners.length}。請等待 MOD 發放。` }, `result:${event.kind}:${event.day}`);
       await sql`UPDATE daily_events SET result_message_id=${msg.id} WHERE day=${event.day} AND kind=${event.kind} AND result_message_id IS NULL`;
     }
@@ -161,11 +143,16 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
     ticking = true;
     try {
       const { channel } = await guildAndChannel();
+      if (giveawayQualification) {
+        try { await giveawayQualification.tick(); }
+        catch (error) { logger.error('DAILY_GIVEAWAY_QUALIFICATION_FAILED', error); }
+      }
       const time = now();
-      for (const event of await sql`SELECT * FROM daily_events WHERE kind IN ('giveaway','quiz') AND (result_message_id IS NULL OR result IS NULL)`) {
+      for (const event of await sql`SELECT * FROM daily_events WHERE kind = 'quiz' AND (result_message_id IS NULL OR result IS NULL)`) {
         if (time >= eventTimes(event.day,event.kind).end) await locked(`${event.kind}:${event.day}`, () => close(event, channel));
       }
-      for (const day of [dateKey(time-DAY),dateKey(time)]) for (const kind of ['giveaway','quiz']) {
+      for (const day of [dateKey(time-DAY),dateKey(time)]) for (const kind of ['quiz']) {
+        if (!isActivityDay(day)) continue;
         const { start,end } = eventTimes(day,kind);
         if (time >= start && time < end) await open(day,kind,channel);
       }
@@ -178,15 +165,15 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
       if (!interaction.member?.roles?.cache?.has(moderatorRoleId)) return interaction.reply({ content:'只有 MOD 可設定題目。', flags:EPHEMERAL });
       if (interaction.channelId !== channelId) return interaction.reply({content:'請在指定私人頻道設定題目。',flags:EPHEMERAL});
       const opts = interaction.options, day = opts.getString('date',true);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(midnight(day)) || dateKey(midnight(day)) !== day || now() >= eventTimes(day,'quiz').start)
-        return interaction.reply({content:'日期無效，或該日期的出題時間已到。',flags:EPHEMERAL});
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(midnight(day)) || dateKey(midnight(day)) !== day || !isActivityDay(day) || now() >= eventTimes(day,'quiz').start)
+        return interaction.reply({content:'日期無效、為週末，或該日期的出題時間已到。',flags:EPHEMERAL});
       const options = ['a','b','c','d'].map(k => opts.getString(k,true));
       await sql`INSERT INTO daily_quiz_questions(day,question,options,correct,created_by) VALUES (${day},${opts.getString('question',true)},${JSON.stringify(options)}::jsonb,${opts.getString('correct',true)},${interaction.user.id}) ON CONFLICT(day) DO UPDATE SET question=excluded.question,options=excluded.options,correct=excluded.correct,created_by=excluded.created_by`;
       return interaction.reply({content:`已設定 ${day} 的每日題目，正確答案不會公開。`,flags:EPHEMERAL});
     }
     if (!interaction.isButton() || !interaction.customId.startsWith('daily:')) return;
     const [,kind,day,answer] = interaction.customId.split(':');
-    if (!['giveaway','quiz'].includes(kind) || interaction.channelId !== channelId || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !(kind === 'giveaway' ? answer === 'join' : ['A','B','C','D'].includes(answer))) return;
+    if (kind !== 'quiz' || interaction.channelId !== channelId || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !['A','B','C','D'].includes(answer)) return;
     await interaction.deferReply({flags:EPHEMERAL});
     const time = now(), {start,end} = eventTimes(day,kind);
     if (time < start || time >= end) return interaction.editReply('這場活動尚未開始或已截止。');
@@ -195,7 +182,7 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
     const [existing] = await sql`SELECT 1 FROM daily_entries WHERE day=${day} AND kind=${kind} AND user_id=${interaction.user.id}`;
     if (existing) return interaction.editReply(kind === 'quiz' ? '你已經回答過，答案不能修改。' : '你已經參加過這場抽獎。');
     try {
-      if (!await eligible(interaction.guild,interaction.user.id,kind === 'giveaway' ? 20 : 10,time)) return interaction.editReply('目前尚未達到今日 group chat 的發言門檻。');
+      if (!await eligible(interaction.guild,interaction.user.id,10,time,start)) return interaction.editReply('目前尚未達到本場答題的發言門檻。');
       return await locked(`${kind}:${day}`, async () => {
         if (now() >= end) return interaction.editReply('活動已截止。');
         const [added] = await sql`INSERT INTO daily_entries(day,kind,user_id,answer) SELECT ${day},${kind},${interaction.user.id},${kind === 'quiz' ? answer : null} WHERE EXISTS (SELECT 1 FROM daily_events WHERE day=${day} AND kind=${kind} AND result IS NULL) ON CONFLICT DO NOTHING RETURNING user_id`;
@@ -203,5 +190,5 @@ export function createDailyModule({ client, sql, env = process.env, now = Date.n
       });
     } catch (error) { logger.error('DAILY_ELIGIBILITY_FAILED',error); return interaction.editReply('目前無法驗證發言資格，請稍後重試或聯絡 MOD。'); }
   }
-  return { guildId, commands:[command.toJSON()], handle, tick, async start() { await initialize(); await tick(); timer = setInterval(tick, 30000); }, stop() { clearInterval(timer); } };
+  return { guildId, commands:[command.toJSON()], handle, tick, async start() { await initialize(); if (giveawayQualification) await giveawayQualification.initialize(); await tick(); timer = setInterval(tick, 30000); }, stop() { clearInterval(timer); } };
 }

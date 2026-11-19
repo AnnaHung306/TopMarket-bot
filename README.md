@@ -4,11 +4,13 @@
 
 ### 每日活動（僅供私人頻道測試）
 
-新增獨立的 Giveaway 與每日答題。台灣時間 08:00 更新發言統計區間；前者 10:00 開始、隔日 09:00 截止，後者 12:00 開始、隔日 11:00 截止。每場獎項均為 2U 兩名，僅公布得獎者，由 MOD 人工發放。報名時分別要求指定聊天頻道當日累計 20／10 則訊息，討論串及機器人訊息不計。以按下按鈕時所在的 08:00 至隔日 08:00 區間計算，不存訊息內容。已刪除、機器人無權讀取或 Discord 不再提供的訊息不能算入，並應事先核對各頻道權限。
+Giveaway 由 Giveaway Boat 處理；本程式不得建立、接受或結算 Giveaway。每日答題僅週一至週五台灣時間 12:00 開始，隔日 11:00 截止，週五的題目週六結算。每場獎項為 2U 兩名，由 MOD 人工發放。答題資格計算自該場開啟起指定聊天頻道的 10 則訊息，討論串及機器人訊息不計。資格只讀訊息中繼資料，不存訊息內容；已刪除、機器人無權讀取或 Discord 不再提供的訊息不能算入。
 
 MOD 在私人活動頻道使用 `/dailyquiz add`，填寫台灣時間日期、問題、A–D 選項及正確答案；12:00 後不能新增當天的題目。沒有預先準備題目時，機器人提醒 MOD 並略過當天。答案在截止前僅回覆提交者本人；每人每場只能提交一次，得獎者從答對者抽出。
 
-設定 `DAILY_ENABLED=true`、`DAILY_GUILD_ID`、`DAILY_CHANNEL_ID`、`DAILY_GROUP_CATEGORY_ID`、`DAILY_GROUP_CHANNEL_IDS`（指定文字頻道 ID，以逗號分隔）、`DAILY_MODERATOR_ROLE_ID`、`DAILY_BOT_ROLE_ID`。目前依使用者指定僅計入 `general-chat` 及 `chinese`，排除 `bot-mod-test`；各指定頻道都會逐一檢查，避免因 Bot 看不到頻道而悄悄少算。私人頻道應明確拒絕 @everyone 的檢視權限，允許 MOD 與指定 Bot 身分組；Bot 需有活動頻道傳送與讀取歷史，以及指定聊天頻道檢視與讀取歷史的權限。程式會檢查私人頻道覆寫，待使用者測試認可並明確授權後，才可另外處理公開規則。
+設定 `DAILY_ENABLED=true`、`DAILY_GUILD_ID`、`DAILY_CHANNEL_ID`、`DAILY_GROUP_CATEGORY_ID`、`DAILY_GROUP_CHANNEL_IDS`、`DAILY_MODERATOR_ROLE_ID`、`DAILY_BOT_ROLE_ID`、`DAILY_GIVEAWAY_BOAT_ID`。僅計入 `general-chat` 及 `chinese`，排除 `bot-mod-test`。私人頻道必須明確拒絕 @everyone 並允許 MOD 和指定機器人；使用者驗收並授權前不開放一般成員。
+
+Giveaway 資格橋接目前僅為單一測試者的測試模式：需要 `DAILY_GIVEAWAY_TEST_ENABLED=true`、`DAILY_GIVEAWAY_ROLE_ID`、`DAILY_GIVEAWAY_TEST_USER_ID`。週一至週五 10:00 啟動的活動以該場開始後的 20 則訊息授予測試身分組，該場隔日 09:00 截止。下一場開始時才移除上一場測試身分組，避免在開獎前撤銷資格。Bot 需要管理身分組權限；Giveaway Boat 需額外設定並驗證身分組要求、報名保留與私人活動設定。此模式尚未支援一般成員或自動建立 Giveaway，不得當成正式活動使用。
 
 排程使用常駐 Bot 程序，每 30 秒檢查；必須只執行一個實例，資料保存在 PostgreSQL。Bot 在活動時間中途恢復時會嘗試建立尚未發布的活動；已截止的既有活動會在恢復後結算。如果整場活動期間都離線，該場不會補辦。資料庫或 Discord 權限故障時不會以假資料接受報名。公告傳送後若程式中斷，重啟會先核對頻道中的機器人訊息再重試；頻道歷史不可讀或過多時需人工排查。
 
