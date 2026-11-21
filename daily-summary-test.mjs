@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { previousTaipeiDay, readDay, requestSummary, runDailySummary, speakerCsv, startDailySummary } from './discord-daily-summary.mjs';
+import { previousTaipeiDay, readDay, requestSummary, runDailySummary, speakerCsv, startDailySummary, renderSummary, formatPeriod } from './discord-daily-summary.mjs';
 import { createSummaryLifecycle } from './discord-summary-lifecycle.mjs';
 
 const period = previousTaipeiDay(Date.parse('2026-11-20T23:15:00+08:00'));
 assert.deepEqual(period, { start: Date.parse('2026-11-19T23:00:00+08:00'), end: Date.parse('2026-11-20T23:00:00+08:00'), date: '2026-11-20' });
+assert.equal(formatPeriod(period), '2026-11-19 23:00 至 2026-11-20 23:00（台灣時間，結束時間不含）');
 assert.equal(previousTaipeiDay(Date.parse('2026-11-20T22:59:59+08:00')).date, '2026-11-19');
 const msg = (id, time, content, bot = false) => ({ id, createdTimestamp: Date.parse(time), content, author: { bot, id: bot ? 'bot' : '42', username: 'tester' } });
 const source = { id: '1548950663008878683', messages: { fetch: async () => new Map([
@@ -14,7 +15,7 @@ const source = { id: '1548950663008878683', messages: { fetch: async () => new M
   ['5', { ...msg('5', '2026-11-20T05:00:00+08:00', '系統訊息'), system: true }],
 ]) } };
 const { messages, speakers, totalHuman } = await readDay(source, period.start, period.end);
-assert.deepEqual(messages, [{ id: '1', content: '話題 [使用者] [電子郵件]' }]);
+assert.deepEqual(messages, [{ id: '1', authorId: '42', content: '話題 [使用者] [電子郵件]' }]);
 assert.equal(totalHuman, 2); assert.equal(speakers[0].id, '42'); assert.equal(speakers[0].count, 2);
 assert.match(speakerCsv([{ id: '42', username: '=malicious', count: 2 }]), /"'=malicious"/);
 assert.match(speakerCsv([{ id: '42', username: '  =malicious', count: 2 }]), /"'  =malicious"/);
@@ -35,9 +36,13 @@ const api = async (url, options) => {
   assert.equal(body.store, false);
   assert.equal(body.model, 'gpt-6-luna');
   assert.match(body.input, /\[電子郵件\]/);
-  return { ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '話題摘要' }] }] }) };
+  assert.doesNotMatch(body.input, /authorId/);
+  assert.equal(body.text.format.type, 'json_schema');
+  return { ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{ text: '提出話題', message_ids: ['m1'] }], sentiment: [], pending: [] }) }] }] }) };
 };
-assert.equal(await requestSummary(messages, { apiKey: 'fake', fetchImpl: api }), '話題摘要');
+assert.match(await requestSummary(messages, { apiKey: 'fake', fetchImpl: api }), /ID 42.*提出話題/);
+assert.throws(() => renderSummary({ events: [{ text: '未經證實', message_ids: ['m999'] }], sentiment: [], pending: [] }, messages), /SUMMARY_SOURCE_INVALID/);
+assert.throws(() => renderSummary({ events: [{ text: '<@42> 有人說', message_ids: ['m1'] }], sentiment: [], pending: [] }, messages), /SUMMARY_OUTPUT_UNSAFE/);
 await assert.rejects(() => requestSummary(messages, { apiKey: 'fake', fetchImpl: async () => ({ ok: false, status: 429 }) }), /SUMMARY_API_HTTP_429/);
 await assert.rejects(() => requestSummary(messages, { apiKey: 'fake', fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'incomplete' }) }) }), /SUMMARY_API_INCOMPLETE/);
 const target = { id: '1572821315507855430', send: async value => { posted = value; } };
@@ -51,7 +56,8 @@ const db = { query: async ({ text, values }) => {
 } };
 const params = { client, db, apiKey: 'fake', canAct: async () => true, now: Date.parse('2026-11-20T23:15:00+08:00'), fetchImpl: api };
 assert.equal(await runDailySummary(params), 'sent');
-assert.equal(status, 'sent'); assert.match(posted.content, /2026-11-20/); assert.deepEqual(posted.allowedMentions.parse, []);
+assert.equal(status, 'sent'); assert.match(posted.content, /2026-11-19 23:00 至 2026-11-20 23:00/); assert.deepEqual(posted.allowedMentions.parse, []);
+assert.match(posted.embeds[0].description, /ID 42/);
 assert.match(posted.files[0].attachment.toString('utf8'), /"42","tester","2"/);
 assert.equal(await runDailySummary(params), 'already-claimed');
 claimed = false; posted = undefined;
@@ -108,7 +114,7 @@ const nowClient = { guilds: { fetch: async () => ({ channels: { fetch: async id 
 let dbClosed = false;
 const nowDb = { on() {}, async connect() {}, async end() { dbClosed = true; }, async query(q) { if (typeof q === 'string') return {}; return { rowCount: 1 }; } };
 const stop = await startDailySummary({ client: nowClient, apiKey: 'fake', canAct: async () => true, makeClient: () => nowDb, runOnStart: true,
-  fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '測試摘要' }] }] }) }) });
+  fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{ text: '測試摘要', message_ids: ['m1'] }], sentiment: [], pending: [] }) }] }] }) }) });
 await Promise.race([deliveredPromise, new Promise((_, reject) => setTimeout(() => reject(Error('Immediate summary timed out')), 2000))]);
 await stop(); assert.equal(dbClosed, true);
 console.log('Daily summary scope, pagination inputs, OpenAI contract, failure and deduplication tests passed');
