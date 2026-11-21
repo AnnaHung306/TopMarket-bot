@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { previousTaipeiDay, readDay, requestSummary, runDailySummary, resolveSpeakerNames, speakerMarkdownChunks, startDailySummary, renderSummary, formatPeriod } from './discord-daily-summary.mjs';
+import { previousTaipeiDay, readDay, requestSummary, runDailySummary, resolveSpeakerNames, speakerMarkdownChunks, startDailySummary, renderSummary, formatPeriod, splitSummary } from './discord-daily-summary.mjs';
 import { createSummaryLifecycle } from './discord-summary-lifecycle.mjs';
 
 const period = previousTaipeiDay(Date.parse('2026-11-20T23:15:00+08:00'));
@@ -36,7 +36,7 @@ assert.equal(calls.length, 2);
 assert.equal(calls[0].before, ((BigInt(period.end) - 1420070400000n) << 22n).toString());
 assert.equal(calls[1].before, '101');
 await assert.rejects(() => requestSummary(messages, { apiKey: '' }), /SUMMARY_API_KEY_MISSING/);
-let posted;
+let posted = [];
 const api = async (url, options) => {
   assert.equal(url, 'https://api.openai.com/v1/responses');
   const body = JSON.parse(options.body);
@@ -45,14 +45,25 @@ const api = async (url, options) => {
   assert.match(body.input, /\[電子郵件\]/);
   assert.doesNotMatch(body.input, /authorId/);
   assert.equal(body.text.format.type, 'json_schema');
-  return { ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{ text: '提出話題', message_ids: ['m1'] }], sentiment: [], pending: [] }) }] }] }) };
+  return { ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{ topic: '活動', text: '提出話題', message_ids: ['m1'] }], sentiment: [], pending: [] }) }] }] }) };
 };
 assert.match(await requestSummary(messages, { apiKey: 'fake', fetchImpl: api }), /tester.*提出話題/);
-assert.throws(() => renderSummary({ events: [{ text: '未經證實', message_ids: ['m999'] }], sentiment: [], pending: [] }, messages), /SUMMARY_SOURCE_INVALID/);
-assert.throws(() => renderSummary({ events: [{ text: '<@42> 有人說', message_ids: ['m1'] }], sentiment: [], pending: [] }, messages), /SUMMARY_OUTPUT_UNSAFE/);
+assert.throws(() => renderSummary({ events: [{ topic: '活動', text: '未經證實', message_ids: ['m999'] }], sentiment: [], pending: [] }, messages), /SUMMARY_SOURCE_INVALID/);
+assert.throws(() => renderSummary({ events: [{ topic: '活動', text: '<@42> 有人說', message_ids: ['m1'] }], sentiment: [], pending: [] }, messages), /SUMMARY_OUTPUT_UNSAFE/);
+let attempts = 0;
+const retryApi = async (url, options) => {
+  attempts++;
+  if (attempts === 1) return { ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{topic:'活動',text:'有人詢問',message_ids:['m1']}],sentiment:[],pending:[] }) }] }] }) };
+  return api(url, options);
+};
+assert.match(await requestSummary(messages, { apiKey:'fake', fetchImpl:retryApi }), /tester.*提出話題/);
+assert.equal(attempts, 2);
+const multi = renderSummary({ events: [{ topic: '維護', text: '安排維護', message_ids:['m1'] }, { topic: '維護', text: '延長維護', message_ids:['m2'] }], sentiment: [], pending: [] }, [{id:'1',authorName:'en'},{id:'2',authorName:'johnnyroger'}]);
+assert.equal((multi.match(/\*\*維護\*\*/g)||[]).length, 1); assert.match(multi,/en.*安排維護/); assert.match(multi,/johnnyroger.*延長維護/);
+assert.ok(splitSummary(Array(5).fill('x'.repeat(1000)).join('\n')).length > 1);
 await assert.rejects(() => requestSummary(messages, { apiKey: 'fake', fetchImpl: async () => ({ ok: false, status: 429 }) }), /SUMMARY_API_HTTP_429/);
 await assert.rejects(() => requestSummary(messages, { apiKey: 'fake', fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'incomplete' }) }) }), /SUMMARY_API_INCOMPLETE/);
-const target = { id: '1572821315507855430', send: async value => { posted = value; } };
+const target = { id: '1572821315507855430', send: async value => { posted.push(value); } };
 const guild = { members: memberFetcher, channels: { fetch: async id => id === source.id ? source : target } };
 const client = { guilds: { fetch: async () => guild } };
 let claimed = false; let status;
@@ -63,17 +74,17 @@ const db = { query: async ({ text, values }) => {
 } };
 const params = { client, db, apiKey: 'fake', canAct: async () => true, now: Date.parse('2026-11-20T23:15:00+08:00'), fetchImpl: api };
 assert.equal(await runDailySummary(params), 'sent');
-assert.equal(status, 'sent'); assert.match(posted.content, /2026-11-19 23:00 至 2026-11-20 23:00/); assert.deepEqual(posted.allowedMentions.parse, []);
-assert.match(posted.embeds[0].description, /tester/);
-assert.match(posted.content, /\*\*tester\*\*：2 則/);
-assert.doesNotMatch(posted.content, /ID 42|@/);
+assert.equal(status, 'sent'); assert.match(posted[0].content, /2026-11-19 23:00 至 2026-11-20 23:00/); assert.deepEqual(posted[0].allowedMentions.parse, []);
+assert.match(posted[0].embeds[0].description, /tester/);
+assert.match(posted[1].content, /\*\*tester\*\*：2 則/);
+assert.doesNotMatch(posted.map(x=>x.content).join(''), /ID 42|@/);
 assert.equal(await runDailySummary(params), 'already-claimed');
-claimed = false; posted = undefined;
+claimed = false; posted = [];
 await assert.rejects(() => runDailySummary({ ...params, fetchImpl: async () => ({ ok: false, status: 429 }) }), /SUMMARY_API_HTTP_429/);
-assert.equal(status, 'failed'); assert.match(posted.content, /未完成/);
-claimed = false; posted = undefined;
+assert.equal(status, 'failed'); assert.match(posted[0].content, /未完成/);
+claimed = false; posted = [];
 await assert.rejects(() => runDailySummary({ ...params, canAct: async () => false }), /SUMMARY_LOCK_LOST/);
-assert.equal(posted, undefined); assert.equal(claimed, false);
+assert.equal(posted.length, 0); assert.equal(claimed, false);
 await assert.rejects(() => runDailySummary({ ...params, apiKey: '' }), /SUMMARY_API_KEY_MISSING/);
 assert.equal(claimed, false);
 const notices = [];
@@ -85,7 +96,7 @@ const failAfterSendDb = { query: async ({ text, values }) => {
 const failTarget = { ...target, send: async value => { notices.push(value.content); } };
 const failClient = { guilds: { fetch: async () => ({ members: memberFetcher, channels: { fetch: async id => id === source.id ? source : failTarget } }) } };
 await assert.rejects(() => runDailySummary({ ...params, db: failAfterSendDb, client: failClient }), /DB unavailable/);
-assert.equal(notices.length, 2); assert.match(notices[1], /摘要已傳送/);
+assert.equal(notices.length, 3); assert.match(notices[2], /摘要已傳送/);
 const timedOutNotices = []; let timedOutStatus;
 const timedOutTarget = { ...target, send: async value => {
   timedOutNotices.push(value.content);
@@ -117,12 +128,12 @@ let deliveryDone;
 const deliveredPromise = new Promise(resolve => { deliveryDone = resolve; });
 const latest = previousTaipeiDay();
 const nowSource = { id: source.id, messages: { fetch: async () => new Map([['91', msg('91', new Date(latest.start + 60000).toISOString(), '測試')]]) } };
-const nowTarget = { id: target.id, send: async value => { assert.match(value.content, /tester/); deliveryDone(); } };
+const nowTarget = { id: target.id, send: async value => { if (/tester/.test(value.content)) deliveryDone(); } };
 const nowClient = { guilds: { fetch: async () => ({ members: memberFetcher, channels: { fetch: async id => id === nowSource.id ? nowSource : nowTarget } }) } };
 let dbClosed = false;
 const nowDb = { on() {}, async connect() {}, async end() { dbClosed = true; }, async query(q) { if (typeof q === 'string') return {}; return { rowCount: 1 }; } };
 const stop = await startDailySummary({ client: nowClient, apiKey: 'fake', canAct: async () => true, makeClient: () => nowDb, runOnStart: true,
-  fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{ text: '測試摘要', message_ids: ['m1'] }], sentiment: [], pending: [] }) }] }] }) }) });
+  fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{ topic: '測試', text: '測試摘要', message_ids: ['m1'] }], sentiment: [], pending: [] }) }] }] }) }) });
 await Promise.race([deliveredPromise, new Promise((_, reject) => setTimeout(() => reject(Error('Immediate summary timed out')), 2000))]);
 await stop(); assert.equal(dbClosed, true);
 console.log('Daily summary scope, pagination inputs, OpenAI contract, failure and deduplication tests passed');
