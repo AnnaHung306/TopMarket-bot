@@ -1,0 +1,114 @@
+import assert from 'node:assert/strict';
+import { previousTaipeiDay, readDay, requestSummary, runDailySummary, speakerCsv, startDailySummary } from './discord-daily-summary.mjs';
+import { createSummaryLifecycle } from './discord-summary-lifecycle.mjs';
+
+const period = previousTaipeiDay(Date.parse('2026-11-20T23:15:00+08:00'));
+assert.deepEqual(period, { start: Date.parse('2026-11-19T23:00:00+08:00'), end: Date.parse('2026-11-20T23:00:00+08:00'), date: '2026-11-20' });
+assert.equal(previousTaipeiDay(Date.parse('2026-11-20T22:59:59+08:00')).date, '2026-11-19');
+const msg = (id, time, content, bot = false) => ({ id, createdTimestamp: Date.parse(time), content, author: { bot, id: bot ? 'bot' : '42', username: 'tester' } });
+const source = { id: '1548950663008878683', messages: { fetch: async () => new Map([
+  ['1', msg('1', '2026-11-20T02:00:00+08:00', '話題 <@123> test@example.com')],
+  ['2', msg('2', '2026-11-20T03:00:00+08:00', '機器人', true)],
+  ['3', msg('3', '2026-11-20T23:00:00+08:00', '不在範圍')],
+  ['4', msg('4', '2026-11-20T04:00:00+08:00', '')],
+  ['5', { ...msg('5', '2026-11-20T05:00:00+08:00', '系統訊息'), system: true }],
+]) } };
+const { messages, speakers, totalHuman } = await readDay(source, period.start, period.end);
+assert.deepEqual(messages, [{ id: '1', content: '話題 [使用者] [電子郵件]' }]);
+assert.equal(totalHuman, 2); assert.equal(speakers[0].id, '42'); assert.equal(speakers[0].count, 2);
+assert.match(speakerCsv([{ id: '42', username: '=malicious', count: 2 }]), /"'=malicious"/);
+assert.match(speakerCsv([{ id: '42', username: '  =malicious', count: 2 }]), /"'  =malicious"/);
+await assert.rejects(() => readDay(source, period.start, period.end, { maxCharacters: 1 }), /SUMMARY_INPUT_LIMIT/);
+const firstPage = new Map(Array.from({ length: 100 }, (_, i) => [String(200 - i), msg(String(200 - i), '2026-11-20T02:00:00+08:00', `訊息${i}`)]));
+const secondPage = new Map([['99', msg('99', '2026-11-20T01:00:00+08:00', '較早')], ['98', msg('98', '2026-11-19T22:59:00+08:00', '範圍外')]]);
+const calls = [];
+const paged = { messages: { fetch: async options => { calls.push(options); return calls.length === 1 ? firstPage : secondPage; } } };
+assert.equal((await readDay(paged, period.start, period.end)).totalHuman, 101);
+assert.equal(calls.length, 2);
+assert.equal(calls[0].before, ((BigInt(period.end) - 1420070400000n) << 22n).toString());
+assert.equal(calls[1].before, '101');
+await assert.rejects(() => requestSummary(messages, { apiKey: '' }), /SUMMARY_API_KEY_MISSING/);
+let posted;
+const api = async (url, options) => {
+  assert.equal(url, 'https://api.openai.com/v1/responses');
+  const body = JSON.parse(options.body);
+  assert.equal(body.store, false);
+  assert.equal(body.model, 'gpt-6-luna');
+  assert.match(body.input, /\[電子郵件\]/);
+  return { ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '話題摘要' }] }] }) };
+};
+assert.equal(await requestSummary(messages, { apiKey: 'fake', fetchImpl: api }), '話題摘要');
+await assert.rejects(() => requestSummary(messages, { apiKey: 'fake', fetchImpl: async () => ({ ok: false, status: 429 }) }), /SUMMARY_API_HTTP_429/);
+await assert.rejects(() => requestSummary(messages, { apiKey: 'fake', fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'incomplete' }) }) }), /SUMMARY_API_INCOMPLETE/);
+const target = { id: '1572821315507855430', send: async value => { posted = value; } };
+const guild = { channels: { fetch: async id => id === source.id ? source : target } };
+const client = { guilds: { fetch: async () => guild } };
+let claimed = false; let status;
+const db = { query: async ({ text, values }) => {
+  assert.equal(values[0], '2026-11-20');
+  if (text.includes('INSERT')) { if (claimed) return { rowCount: 0 }; claimed = true; return { rowCount: 1 }; }
+  status = text.includes("'sent'") ? 'sent' : values[1]; return { rowCount: 1 };
+} };
+const params = { client, db, apiKey: 'fake', canAct: async () => true, now: Date.parse('2026-11-20T23:15:00+08:00'), fetchImpl: api };
+assert.equal(await runDailySummary(params), 'sent');
+assert.equal(status, 'sent'); assert.match(posted.content, /2026-11-20/); assert.deepEqual(posted.allowedMentions.parse, []);
+assert.match(posted.files[0].attachment.toString('utf8'), /"42","tester","2"/);
+assert.equal(await runDailySummary(params), 'already-claimed');
+claimed = false; posted = undefined;
+await assert.rejects(() => runDailySummary({ ...params, fetchImpl: async () => ({ ok: false, status: 429 }) }), /SUMMARY_API_HTTP_429/);
+assert.equal(status, 'failed'); assert.match(posted.content, /未完成/);
+claimed = false; posted = undefined;
+await assert.rejects(() => runDailySummary({ ...params, canAct: async () => false }), /SUMMARY_LOCK_LOST/);
+assert.equal(posted, undefined); assert.equal(claimed, false);
+await assert.rejects(() => runDailySummary({ ...params, apiKey: '' }), /SUMMARY_API_KEY_MISSING/);
+assert.equal(claimed, false);
+const notices = [];
+const failAfterSendDb = { query: async ({ text, values }) => {
+  if (text.includes('INSERT')) return { rowCount: 1 };
+  if (text.includes("'sent'")) throw Error('DB unavailable after send');
+  assert.equal(values[1], 'uncertain'); return { rowCount: 1 };
+} };
+const failTarget = { ...target, send: async value => { notices.push(value.content); } };
+const failClient = { guilds: { fetch: async () => ({ channels: { fetch: async id => id === source.id ? source : failTarget } }) } };
+await assert.rejects(() => runDailySummary({ ...params, db: failAfterSendDb, client: failClient }), /DB unavailable/);
+assert.equal(notices.length, 2); assert.match(notices[1], /摘要已傳送/);
+const timedOutNotices = []; let timedOutStatus;
+const timedOutTarget = { ...target, send: async value => {
+  timedOutNotices.push(value.content);
+  if (timedOutNotices.length === 1) throw Error('Discord request timed out');
+} };
+const timedOutClient = { guilds: { fetch: async () => ({ channels: { fetch: async id => id === source.id ? source : timedOutTarget } }) } };
+const timedOutDb = { query: async ({ text, values }) => {
+  if (text.includes('INSERT')) return { rowCount: 1 };
+  timedOutStatus = values[1]; return { rowCount: 1 };
+} };
+await assert.rejects(() => runDailySummary({ ...params, db: timedOutDb, client: timedOutClient }), /timed out/);
+assert.equal(timedOutStatus, 'uncertain');
+assert.match(timedOutNotices[1], /發送狀態不確定/);
+let finishStart; let stopped = 0;
+const gate = new Promise(resolve => { finishStart = resolve; });
+const lifecycle = createSummaryLifecycle({ start: async () => { await gate; return async () => { stopped++; }; } });
+lifecycle.start();
+const closing = lifecycle.close();
+assert.equal(stopped, 0);
+finishStart();
+await closing;
+await lifecycle.close();
+lifecycle.start();
+assert.equal(stopped, 1);
+let errorSeen = false;
+const failingLifecycle = createSummaryLifecycle({ start: async () => { throw Error('init failure'); }, onError: () => { errorSeen = true; } });
+failingLifecycle.start(); await failingLifecycle.close(); assert.equal(errorSeen, true);
+let deliveryDone;
+const deliveredPromise = new Promise(resolve => { deliveryDone = resolve; });
+const latest = previousTaipeiDay();
+const nowSource = { id: source.id, messages: { fetch: async () => new Map([['91', msg('91', new Date(latest.start + 60000).toISOString(), '測試')]]) } };
+const nowTarget = { id: target.id, send: async value => { assert.match(value.files[0].attachment.toString('utf8'), /tester/); deliveryDone(); } };
+const nowClient = { guilds: { fetch: async () => ({ channels: { fetch: async id => id === nowSource.id ? nowSource : nowTarget } }) } };
+let dbClosed = false;
+const nowDb = { on() {}, async connect() {}, async end() { dbClosed = true; }, async query(q) { if (typeof q === 'string') return {}; return { rowCount: 1 }; } };
+const stop = await startDailySummary({ client: nowClient, apiKey: 'fake', canAct: async () => true, makeClient: () => nowDb, runOnStart: true,
+  fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '測試摘要' }] }] }) }) });
+await Promise.race([deliveredPromise, new Promise((_, reject) => setTimeout(() => reject(Error('Immediate summary timed out')), 2000))]);
+await stop(); assert.equal(dbClosed, true);
+console.log('Daily summary scope, pagination inputs, OpenAI contract, failure and deduplication tests passed');
