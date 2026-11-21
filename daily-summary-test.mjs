@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { previousTaipeiDay, readDay, requestSummary, runDailySummary, resolveSpeakerNames, speakerMarkdownChunks, startDailySummary, renderSummary, formatPeriod, splitSummary } from './discord-daily-summary.mjs';
+import { previousTaipeiDay, readDay, requestSummary, runDailySummary, resolveSpeakerNames, speakerMarkdownChunks, startDailySummary, renderSummary, formatPeriod, splitSummary, verifySummaryClaims } from './discord-daily-summary.mjs';
 import { createSummaryLifecycle } from './discord-summary-lifecycle.mjs';
 
 const period = previousTaipeiDay(Date.parse('2026-11-20T23:15:00+08:00'));
@@ -45,13 +45,30 @@ const api = async (url, options) => {
   assert.match(body.input, /\[電子郵件\]/);
   assert.doesNotMatch(body.input, /authorId/);
   assert.equal(body.text.format.type, 'json_schema');
+  if (body.text.format.name === 'discord_summary_review') {
+    const claims = JSON.parse(body.input);
+    return { ok: true, json: async () => ({ status:'completed', output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({checks:claims.map(c=>({key:c.key,verdict:'accurate',text:c.claim}))})}]}] }) };
+  }
   return { ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{ topic: '活動', text: '提出話題', message_ids: ['m1'] }], sentiment: [], pending: [] }) }] }] }) };
 };
 assert.match(await requestSummary(messages, { apiKey: 'fake', fetchImpl: api }), /tester.*提出話題/);
 assert.throws(() => renderSummary({ events: [{ topic: '活動', text: '未經證實', message_ids: ['m999'] }], sentiment: [], pending: [] }, messages), /SUMMARY_SOURCE_INVALID/);
 assert.throws(() => renderSummary({ events: [{ topic: '活動', text: '<@42> 有人說', message_ids: ['m1'] }], sentiment: [], pending: [] }, messages), /SUMMARY_OUTPUT_UNSAFE/);
+const noYield = [{ id:'3', authorName:'測試者', content:'没人抽50U的卡了吗？我都好几天没收益了' }];
+assert.throws(() => renderSummary({ events:[{topic:'收益',text:'表示已好幾天沒抽 50U 卡並取得收益。',message_ids:['m1']}],sentiment:[],pending:[] }, noYield), /SUMMARY_SOURCE_MISMATCH/);
+assert.match(renderSummary({ events:[{topic:'收益',text:'表示好幾天沒有收益。',message_ids:['m1']}],sentiment:[],pending:[] }, noYield), /沒有收益/);
+const badClaim={events:[{topic:'收益',text:'表示已好幾天沒抽 50U 卡並取得收益。',message_ids:['m1']}],sentiment:[],pending:[]};
+const correctionApi=async (url, options)=>{const claim=JSON.parse(options.body).input;assert.match(claim,/没收益/);return {ok:true,json:async()=>({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({checks:[{key:'events:0',verdict:'corrected',text:'詢問是否沒人抽卡，並表示好幾天沒有收益。'}]})}]}]})};};
+const corrected=await verifySummaryClaims(badClaim,noYield,{apiKey:'fake',fetchImpl:correctionApi});
+assert.match(renderSummary(corrected,noYield), /好幾天沒有收益/);
+const unverified=await verifySummaryClaims(badClaim,noYield,{apiKey:'fake',fetchImpl:async()=>({ok:true,json:async()=>({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({checks:[{key:'events:0',verdict:'cannot_verify',text:''}]})}]}]})})});
+const unverifiedText=renderSummary(unverified,noYield);
+assert.match(unverifiedText,/待人工核對（原文摘錄/);assert.match(unverifiedText,/好几天没收益/);assert.doesNotMatch(unverifiedText,/並取得收益/);
+await assert.rejects(() => verifySummaryClaims(badClaim,noYield,{apiKey:'fake',fetchImpl:async()=>({ok:true,json:async()=>({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({checks:[]})}]}]})})}), /SUMMARY_REVIEW_INVALID/);
+await assert.rejects(() => verifySummaryClaims(badClaim,noYield,{apiKey:'fake',fetchImpl:async()=>({ok:true,json:async()=>({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({checks:[{key:'events:0',verdict:'accurate',text:'擅自變更的文字'}]})}]}]})})}), /SUMMARY_REVIEW_INVALID/);
 let attempts = 0;
 const retryApi = async (url, options) => {
+  if (JSON.parse(options.body).text.format.name === 'discord_summary_review') return api(url, options);
   attempts++;
   if (attempts === 1) return { ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{topic:'活動',text:'有人詢問',message_ids:['m1']}],sentiment:[],pending:[] }) }] }] }) };
   return api(url, options);
@@ -79,6 +96,15 @@ assert.match(posted[0].embeds[0].description, /tester/);
 assert.match(posted[1].content, /\*\*tester\*\*：2 則/);
 assert.doesNotMatch(posted.map(x=>x.content).join(''), /ID 42|@/);
 assert.equal(await runDailySummary(params), 'already-claimed');
+const manualReviewPosts=[];
+const manualReviewTarget={...target,send:async value=>manualReviewPosts.push(value)};
+const manualReviewClient={guilds:{fetch:async()=>({members:memberFetcher,channels:{fetch:async id=>id===source.id?source:manualReviewTarget}})}};
+const manualReviewDb={query:async q=>q.text.includes('INSERT')?{rowCount:1}:{rowCount:1}};
+const manualReviewApi=async (url,options)=>{const body=JSON.parse(options.body);if(body.text.format.name!=='discord_summary_review')return api(url,options);const checks=JSON.parse(body.input).map(c=>({key:c.key,verdict:'cannot_verify',text:''}));return {ok:true,json:async()=>({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({checks})}]}]})};};
+assert.equal(await runDailySummary({...params,client:manualReviewClient,db:manualReviewDb,fetchImpl:manualReviewApi}), 'sent');
+assert.match(manualReviewPosts[0].embeds[0].description,/待人工核對（原文摘錄/);
+assert.match(manualReviewPosts[0].embeds[0].description,/話題/);
+assert.doesNotMatch(manualReviewPosts[0].embeds[0].description,/@/);
 claimed = false; posted = [];
 await assert.rejects(() => runDailySummary({ ...params, fetchImpl: async () => ({ ok: false, status: 429 }) }), /SUMMARY_API_HTTP_429/);
 assert.equal(status, 'failed'); assert.match(posted[0].content, /未完成/);
@@ -133,7 +159,7 @@ const nowClient = { guilds: { fetch: async () => ({ members: memberFetcher, chan
 let dbClosed = false;
 const nowDb = { on() {}, async connect() {}, async end() { dbClosed = true; }, async query(q) { if (typeof q === 'string') return {}; return { rowCount: 1 }; } };
 const stop = await startDailySummary({ client: nowClient, apiKey: 'fake', canAct: async () => true, makeClient: () => nowDb, runOnStart: true,
-  fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ events: [{ topic: '測試', text: '測試摘要', message_ids: ['m1'] }], sentiment: [], pending: [] }) }] }] }) }) });
+  fetchImpl: async (url, options) => { const b=JSON.parse(options.body); const out=b.text.format.name==='discord_summary_review' ? {checks:JSON.parse(b.input).map(c=>({key:c.key,verdict:'accurate',text:c.claim}))} : {events:[{topic:'測試',text:'測試摘要',message_ids:['m1']}],sentiment:[],pending:[]}; return {ok:true,json:async()=>({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(out)}]}]})}; } });
 await Promise.race([deliveredPromise, new Promise((_, reject) => setTimeout(() => reject(Error('Immediate summary timed out')), 2000))]);
 await stop(); assert.equal(dbClosed, true);
 console.log('Daily summary scope, pagination inputs, OpenAI contract, failure and deduplication tests passed');
