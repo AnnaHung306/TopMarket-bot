@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { isConfirmedBoatResult } from './giveaway-boat-result.mjs';
+const ids={messageId:'10000000000000001',channelId:'10000000000000002',boatId:'10000000000000003'};
+const message={id:ids.messageId,channel_id:ids.channelId,author:{id:ids.boatId},content:'🎊 **GIVEAWAY ENDED** 🎊',embeds:[{description:'Winner: <@10000000000000004>',timestamp:'2026-11-22T03:58:01.034Z',footer:{text:'Ended at'}}],components:[{components:[{custom_id:'giveaway_message',disabled:true}]}]};
+assert.equal(isConfirmedBoatResult(message,ids),true);
+assert.equal(isConfirmedBoatResult({...message,author:{id:'wrong'}},ids),false);
+assert.equal(isConfirmedBoatResult({...message,channel_id:'wrong'},ids),false);
+assert.equal(isConfirmedBoatResult({...message,id:'wrong'},ids),false);
+assert.equal(isConfirmedBoatResult({...message,content:''},ids),false);
+assert.equal(isConfirmedBoatResult({...message,embeds:[]},ids),false);
+assert.equal(isConfirmedBoatResult({...message,components:[]},ids),false);
+assert.equal(isConfirmedBoatResult({...message,embeds:[{...message.embeds[0],description:'No one entered the giveaway!'}]},ids),true);
+assert.equal(isConfirmedBoatResult({...message,embeds:[{...message.embeds[0],description:'Awaiting winner selection'}]},ids),false);
+console.log('Giveaway Boat result tests passed');

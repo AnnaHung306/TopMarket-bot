@@ -1,14 +1,13 @@
 import { ChannelType, MessageType, PermissionFlagsBits } from 'discord.js';
 
 // Rebuild from history so a restart cannot silently drop qualifying messages.
-export async function hasMessages({ guild, channelIds, categoryId, userId, start, end, required }) {
+export async function hasMessages({ guild, categoryId, userId, start, end, required, onlyChannelId = null }) {
   let count = 0;
-  const channels = [];
-  for (const id of channelIds) {
-    const channel = await guild.channels.fetch(id);
-    if (!channel || channel.parentId !== categoryId || channel.type !== ChannelType.GuildText) throw Error('DAILY_GROUP_CHANNELS_MISSING');
+  const allChannels = await guild.channels.fetch();
+  const channels = [...allChannels.values()].filter(channel => channel?.parentId === categoryId && channel.type === ChannelType.GuildText && (!onlyChannelId || channel.id === onlyChannelId));
+  if (!channels.length) throw Error('DAILY_GROUP_CHANNELS_MISSING');
+  for (const channel of channels) {
     if (!channel.permissionsFor(guild.members.me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) throw Error('DAILY_GROUP_PERMISSIONS_MISSING');
-    channels.push(channel);
   }
   for (const channel of channels) {
     let before;
