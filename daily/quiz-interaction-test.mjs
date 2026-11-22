@@ -62,3 +62,25 @@ await daily.handle(i);
 assert.match(i.calls.at(-1)[1].content,/已截止/);
 assert.equal(stored,undefined);
 console.log('quiz eligibility and private answer interaction tests passed');
+
+// Public-mode safety checks are simulated locally, without Discord calls.
+const unverified='10000000000000012', botId='10000000000000013';
+const unverifiedRole={permissions:{has:()=>false}};
+const ow=(key,allow=false,deny=false)=>({id:key,allow:{has:()=>allow},deny:{has:()=>deny}});
+const permissions=(viewer)=>({has:()=>viewer!==unverifiedRole});
+const activityChannel={id:channelId,type:ChannelType.GuildText,permissionsFor:permissions,permissionOverwrites:{cache:new Map([[guildId,ow(guildId,true)],[unverified,ow(unverified,false,true)]])}};
+const moderatorChannel={id:modId,type:ChannelType.GuildText,permissionsFor:permissions,permissionOverwrites:{cache:new Map([[guildId,ow(guildId,false,true)],[role,ow(role,true)]])}};
+let isUnverified=true, fetches=0, revokeOnFetch=Infinity;
+const publicGuild={...guild,id:guildId,roles:{cache:new Map([[unverified,unverifiedRole]]),fetch:async()=>unverifiedRole},members:{me:{},fetch:async()=>({roles:{cache:{has:()=>isUnverified || ++fetches>=revokeOnFetch}}})},channels:{fetch:async id=>id===channelId?activityChannel:id===modId?moderatorChannel:new Collection([['chat',chat]])}};
+const publicDaily=createDailyModule({client:{user:{id:botId},guilds:{fetch:async()=>publicGuild}},sql,env:{...env,DAILY_PUBLIC_ACTIVITY_ENABLED:'true',DAILY_UNVERIFIED_ROLE_ID:unverified},now:()=>time,logger:{error:(...args)=>{throw Error(String(args));}}});
+time=start+60000; stored=undefined;
+i=interaction(`daily:quiz:${day}:join`); i.guild=publicGuild;
+await publicDaily.handle(i);
+assert.match(i.calls.at(-1)[1].content,/尚未完成伺服器驗證/);
+assert.equal(i.calls.at(-1)[1].components.length,0);
+isUnverified=false; fetches=0; revokeOnFetch=2;
+i=interaction(`daily:quiz:${day}:join`); i.guild=publicGuild;
+await publicDaily.handle(i);
+assert.match(i.calls.at(-1)[1].content,/尚未完成伺服器驗證/,'role changes during eligibility checks must fail closed');
+assert.equal(stored,undefined);
+console.log('public quiz verification safety tests passed');

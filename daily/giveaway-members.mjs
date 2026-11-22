@@ -23,8 +23,8 @@ export async function qualifyingMembers({guild,categoryId,start,end,threshold=20
 
 // Disabled unless explicitly configured. Rollover only touches recorded grants
 // after each registered old draw is confirmed; no member enumeration intent.
-export function createMemberGiveawayQualification({guildId,roleId,boatId,channelId,categoryId,client,sql,now=Date.now,onlyChannelId=null,collect=qualifyingMembers}) {
-  if (![guildId,roleId,boatId,channelId,categoryId].every(v=>idPattern.test(v||''))) throw Error('DAILY_GIVEAWAY_CONFIGURATION_INVALID');
+export function createMemberGiveawayQualification({guildId,roleId,boatId,channelId,categoryId,client,sql,now=Date.now,onlyChannelId=null,unverifiedRoleId=null,collect=qualifyingMembers}) {
+  if (![guildId,roleId,boatId,channelId,categoryId].every(v=>idPattern.test(v||'')) || (unverifiedRoleId && !idPattern.test(unverifiedRoleId))) throw Error('DAILY_GIVEAWAY_CONFIGURATION_INVALID');
   let running=false;
   async function initialize() {
     await sql`CREATE TABLE IF NOT EXISTS daily_giveaway_role_grants (user_id text PRIMARY KEY, activity_day text NOT NULL)`;
@@ -59,11 +59,12 @@ export function createMemberGiveawayQualification({guildId,roleId,boatId,channel
       // the member no longer appears in the current message scan.
       for(const row of grants.filter(row=>row.activity_day===day)) {
         const [cancelled]=await sql`SELECT 1 FROM daily_disqualifications WHERE day=${day} AND kind='giveaway' AND user_id=${row.user_id}`;
-        if(!cancelled) continue;
+        if(!cancelled && !unverifiedRoleId) continue;
         let member;
         try { member=await guild.members.fetch({user:row.user_id,force:true}); }
         catch(error) { if(error.code!==10007) throw error; }
-        if(member?.roles.cache.has(roleId)) await member.roles.remove(roleId,'Moderator cancelled giveaway eligibility');
+        if (member && !member.roles?.cache) throw Error('DAILY_GIVEAWAY_MEMBER_ROLES_UNAVAILABLE');
+        if(member?.roles.cache.has(roleId) && (cancelled || (unverifiedRoleId && member.roles.cache.has(unverifiedRoleId)))) await member.roles.remove(roleId,cancelled ? 'Moderator cancelled giveaway eligibility' : 'Member is not verified');
       }
       const [currentSession]=await sql`SELECT channel_id,message_id FROM daily_giveaway_sessions WHERE day=${day}`;
       if(!currentSession || currentSession.channel_id!==channelId) throw Error('DAILY_GIVEAWAY_SESSION_UNREGISTERED');
@@ -79,7 +80,8 @@ export function createMemberGiveawayQualification({guildId,roleId,boatId,channel
         const [cancelled]=await sql`SELECT 1 FROM daily_disqualifications WHERE day=${day} AND kind='giveaway' AND user_id=${userId}`;
         if(cancelled) continue;
         const member=await guild.members.fetch({user:userId,force:true});
-        if(member.user.bot || !member.manageable) continue;
+        if (!member.roles?.cache) throw Error('DAILY_GIVEAWAY_MEMBER_ROLES_UNAVAILABLE');
+        if(member.user.bot || !member.manageable || (unverifiedRoleId && member.roles.cache.has(unverifiedRoleId))) continue;
         const [grant]=await sql`SELECT activity_day FROM daily_giveaway_role_grants WHERE user_id=${userId}`;
         if(member.roles.cache.has(roleId)) {
           if(!grant || grant.activity_day!==day) throw Error('DAILY_GIVEAWAY_UNTRACKED_ROLE');

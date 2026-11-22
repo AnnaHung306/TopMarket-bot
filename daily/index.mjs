@@ -12,6 +12,7 @@ import { drawWinners } from './draw.mjs';
 import { mayManageActivity, cancelCommand } from './moderator-access.mjs';
 import { recordCancellation, removeGiveawayRole } from './moderation-cancellation.mjs';
 import { quizParticipantIncidents, reviewPages } from './participant-review.mjs';
+import { assertActivityChannelPolicy } from './channel-policy.mjs';
 export { eventTimes } from './time.mjs';
 
 const EPHEMERAL = MessageFlags.Ephemeral;
@@ -46,11 +47,15 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
   const moderatorRoleId = ids('DAILY_MODERATOR_ROLE_ID', env.DAILY_MODERATOR_ROLE_ID);
   const botRoleId = ids('DAILY_BOT_ROLE_ID', env.DAILY_BOT_ROLE_ID);
   const giveawayBoatId = ids('DAILY_GIVEAWAY_BOAT_ID', env.DAILY_GIVEAWAY_BOAT_ID);
+  const publicEnabled = env.DAILY_PUBLIC_ACTIVITY_ENABLED === 'true';
+  const unverifiedRoleId = publicEnabled ? ids('DAILY_UNVERIFIED_ROLE_ID',env.DAILY_UNVERIFIED_ROLE_ID) : null;
+  if(publicEnabled && privateTestChannelId) throw Error('DAILY_PUBLIC_TEST_CONFIGURATION_INVALID');
   const snapshotsEnabled = env.DAILY_SNAPSHOT_ENABLED === 'true';
   const memberGiveawayEnabled = env.DAILY_GIVEAWAY_ENABLED === 'true';
   if (memberGiveawayEnabled && env.DAILY_GIVEAWAY_TEST_ENABLED === 'true') throw Error('DAILY_GIVEAWAY_MODES_CONFLICT');
+  if (publicEnabled && env.DAILY_GIVEAWAY_TEST_ENABLED === 'true') throw Error('DAILY_PUBLIC_TEST_CONFIGURATION_INVALID');
   const giveawayQualification = memberGiveawayEnabled ? createMemberGiveawayQualification({
-    guildId,roleId:env.DAILY_GIVEAWAY_ROLE_ID,boatId:giveawayBoatId,channelId,categoryId:groupCategoryId,client,sql,now,onlyChannelId:privateTestChannelId,
+    guildId,roleId:env.DAILY_GIVEAWAY_ROLE_ID,boatId:giveawayBoatId,channelId,categoryId:groupCategoryId,client,sql,now,onlyChannelId:privateTestChannelId,unverifiedRoleId,
   }) : env.DAILY_GIVEAWAY_TEST_ENABLED === 'true' ? createGiveawayQualification({
     guildId, roleId: env.DAILY_GIVEAWAY_ROLE_ID, testerId: env.DAILY_GIVEAWAY_TEST_USER_ID, boatId:giveawayBoatId, testChannelId:modChannelId,
     channelIds: groupChannelIds, categoryId: groupCategoryId, client, sql, now,
@@ -92,17 +97,9 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
     if (!channel || channel.type !== ChannelType.GuildText) throw Error('DAILY_CHANNEL_INVALID');
     if (!modChannel || modChannel.type !== ChannelType.GuildText) throw Error('DAILY_MOD_CHANNEL_INVALID');
     if (!modChannel.permissionsFor(guild.members.me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory])) throw Error('DAILY_MOD_CHANNEL_PERMISSIONS_MISSING');
-    if (!modChannel.permissionOverwrites.cache.get(guild.id)?.deny.has(PermissionFlagsBits.ViewChannel) || !modChannel.permissionOverwrites.cache.get(moderatorRoleId)?.allow.has(PermissionFlagsBits.ViewChannel)) throw Error('DAILY_PRIVATE_MOD_CHANNEL_REQUIRED');
     if (!channel.permissionsFor(guild.members.me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory])) throw Error('DAILY_CHANNEL_PERMISSIONS_MISSING');
-    // The test channel must stay private until the user explicitly releases it.
-    const everyone = channel.permissionOverwrites.cache.get(guild.id);
-    const moderator = channel.permissionOverwrites.cache.get(moderatorRoleId);
-    if (!everyone?.deny.has(PermissionFlagsBits.ViewChannel) || !moderator?.allow.has(PermissionFlagsBits.ViewChannel)) throw Error('DAILY_PRIVATE_CHANNEL_REQUIRED');
-    for (const overwrite of channel.permissionOverwrites.cache.values()) {
-      const allowed = [moderatorRoleId, botRoleId, client.user.id, giveawayBoatId];
-      if (privateTestChannelId && giveawayQualification) allowed.push(env.DAILY_GIVEAWAY_TEST_USER_ID);
-      if (!allowed.includes(overwrite.id) && overwrite.allow.has(PermissionFlagsBits.ViewChannel)) throw Error('DAILY_PRIVATE_CHANNEL_EXTRA_ACCESS');
-    }
+    if (publicEnabled) await guild.roles.fetch(unverifiedRoleId);
+    assertActivityChannelPolicy({guild,channel,modChannel,moderatorRoleId,botRoleId,botId:client.user.id,boatId:giveawayBoatId,publicEnabled,unverifiedRoleId,testUserId:privateTestChannelId && giveawayQualification ? env.DAILY_GIVEAWAY_TEST_USER_ID : null});
     return { guild, channel, modChannel };
   }
   // Reconstruct counts from the actual message history at admission, so reconnects
@@ -336,7 +333,7 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
     }
     if (interaction.isChatInputCommand() && interaction.commandName === 'dailyquiz') {
       if (!interaction.member?.roles?.cache?.has(moderatorRoleId)) return interaction.reply({ content:'只有 MOD 可設定題目。', flags:EPHEMERAL });
-      if (interaction.channelId !== channelId) return interaction.reply({content:'請在指定私人頻道設定題目。',flags:EPHEMERAL});
+      if (interaction.channelId !== (publicEnabled ? modChannelId : channelId)) return interaction.reply({content:'請在指定私人頻道設定題目。',flags:EPHEMERAL});
       const opts = interaction.options, day = opts.getString('date',true);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(midnight(day)) || dateKey(midnight(day)) !== day || !isActivityDay(day) || now() >= eventTimes(day,'quiz').start)
         return interaction.reply({content:'日期無效、為週末，或該日期的出題時間已到。',flags:EPHEMERAL});
@@ -358,16 +355,26 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
     const [existing] = await sql`SELECT 1 FROM daily_entries WHERE day=${day} AND kind=${kind} AND user_id=${interaction.user.id}`;
     if (existing) return interaction.editReply({content:'你已經回答過，答案不能修改。',components:[]});
     try {
+      if (publicEnabled) await guildAndChannel();
+      const verified = async () => {
+        if (!publicEnabled) return true;
+        const member = await interaction.guild.members.fetch({user:interaction.user.id,force:true});
+        if (!member.roles?.cache) throw Error('DAILY_MEMBER_ROLES_UNAVAILABLE');
+        return !member.roles.cache.has(unverifiedRoleId);
+      };
+      if (!await verified()) return interaction.editReply({content:'目前尚未完成伺服器驗證，無法參加活動。',components:[]});
       const [disqualified] = await sql`SELECT 1 FROM daily_disqualifications WHERE day=${day} AND kind=${kind} AND user_id=${interaction.user.id}`;
       if (disqualified) return interaction.editReply({content:'本場參賽資格已被取消，請聯絡 MOD。',components:[]});
       if (!await eligible(interaction.guild,interaction.user.id,10,time,start)) return interaction.editReply({content:'目前尚未達到本場答題的發言門檻。',components:[]});
       if (action === 'join') {
         if (now() >= end) return interaction.editReply({content:'活動已截止。',components:[]});
+        if (!await verified()) return interaction.editReply({content:'目前尚未完成伺服器驗證，無法參加活動。',components:[]});
         if (!Array.isArray(event.options) || event.options.length !== 4 || event.options.some(x => typeof x !== 'string')) throw Error('DAILY_QUIZ_OPTIONS_INVALID');
         return interaction.editReply({content:`**${event.question}**\n${event.options.map((x,i)=>`${'ABCD'[i]}. ${x}`).join('\n')}\n\n選擇後立即送出，無法更改。`,components:answerButtons(day,interaction.user.id,event.message_id)});
       }
       return await locked(`${kind}:${day}`, async () => {
         if (now() >= end) return interaction.editReply({content:'活動已截止。',components:[]});
+        if (!await verified()) return interaction.editReply({content:'目前尚未完成伺服器驗證，無法參加活動。',components:[]});
         const [added] = await sql`INSERT INTO daily_entries(day,kind,user_id,answer) SELECT ${day},${kind},${interaction.user.id},${answer} WHERE EXISTS (SELECT 1 FROM daily_events WHERE day=${day} AND kind=${kind} AND result IS NULL) AND NOT EXISTS (SELECT 1 FROM daily_disqualifications WHERE day=${day} AND kind=${kind} AND user_id=${interaction.user.id}) ON CONFLICT DO NOTHING RETURNING user_id`;
         return interaction.editReply({content:added ? `已提交答案 ${answer}，本場不能修改。` : '你已回答、資格已取消或活動已結束。',components:[]});
       });
