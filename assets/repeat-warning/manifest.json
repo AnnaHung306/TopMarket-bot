@@ -1,0 +1,20 @@
+[
+  {
+    "file": "01.gif",
+    "source": "https://tenor.com/zh-TW/view/cats-fbi-police-police-cat-fbi-cat-gif-1256429038097351888",
+    "media": "https://media.tenor.com/EW-7jaVHRNAAAAAM/cats-fbi.gif",
+    "bytes": 1214181,
+    "frames": 80,
+    "sha256": "d816e81a418b23723354e89658f1e79bf13f49b26f60cb721552adfa1ff537bf",
+    "license": "未確認"
+  },
+  {
+    "file": "02.gif",
+    "source": "https://tenor.com/zh-TW/view/realkimroro-police-gif-23236998",
+    "media": "https://media1.tenor.com/m/wPex1JNaw8MAAAAC/realkimroro-police.gif",
+    "bytes": 3067270,
+    "frames": 34,
+    "sha256": "fdd34a09f8772f7d40319178ec3a2c4692c3a44b95945d036e0e78d0c8e44819",
+    "license": "未確認"
+  }
+]
