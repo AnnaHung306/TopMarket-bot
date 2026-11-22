@@ -86,6 +86,7 @@ try {
   delete process.env.DISCORD_WALLET_CHANNEL_ID;
 }
 
+process.env.DISCORD_WALLET_CHANNEL_ID = 'allowed-channel';
 const denied = interaction();
 denied.channel.threads.create = async () => { throw Object.assign(Error('missing thread permission'), { code: 50013 }); };
 const originalError = console.error;
@@ -162,3 +163,4 @@ for (const request of [first, second, ...others]) {
   assert.match(request.edits.at(-1), /已完成/);
 }
 console.log('Discord guard, failure recovery and concurrent delivery tests passed');
+delete process.env.DISCORD_WALLET_CHANNEL_ID;

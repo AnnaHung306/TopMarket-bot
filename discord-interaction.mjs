@@ -54,9 +54,13 @@ export function createWalletHandler({ queryWallet, renderPoster, formatReport, c
     const startedAt = performance.now();
     const inThread = interaction.channel?.isThread?.() ?? false;
     const allowedChannel = process.env.DISCORD_WALLET_CHANNEL_ID?.trim();
+    if (!allowedChannel) {
+      await interaction.reply({ content: '錢包查詢頻道尚未完成設定，請聯絡 MOD。', flags: MessageFlags.Ephemeral });
+      return;
+    }
     const inToolbox = interaction.channelId === allowedChannel ||
       (inThread && interaction.channel.parentId === allowedChannel);
-    if (allowedChannel && !inToolbox) {
+    if (!inToolbox) {
       await interaction.reply({ content: '請在指定的 MOD 工具箱頻道或其討論串使用此指令。', flags: MessageFlags.Ephemeral });
       return;
     }
