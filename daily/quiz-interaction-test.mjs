@@ -14,11 +14,26 @@ const sql=async(parts,...values)=>{
   if(q.startsWith('SELECT message_id,result,question,options')) return [event];
   if(q.startsWith('SELECT 1 FROM daily_entries')) return stored?[stored]:[];
   if(q.startsWith('SELECT 1 FROM daily_disqualifications')) return disqualified?[{}]:[];
+  if(q.startsWith('INSERT INTO daily_quiz_questions')) return [];
   if(q.startsWith('INSERT INTO daily_entries')) {if(stored||disqualified)return [];stored={answer:values[3]};return [{user_id:user}];}
   throw Error(`Unexpected query ${q}`);
 };
 const env={DAILY_GUILD_ID:guildId,DAILY_CHANNEL_ID:channelId,DAILY_MOD_CHANNEL_ID:modId,DAILY_GROUP_CATEGORY_ID:category,DAILY_MODERATOR_ROLE_ID:role,DAILY_BOT_ROLE_ID:botRole,DAILY_GIVEAWAY_BOAT_ID:boat};
 const daily=createDailyModule({client:{},sql,env,now:()=>time,logger:{error:(...args)=>{throw Error(String(args));}}});
+assert.equal(daily.commands.find(command=>command.name==='dailyquiz').default_member_permissions,'0');
+for (const rejected of [
+  {guildId,channelId:modId,member:{roles:{cache:new Map()}}},
+  {guildId,channelId,member:{roles:{cache:new Map([[role,true]])}}},
+  {guildId:'10000000000000099',channelId:modId,member:{roles:{cache:new Map([[role,true]])}}},
+]) {
+  let reply;
+  await daily.handle({...rejected,commandName:'dailyquiz',isChatInputCommand:()=>true,reply:async value=>{reply=value;}});
+  if (rejected.guildId !== guildId) assert.equal(reply,undefined);
+  else assert.match(reply.content,/僅限 MOD/);
+}
+let modReply;
+await daily.handle({guildId,channelId:modId,member:{roles:{cache:new Map([[role,true]])}},user:{id:user},commandName:'dailyquiz',isChatInputCommand:()=>true,options:{getString:key=>({date:'2026-11-23',question:'測試題',a:'一',b:'二',c:'三',d:'四',correct:'A'})[key]},reply:async value=>{modReply=value;}});
+assert.match(modReply.content,/已設定 2026-11-23/);
 function interaction(customId,who=user,messageId=source) {
   const calls=[];
   return {guildId,channelId,guild,user:{id:who},message:{id:messageId},customId,isChatInputCommand:()=>false,isButton:()=>true,
