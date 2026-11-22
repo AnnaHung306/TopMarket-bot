@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createChannelScope } from './discord-channel-scope.mjs';
 
-const GUILD = '1541304826674155550';
-const TEST_CHANNEL = '1572821315507855430';
+const privateScope = createChannelScope();
 const assets = JSON.parse(readFileSync(new URL('./assets/keyword-replies/manifest.json', import.meta.url), 'utf8'));
 const replies = {
   morning: '早安喵~ 新的一天又開始了！',
@@ -12,8 +12,8 @@ const replies = {
 const files = Object.fromEntries(Object.keys(replies).map(group => [group, assets.filter(a => a.group === group)]));
 if (files.morning.length !== 5 || files.opening.length !== 5 || files.loss.length !== 3) throw Error('Keyword GIF manifest is incomplete');
 
-export function keywordFor(message) {
-  if (message.guildId !== GUILD || message.channelId !== TEST_CHANNEL || message.author?.bot || message.webhookId || message.system ||
+export function keywordFor(message, inScope = privateScope) {
+  if (!inScope(message) || message.author?.bot || message.webhookId || message.system ||
       !/^\d{1,20}$/u.test(message.author?.id || '') || typeof message.content !== 'string') return null;
   const text = message.content.normalize('NFKC').replace(/https?:\/\/\S+|www\.\S+|<@!?\d+>/giu, ' ').trim();
   // Only a direct, first-person statement that the sender has lost money.
@@ -23,9 +23,9 @@ export function keywordFor(message) {
   return null;
 }
 
-export function createKeywordReplyHandler({ canAct = async () => true, random = Math.random } = {}) {
+export function createKeywordReplyHandler({ canAct = async () => true, random = Math.random, inScope = privateScope } = {}) {
   return async message => {
-    const group = keywordFor(message);
+    const group = keywordFor(message, inScope);
     if (!group || !await canAct()) return;
     const selected = files[group][Math.floor(random() * files[group].length)];
     if (!selected || !/^\d{2}\.gif$/u.test(selected.file)) throw Error('Invalid keyword GIF selection');

@@ -1,21 +1,21 @@
-// Private moderator test only. No messages are removed and no roles are changed.
+// Scope is private by default. Repeat warnings never remove messages or roles.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-const GUILD_ID = '1541304826674155550';
-const CHANNEL_ID = '1572821315507855430';
+import { createChannelScope, moderatorChannel } from './discord-channel-scope.mjs';
+const privateScope = createChannelScope();
 const WINDOW_MS = 30_000;
 const COOLDOWN_MS = 300_000;
 const MAX_ENTRIES = 1000;
 
 const assets = JSON.parse(readFileSync(new URL('./assets/repeat-warning/manifest.json', import.meta.url), 'utf8'));
 if (assets.length !== 2 || assets.some(a => !/^\d{2}\.gif$/u.test(a.file))) throw Error('Repeat warning GIF manifest invalid');
-export function createRepeatWarningHandler({ canAct = async () => true, recordDetection, now = Date.now, random = Math.random } = {}) {
+export function createRepeatWarningHandler({ canAct = async () => true, recordDetection, now = Date.now, random = Math.random, inScope = privateScope, getModChannel = moderatorChannel } = {}) {
   if (typeof recordDetection !== 'function') throw Error('Repeat detection storage is required');
   const records = new Map();
   const cooldowns = new Map();
   const saving = new Set();
   return async message => {
-    if (message.guildId !== GUILD_ID || message.channelId !== CHANNEL_ID || message.author?.bot ||
+    if (!inScope(message) || message.author?.bot ||
         message.webhookId || message.system || !/^\d{1,20}$/u.test(message.author?.id || '') ||
         typeof message.content !== 'string') return;
     const content = message.content.trim();
@@ -38,8 +38,9 @@ export function createRepeatWarningHandler({ canAct = async () => true, recordDe
     if (!['total','giveaway','quiz'].every(key => Number.isSafeInteger(counts?.[key]) && counts[key] >= 0) || counts.total < 1) throw Error('Invalid repeat detection count');
     if (!await canAct()) return;
     cooldowns.set(message.author.id, time + COOLDOWN_MS);
-    await message.channel.send({
-      content: `🔎 疑似刷頻，待 MOD 審核\n用戶：<@${message.author.id}>\nGiveaway 排程時間窗 <t:${Math.floor(counts.giveawayWindow.start/1000)}:F> 至 <t:${Math.floor(counts.giveawayWindow.end/1000)}:F>：${counts.giveaway} 次\n答題排程時間窗 <t:${Math.floor(counts.quizWindow.start/1000)}:F> 至 <t:${Math.floor(counts.quizWindow.end/1000)}:F>：${counts.quiz} 次\n歷次偵測：${counts.total} 次（包含本次）\n以上依排程時間統計，未確認活動是否實際開場；疑似偵測不代表已確認違規。\n[查看觸發訊息](https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id})`,
+    const modChannel = await getModChannel(message);
+    await modChannel.send({
+      content: `🔎 疑似刷頻：累計偵測 ${counts.total} 次\n[查看訊息](https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id})`,
       allowedMentions: { parse: [] },
     });
     try {

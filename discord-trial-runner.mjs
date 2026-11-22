@@ -9,6 +9,7 @@ import { acquireTrialLock } from './discord-trial-lock.mjs';
 import { startDailySummary } from './discord-daily-summary.mjs';
 import { createSummaryLifecycle } from './discord-summary-lifecycle.mjs';
 import { createSummaryCommand } from './discord-summary-command.mjs';
+import { createChannelScope } from './discord-channel-scope.mjs';
 import pg from 'pg';
 
 if (!process.env.DISCORD_TOKEN?.trim()) throw new Error('DISCORD_TOKEN is required');
@@ -19,6 +20,8 @@ if (!lock) {
 }
 const scamTestEnabled = process.env.DISCORD_SCAM_TEST_ENABLED === 'true';
 const summaryEnabled = process.env.DISCORD_DAILY_SUMMARY_ENABLED === 'true';
+const communityEnabled = process.env.DISCORD_COMMUNITY_MODERATION_ENABLED === 'true';
+const inScope = createChannelScope({ communityEnabled });
 const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent];
 const client = new Client({ intents });
 const incidentPool = new pg.Pool({ connectionString: process.env.TRIAL_DATABASE_URL });
@@ -36,9 +39,9 @@ client.once('clientReady', () => {
   if (!process.env.OPENAI_API_KEY?.trim()) { console.log('Daily summary disabled: API key is missing'); return; }
   summary.start();
 });
-client.on('messageCreate', createKeywordReplyHandler({ canAct: lock.canAct }));
+client.on('messageCreate', createKeywordReplyHandler({ canAct: lock.canAct, inScope }));
 if (summaryEnabled && process.env.OPENAI_API_KEY?.trim()) client.on('messageCreate', createSummaryCommand({ client, apiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_SUMMARY_MODEL?.trim() || 'gpt-6-luna', canAct: lock.canAct }));
-client.on('messageCreate', createRepeatWarningHandler({ canAct: lock.canAct, recordDetection: async incident => {
+client.on('messageCreate', createRepeatWarningHandler({ canAct: lock.canAct, inScope, recordDetection: async incident => {
   await incidentStore.initialize();
   await incidentStore.record(incident);
   const giveaway = latestScheduledWindow(incident.detectedAt, 10);
@@ -46,7 +49,7 @@ client.on('messageCreate', createRepeatWarningHandler({ canAct: lock.canAct, rec
   const counts = await incidentStore.countDetections({ ...incident, giveaway, quiz });
   return { ...counts, giveawayWindow: giveaway, quizWindow: quiz };
 } }));
-if (scamTestEnabled) client.on('messageCreate', createScamTestHandler({ canAct: lock.canAct }));
+if (scamTestEnabled) client.on('messageCreate', createScamTestHandler({ canAct: lock.canAct, inScope }));
 const heartbeat = setInterval(async () => {
   if (shuttingDown || await lock.canAct()) return;
   console.log(lock.superseded ? 'New private channel trial instance is taking over' : 'Trial coordination connection lost; stopping this instance');

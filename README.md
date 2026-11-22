@@ -16,7 +16,7 @@ Railway 日誌的 `wallet_query` 會記錄查詢時間、原生分頁數、RPC H
 
 需要 Node.js 22+、Discord Bot、Alchemy Base API key，以及 PostgreSQL 資料庫。使用 Railway PostgreSQL 時設定 `DATABASE_DRIVER=postgres` 並將 `DATABASE_URL` 指向資料庫服務；未設定此選項時沿用 Neon。設定 `DISCORD_TOKEN`、`DISCORD_CLIENT_ID`、`ALCHEMY_API_KEY`、`DATABASE_URL`；可選 `DISCORD_GUILD_ID`，讓指令在指定伺服器較快出現。設定 `DISCORD_WALLET_CHANNEL_ID` 後，其他頻道的 `/wallet` 會立即私密拒絕。Token 與資料庫連線字串應保存為 Railway 變數，切勿提交或貼在公開訊息中。
 
-1. 在 Discord Developer Portal 建立 Application 與 Bot，取得 Application ID 和 Bot Token。使用 OAuth2 URL Generator 勾選 `bot` 和 `applications.commands`，並給機器人「檢視頻道」「傳送訊息」「建立公開討論串」「在討論串傳送訊息」「附加檔案」權限，再邀請到伺服器。這個機器人不需要訊息內容等 privileged intents。
+1. 在 Discord Developer Portal 建立 Application 與 Bot，取得 Application ID 和 Bot Token。使用 OAuth2 URL Generator 勾選 `bot` 和 `applications.commands`，並給機器人「檢視頻道」「傳送訊息」「建立公開討論串」「在討論串傳送訊息」「附加檔案」權限，再邀請到伺服器。錢包功能本身不需要訊息內容等 privileged intents；私人聊天室監測服務需啟用 Message Content Intent。
 2. 在 Railway 建立從本儲存庫部署的服務，設定上述變數。Railway 使用 `npm start` 執行常駐程序；請維持單一實例。可使用 Railway PostgreSQL，並以服務參照提供 `DATABASE_URL`。不需要公開網域或 HTTP 服務。
 3. 若使用私人 MOD 頻道，讓 `@everyone` 無法檢視頻道，允許 MOD 身分組，並單獨允許機器人檢視、發言、建立公開討論串與附加檔案；將頻道 ID 設為 `DISCORD_WALLET_CHANNEL_ID`。置頂使用說明後，等待部署成功，在該頻道輸入 `/wallet` 並填入 Base 地址。若使用全域指令，Discord 的指令同步可能需要一些時間。
 
@@ -40,9 +40,17 @@ PostgreSQL 每個已查錢包保存一列收支累計、已完整處理的區塊
 舊的全站回補已停止，既有資料保留。維護用的 `npm run sync:history` 是獨立工具，不會從網站啟動。
 
 `npm run build` 和 `npm run validate` 驗證原可攜式 Worker 工件。網站只讀 Base，收入為已識別款項。
+# 社群聊天室回覆與審核（預設僅私人頻道）
+
+`discord-trial-runner.mjs` 的關鍵字回覆、疑似刷頻及詐騙偵測預設只處理私人 `#mod-only`。`DISCORD_COMMUNITY_MODERATION_ENABLED=true` 且台灣時間 2026-11-23 09:00 起，才額外處理 `#general-chat` 與 `#chinese`；其他頻道不在範圍。設定預設為 false，推送或部署程式本身不會開放一般頻道。
+
+疑似刷頻與詐騙的 MOD 通知固定送往 `#mod-only`；刷頻警告會在來源頻道回覆使用者，不自動刪訊息或取消資格。詐騙偵測若無法確認 MOD 頻道可接收訊息，停止處理該訊息並記錄錯誤；分類查詢無法完成時，會提醒 MOD 人工檢查，未查到不代表安全。詐騙分類可能有誤，MOD 應核對。
+
+連結檢查僅把網域傳給 Cloudflare 家庭版及惡意軟體 DNS，並不傳網址路徑、查詢參數或 Discord ID；依使用者授權，將來開放的一般頻道網域也會進行查詢。單純使用 HTTP 或貼上一般連結不會自動刪除。啟用前須確認機器人在來源頻道的讀取、發送與管理訊息權限，及私人 MOD 頻道的讀取與發送權限。
+
 # 每日聊天室摘要（僅供私人 MOD 測試，預設關閉）
 
-`discord-trial-runner.mjs` 可在每天台灣時間 23:00 之後，讀取從前一天 23:00（含）至當天 23:00（不含）的 `#chinese` 訊息，經 OpenAI Responses API 產生事件、群眾情緒及待確認事項的繁體中文草稿，並傳至 `#bot-mod-test`。來源及目的地 ID 固定，不會往一般聊天頻道發送；Bot 和 Webhook 不納入。圖片、附件與討論串內容不會被解析。內容超過 10,000 則或 200,000 字元時會停止並提醒，不會默默截斷。此為暫定文案，使用者稍後可調整。
+`discord-trial-runner.mjs` 可在每天台灣時間 10:00 之後，讀取從前一天 10:00（含）至當天 10:00（不含）的 `#chinese` 訊息，經 OpenAI Responses API 產生事件、群眾情緒及待確認事項的繁體中文草稿，並傳至 `#mod-only`。來源及目的地 ID 固定，不會往一般聊天頻道發送；Bot 和 Webhook 不納入。圖片、附件與討論串內容不會被解析。內容超過 10,000 則或 200,000 字元時會停止並提醒，不會默默截斷。此為暫定文案，使用者稍後可調整。
 
 人類使用者的每則訊息都按 Discord 使用者 ID 在程式內分別計數，包括只有附件或表情的訊息；報告只在聊天室以 Markdown 列出目前的伺服器顯示暱稱和次數，不顯示 ID 或帳號。相同暱稱加上「同名」序號；若帳號無法取得顯示名稱，標示「暱稱無法取得」，不猜測姓名。這些統計由程式計算，不交給模型推估；發言者身分欄位不送往 OpenAI，但文字內可能包含身分資料。已刪除或機器人無法讀取的訊息、討論串訊息不計入；情緒則是基於文字語氣的推測，不能代表每個人的心理狀態。
 
@@ -54,8 +62,8 @@ PostgreSQL 每個已查錢包保存一列收支累計、已完整處理的區塊
 
 啟用前須另行確認持續讀取頻道及將訊息傳送 OpenAI 的授權，並確認 API 費用與接收權限；不得自行部署或啟用。啟用需設定 `DISCORD_DAILY_SUMMARY_ENABLED=true`、`OPENAI_API_KEY`、`TRIAL_DATABASE_URL`，可選 `OPENAI_SUMMARY_MODEL`（預設 `gpt-6-luna`）。未啟用或沒有金鑰時不呼叫 API；現有問候及偵測功能可繼續。請不要將金鑰放進版本庫。
 
-在已授權的私人驗證期間，可暫時設定 `DISCORD_DAILY_SUMMARY_TEST_NOW=true` 於啟動時整理最近一個已結束的時段；會使用同一份每日去重紀錄，因此不會重複發送已產生的日期。確認收件後將其改回 `false`，不改變每日 23:00 的排程。
+在已授權的私人驗證期間，可暫時設定 `DISCORD_DAILY_SUMMARY_TEST_NOW=true` 於啟動時整理最近一個已結束的時段；會使用同一份每日去重紀錄，因此不會重複發送已產生的日期。確認收件後將其改回 `false`，不改變每日 10:00 的排程。
 
-啟用時在既有 PostgreSQL 建立 `discord_daily_summary_runs`，僅記錄日期及 claimed/sent/failed/uncertain 狀態，不儲存聊天內容。每個日期只嘗試一次；若在發送前後中斷，狀態可能不確定，需 MOD 查核後人工處理，不自動重送以避免重複。機器人在 23:00 至 23:59 間啟動可執行當日摘要；若該小時整段離線則不會自動補送。
+啟用時在既有 PostgreSQL 建立 `discord_daily_summary_runs`，僅記錄日期及 claimed/sent/failed/uncertain 狀態，不儲存聊天內容。每個日期只嘗試一次；若在發送前後中斷，狀態可能不確定，需 MOD 查核後人工處理，不自動重送以避免重複。機器人在 10:00 至 10:59 間啟動可執行當日摘要；若該小時整段離線則不會自動補送。
 
 送到 OpenAI 的內容會移除 Discord 使用者標記及常見 email，但仍可能包含其他個資；請依社群隱私規則決定能否使用。使用 `store: false`，不代表 OpenAI 不保留濫用監控紀錄。API 失敗不以假摘要代替，會記錄錯誤並盡力在 MOD 頻道提醒；沒有提供金鑰前只能做隔離測試，無法宣稱實際服務驗收。
