@@ -1,6 +1,7 @@
 import { loadEnvFile } from 'node:process';
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
-import { database } from './worker/history/store.js';
+import { database, postgresSql } from './worker/history/store.js';
+import pg from 'pg';
 import { formatReport } from './discord-report.mjs';
 import { createWalletHandler } from './discord-interaction.mjs';
 import { createWalletQuery } from './discord-wallet-query.mjs';
@@ -20,7 +21,12 @@ const command = new SlashCommandBuilder().setName('wallet').setDescription('æŸ¥è
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 let daily;
 if (process.env.DAILY_ENABLED === 'true') {
-  try { daily = createDailyModule({ client, sql: database() }); }
+  try {
+    const sql = database();
+    const incidentSql = process.env.DAILY_INCIDENT_DATABASE_URL?.trim()
+      ? postgresSql(new pg.Pool({connectionString:process.env.DAILY_INCIDENT_DATABASE_URL})) : sql;
+    daily = createDailyModule({ client, sql, incidentSql });
+  }
   catch (error) { console.error('DAILY_CONFIGURATION_FAILED', error.message); }
 }
 const queryWallet = createWalletQuery((address, afterBlock) => walletCachePage(database(), address, afterBlock));
