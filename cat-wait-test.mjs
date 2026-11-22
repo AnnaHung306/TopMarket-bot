@@ -4,12 +4,14 @@ import { createHash } from 'node:crypto';
 import { createWalletHandler } from './discord-interaction.mjs';
 
 const entries = JSON.parse(await readFile(new URL('./assets/tenor-cat-wait/manifest.json', import.meta.url), 'utf8'));
+process.env.DISCORD_WALLET_CHANNEL_ID = 'allowed-channel';
 assert.deepEqual(entries.map(entry => entry.file).sort(), ['cat-01.gif', 'cat-03.gif', 'cat-05.gif', 'cat-06.gif', 'cat-11.gif', 'cat-12.gif', 'cat-17.gif', 'cat-18.gif']);
 for (const [index, entry] of entries.entries()) {
   const replies = [], messages = [], edits = [];
   const thread = { async send(payload) { messages.push(payload); return { async edit(text) { edits.push(text); } }; } };
   const interaction = {
     commandName: 'wallet', isChatInputCommand: () => true, options: { getString: () => 'invalid' },
+    channelId: 'allowed-channel',
     user: { id: '123', username: 'test' },
     async deferReply() { this.deferred = true; },
     async editReply(payload) { replies.push(payload); this.replied = true; },
@@ -26,3 +28,4 @@ for (const [index, entry] of entries.entries()) {
   assert.ok(!/https?:\/\//.test(replies[1].content), `${entry.file} exposed an external link`);
 }
 console.log(`PASS: ${entries.length} GIF choices only in the channel reply`);
+delete process.env.DISCORD_WALLET_CHANNEL_ID;
