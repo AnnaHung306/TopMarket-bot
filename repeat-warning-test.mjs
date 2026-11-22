@@ -54,11 +54,13 @@ await assert.rejects(() => store.record({messageId:'10',guildId:'11',channelId:'
 assert.equal(queries.length,2);
 assert.deepEqual(await store.countDetections({guildId:'11',userId:'13',giveaway:{start:0,end:2},quiz:{start:0,end:1}}),{total:2,giveaway:1,quiz:0});
 const sunday = Date.parse('2026-11-22T10:00:00+08:00');
-assert.equal(new Date(latestScheduledWindow(sunday,10).start).toISOString(),'2026-11-22T02:00:00.000Z');
+assert.equal(new Date(latestScheduledWindow(sunday,10).start).toISOString(),'2026-11-20T02:00:00.000Z');
 const mondayMorning = Date.parse('2026-11-23T11:00:00+08:00');
 assert.equal(new Date(latestScheduledWindow(mondayMorning,10).start).toISOString(),'2026-11-23T02:00:00.000Z');
-assert.equal(new Date(latestScheduledWindow(mondayMorning,10).start).toISOString(),'2026-11-23T02:00:00.000Z');
-assert.equal(new Date(latestScheduledWindow(Date.parse('2026-11-23T09:59:59+08:00'),10).start).toISOString(),'2026-11-22T02:00:00.000Z');
+assert.equal(new Date(latestScheduledWindow(Date.parse('2026-11-24T09:59:59+08:00'),10).start).toISOString(),'2026-11-23T02:00:00.000Z');
+assert.equal(latestScheduledWindow(Date.parse('2026-11-24T08:59:59+08:00'),10).end,Date.parse('2026-11-24T08:59:59.001+08:00'));
+assert.equal(latestScheduledWindow(Date.parse('2026-11-24T09:30:00+08:00'),10).end,Date.parse('2026-11-24T09:00:00+08:00'));
+assert.equal(latestScheduledWindow(Date.parse('2026-11-24T10:00:00+08:00'),10).start,Date.parse('2026-11-24T10:00:00+08:00'));
 let failedReply = false;
 const originalError = console.error;
 console.error = () => {};
