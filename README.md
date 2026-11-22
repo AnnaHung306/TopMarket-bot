@@ -6,7 +6,7 @@
 
 Giveaway 由 Giveaway Boat 處理；本程式不得建立、接受或結算 Giveaway。兩項活動預定週一至週五台灣時間 10:00 開始、隔日 09:00 截止結算，隔日 10:00 發 MOD 報告並重置計數；週五的活動週六結算及報告，週末不開新場。每場獎項為 2U 兩名，由 MOD 人工發放。答題資格計算自該場開啟起指定聊天頻道的 10 則訊息，討論串及機器人訊息不計。資格只讀訊息中繼資料，不存訊息內容；已刪除、機器人無權讀取或 Discord 不再提供的訊息不能算入。
 
-MOD 在私人活動頻道使用 `/dailyquiz add`，填寫台灣時間日期、問題、A–D 選項及正確答案；10:00 後不能新增當天的題目。答案在截止前僅回覆提交者本人；每人每場只能提交一次，得獎者從答對者抽出。
+MOD 在私人 `mod-only` 頻道使用 `/dailyquiz add`，填寫台灣時間日期、問題、A–D 選項及正確答案；10:00 後不能新增當天的題目。指令預設只開放管理員，必須在 Discord 的該指令覆寫明確允許 MOD；程式也會檢查伺服器、頻道及 MOD 身分。答案在截止前僅回覆提交者本人；每人每場只能提交一次，得獎者從答對者抽出。
 
 設定 `DAILY_ENABLED=true`、`DAILY_GUILD_ID`、`DAILY_CHANNEL_ID`、`DAILY_MOD_CHANNEL_ID`、`DAILY_GROUP_CATEGORY_ID`、`DAILY_MODERATOR_ROLE_ID`、`DAILY_BOT_ROLE_ID`、`DAILY_GIVEAWAY_BOAT_ID`。計入 Group chat 類別下的文字頻道，包含 `mod-only`，不計討論串；機器人必須能檢視並讀取所列頻道的訊息歷史。私人頻道必須明確拒絕 @everyone 並允許 MOD 和指定機器人；使用者驗收並授權前不開放一般成員。
 

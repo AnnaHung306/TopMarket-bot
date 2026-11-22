@@ -21,6 +21,7 @@ const snowflake = /^\d{17,20}$/;
 const nonceFor = value => createHash('sha256').update(value).digest('hex').slice(0, 24);
 const ids = (name, value) => { if (!snowflake.test(value || '')) throw Error(`${name} must be a Discord ID`); return value; };
 const command = new SlashCommandBuilder().setName('dailyquiz').setDescription('管理每日答題題目')
+  .setDefaultMemberPermissions(0)
   .addSubcommand(s => s.setName('add').setDescription('預先設定指定日期的題目')
     .addStringOption(o => o.setName('date').setDescription('台灣時間日期 YYYY-MM-DD').setRequired(true))
     .addStringOption(o => o.setName('question').setDescription('題目').setMaxLength(500).setRequired(true))
@@ -332,8 +333,7 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
       return;
     }
     if (interaction.isChatInputCommand() && interaction.commandName === 'dailyquiz') {
-      if (!interaction.member?.roles?.cache?.has(moderatorRoleId)) return interaction.reply({ content:'只有 MOD 可設定題目。', flags:EPHEMERAL });
-      if (interaction.channelId !== (publicEnabled ? modChannelId : channelId)) return interaction.reply({content:'請在指定私人頻道設定題目。',flags:EPHEMERAL});
+      if (!mayManageActivity(interaction,{guildId,modChannelId,moderatorRoleId})) return interaction.reply({content:'僅限 MOD 在私人管理頻道設定題目。',flags:EPHEMERAL});
       const opts = interaction.options, day = opts.getString('date',true);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(midnight(day)) || dateKey(midnight(day)) !== day || !isActivityDay(day) || now() >= eventTimes(day,'quiz').start)
         return interaction.reply({content:'日期無效、為週末，或該日期的出題時間已到。',flags:EPHEMERAL});
