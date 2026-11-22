@@ -1,6 +1,10 @@
 // Standalone, private-channel trial: do not register commands or handle wallet interactions.
 import { Client, GatewayIntentBits } from 'discord.js';
 import { createGreetingHandler } from './discord-greetings.mjs';
+import { createKeywordReplyHandler } from './discord-keyword-replies.mjs';
+import { createRepeatWarningHandler } from './discord-repeat-warning.mjs';
+import { createRepeatIncidentStore } from './discord-repeat-incidents.mjs';
+import { latestScheduledWindow } from './discord-repeat-windows.mjs';
 import { createScamTestHandler } from './discord-scam-test.mjs';
 import { acquireTrialLock } from './discord-trial-lock.mjs';
 import { startDailySummary } from './discord-daily-summary.mjs';
@@ -15,9 +19,10 @@ if (!lock) {
 }
 const scamTestEnabled = process.env.DISCORD_SCAM_TEST_ENABLED === 'true';
 const summaryEnabled = process.env.DISCORD_DAILY_SUMMARY_ENABLED === 'true';
-const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages];
-if (scamTestEnabled || summaryEnabled) intents.push(GatewayIntentBits.MessageContent);
+const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent];
 const client = new Client({ intents });
+const incidentPool = new pg.Pool({ connectionString: process.env.TRIAL_DATABASE_URL });
+const incidentStore = createRepeatIncidentStore(incidentPool);
 let shuttingDown = false;
 const summary = createSummaryLifecycle({
   start: () => startDailySummary({ client, connectionString: process.env.TRIAL_DATABASE_URL, apiKey: process.env.OPENAI_API_KEY,
@@ -31,7 +36,16 @@ client.once('clientReady', () => {
   if (!process.env.OPENAI_API_KEY?.trim()) { console.log('Daily summary disabled: API key is missing'); return; }
   summary.start();
 });
-client.on('messageCreate', createGreetingHandler(client, { canAct: lock.canAct }));
+client.on('messageCreate', createGreetingHandler(client, { canAct: lock.canAct, suppressMorning: true }));
+client.on('messageCreate', createKeywordReplyHandler({ canAct: lock.canAct }));
+client.on('messageCreate', createRepeatWarningHandler({ canAct: lock.canAct, recordDetection: async incident => {
+  await incidentStore.initialize();
+  await incidentStore.record(incident);
+  const giveaway = latestScheduledWindow(incident.detectedAt, 10);
+  const quiz = latestScheduledWindow(incident.detectedAt, 12);
+  const counts = await incidentStore.countDetections({ ...incident, giveaway, quiz });
+  return { ...counts, giveawayWindow: giveaway, quizWindow: quiz };
+} }));
 if (scamTestEnabled) client.on('messageCreate', createScamTestHandler({ canAct: lock.canAct }));
 const heartbeat = setInterval(async () => {
   if (shuttingDown || await lock.canAct()) return;
@@ -44,6 +58,7 @@ async function shutdown() {
   shuttingDown = true;
   clearInterval(heartbeat);
   await summary.close();
+  await incidentPool.end();
   await lock.close();
   client.destroy();
 }

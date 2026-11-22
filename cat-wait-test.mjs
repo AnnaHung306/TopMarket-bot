@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { createWalletHandler } from './discord-interaction.mjs';
 
 const entries = JSON.parse(await readFile(new URL('./assets/tenor-cat-wait/manifest.json', import.meta.url), 'utf8'));
-assert.deepEqual(entries.map(entry => entry.file).sort(), ['cat-01.gif', 'cat-03.gif', 'cat-05.gif', 'cat-06.gif', 'cat-11.gif', 'cat-12.gif', 'cat-17.gif', 'cat-18.gif']);
+assert.deepEqual(entries.map(entry => entry.file).sort(), ['cat-01.gif', 'cat-03.gif', 'cat-05.gif', 'cat-06.gif', 'cat-11.gif', 'cat-12.gif', 'cat-17.gif', 'cat-18.gif', 'cat-19.gif']);
 for (const [index, entry] of entries.entries()) {
   const replies = [], messages = [], edits = [];
   const thread = { async send(payload) { messages.push(payload); return { async edit(text) { edits.push(text); } }; } };

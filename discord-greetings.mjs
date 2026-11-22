@@ -12,10 +12,10 @@ export function greetingFor(message, botId) {
   return GREETINGS.has(text) ? text : null;
 }
 
-export function createGreetingHandler(client, { canAct = async () => true } = {}) {
+export function createGreetingHandler(client, { canAct = async () => true, suppressMorning = false } = {}) {
   return async message => {
     const greeting = greetingFor(message, client.user?.id);
-    if (!greeting || !await canAct()) return;
+    if (!greeting || (suppressMorning && greeting === '早安') || !await canAct()) return;
     try {
       await message.reply({ content: greeting, allowedMentions: { repliedUser: false, parse: [] } });
     } catch (error) {
