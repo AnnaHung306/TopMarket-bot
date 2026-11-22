@@ -8,9 +8,14 @@ const TAIPEI_OFFSET = 8 * 60 * 60 * 1000;
 export function previousTaipeiDay(now = Date.now()) {
   const local = new Date(now + TAIPEI_OFFSET);
   const midnight = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) - TAIPEI_OFFSET;
-  let end = midnight + 23 * 60 * 60 * 1000;
+  let end = midnight + 10 * 60 * 60 * 1000;
   if (now < end) end -= DAY;
   return { start: end - DAY, end, date: new Date(end + TAIPEI_OFFSET).toISOString().slice(0, 10) };
+}
+
+export function currentTaipeiPeriod(now = Date.now()) {
+  const start = previousTaipeiDay(now).end;
+  return { start, end: now, date: new Date(start + TAIPEI_OFFSET).toISOString().slice(0, 10) };
 }
 
 export async function readDay(channel, start, end, { maxMessages = 10000, maxCharacters = 200000 } = {}) {
@@ -312,7 +317,7 @@ export async function startDailySummary({ client, connectionString, apiKey, mode
   let stopped = false;
   const tick = async (force = false) => {
     const local = new Date(Date.now() + TAIPEI_OFFSET);
-    if (stopped || running || (!force && local.getUTCHours() !== 23)) return;
+    if (stopped || running || (!force && local.getUTCHours() !== 10)) return;
     running = runDailySummary({ client, db, apiKey, model, canAct, fetchImpl });
     try { const result = await running; if (result === 'sent') console.log('Private daily summary delivered'); }
     catch (error) { console.error('Daily summary failed:', error.message); }

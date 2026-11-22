@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
-import { previousTaipeiDay, readDay, requestSummary, runDailySummary, resolveSpeakerNames, speakerMarkdownChunks, startDailySummary, renderSummary, formatPeriod, splitSummary, verifySummaryClaims } from './discord-daily-summary.mjs';
+import { previousTaipeiDay, currentTaipeiPeriod, readDay, requestSummary, runDailySummary, resolveSpeakerNames, speakerMarkdownChunks, startDailySummary, renderSummary, formatPeriod, splitSummary, verifySummaryClaims } from './discord-daily-summary.mjs';
+import { createSummaryCommand } from './discord-summary-command.mjs';
 import { createSummaryLifecycle } from './discord-summary-lifecycle.mjs';
 
-const period = previousTaipeiDay(Date.parse('2026-11-20T23:15:00+08:00'));
-assert.deepEqual(period, { start: Date.parse('2026-11-19T23:00:00+08:00'), end: Date.parse('2026-11-20T23:00:00+08:00'), date: '2026-11-20' });
-assert.equal(formatPeriod(period), '2026-11-19 23:00 至 2026-11-20 23:00（台灣時間，結束時間不含）');
-assert.equal(previousTaipeiDay(Date.parse('2026-11-20T22:59:59+08:00')).date, '2026-11-19');
+const period = previousTaipeiDay(Date.parse('2026-11-20T10:15:00+08:00'));
+assert.deepEqual(period, { start: Date.parse('2026-11-19T10:00:00+08:00'), end: Date.parse('2026-11-20T10:00:00+08:00'), date: '2026-11-20' });
+assert.equal(formatPeriod(period), '2026-11-19 10:00 至 2026-11-20 10:00（台灣時間，結束時間不含）');
+assert.equal(previousTaipeiDay(Date.parse('2026-11-20T09:59:59+08:00')).date, '2026-11-19');
+assert.deepEqual(currentTaipeiPeriod(Date.parse('2026-11-20T09:59:59+08:00')), {start:Date.parse('2026-11-19T10:00:00+08:00'),end:Date.parse('2026-11-20T09:59:59+08:00'),date:'2026-11-19'});
+assert.equal(currentTaipeiPeriod(Date.parse('2026-11-20T10:00:00+08:00')).start, Date.parse('2026-11-20T10:00:00+08:00'));
 const msg = (id, time, content, bot = false) => ({ id, createdTimestamp: Date.parse(time), content, author: { bot, id: bot ? 'bot' : '42', username: 'tester' } });
 const source = { id: '1548950663008878683', messages: { fetch: async () => new Map([
   ['1', msg('1', '2026-11-20T02:00:00+08:00', '話題 <@123> test@example.com')],
   ['2', msg('2', '2026-11-20T03:00:00+08:00', '機器人', true)],
-  ['3', msg('3', '2026-11-20T23:00:00+08:00', '不在範圍')],
+  ['3', msg('3', '2026-11-20T10:00:00+08:00', '不在範圍')],
   ['4', msg('4', '2026-11-20T04:00:00+08:00', '')],
   ['5', { ...msg('5', '2026-11-20T05:00:00+08:00', '系統訊息'), system: true }],
 ]) } };
@@ -28,7 +31,7 @@ assert.deepEqual(duplicateNames.map(x=>x.displayName), ['＠same（同名 1）',
 assert.doesNotMatch(speakerMarkdownChunks(duplicateNames).join(''), /@/);
 await assert.rejects(() => readDay(source, period.start, period.end, { maxCharacters: 1 }), /SUMMARY_INPUT_LIMIT/);
 const firstPage = new Map(Array.from({ length: 100 }, (_, i) => [String(200 - i), msg(String(200 - i), '2026-11-20T02:00:00+08:00', `訊息${i}`)]));
-const secondPage = new Map([['99', msg('99', '2026-11-20T01:00:00+08:00', '較早')], ['98', msg('98', '2026-11-19T22:59:00+08:00', '範圍外')]]);
+const secondPage = new Map([['99', msg('99', '2026-11-20T01:00:00+08:00', '較早')], ['98', msg('98', '2026-11-19T09:59:00+08:00', '範圍外')]]);
 const calls = [];
 const paged = { messages: { fetch: async options => { calls.push(options); return calls.length === 1 ? firstPage : secondPage; } } };
 assert.equal((await readDay(paged, period.start, period.end)).totalHuman, 101);
@@ -89,9 +92,9 @@ const db = { query: async ({ text, values }) => {
   if (text.includes('INSERT')) { if (claimed) return { rowCount: 0 }; claimed = true; return { rowCount: 1 }; }
   status = text.includes("'sent'") ? 'sent' : values[1]; return { rowCount: 1 };
 } };
-const params = { client, db, apiKey: 'fake', canAct: async () => true, now: Date.parse('2026-11-20T23:15:00+08:00'), fetchImpl: api };
+const params = { client, db, apiKey: 'fake', canAct: async () => true, now: Date.parse('2026-11-20T10:15:00+08:00'), fetchImpl: api };
 assert.equal(await runDailySummary(params), 'sent');
-assert.equal(status, 'sent'); assert.match(posted[0].content, /2026-11-19 23:00 至 2026-11-20 23:00/); assert.deepEqual(posted[0].allowedMentions.parse, []);
+assert.equal(status, 'sent'); assert.match(posted[0].content, /2026-11-19 10:00 至 2026-11-20 10:00/); assert.deepEqual(posted[0].allowedMentions.parse, []);
 assert.match(posted[0].embeds[0].description, /tester/);
 assert.match(posted[1].content, /\*\*tester\*\*：2 則/);
 assert.doesNotMatch(posted.map(x=>x.content).join(''), /ID 42|@/);
@@ -162,4 +165,18 @@ const stop = await startDailySummary({ client: nowClient, apiKey: 'fake', canAct
   fetchImpl: async (url, options) => { const b=JSON.parse(options.body); const out=b.text.format.name==='discord_summary_review' ? {checks:JSON.parse(b.input).map(c=>({key:c.key,verdict:'accurate',text:c.claim}))} : {events:[{topic:'測試',text:'測試摘要',message_ids:['m1']}],sentiment:[],pending:[]}; return {ok:true,json:async()=>({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(out)}]}]})}; } });
 await Promise.race([deliveredPromise, new Promise((_, reject) => setTimeout(() => reject(Error('Immediate summary timed out')), 2000))]);
 await stop(); assert.equal(dbClosed, true);
+const commandPosts = [];
+const commandNow = Date.parse('2026-11-20T10:15:00+08:00');
+const commandSource = { id:source.id, messages:{ fetch:async()=>new Map([['9',msg('9','2026-11-20T10:05:00+08:00','話題 test@example.com')]]) } };
+const commandClient = { guilds:{fetch:async()=>({members:memberFetcher,channels:{fetch:async()=>commandSource}})} };
+const handleCommand = createSummaryCommand({client:commandClient,apiKey:'fake',canAct:async()=>true,now:()=>commandNow,fetchImpl:api});
+const command = {guildId:'1541304826674155550',channelId:'1572821315507855430',author:{bot:false},member:{roles:{cache:new Map([['1571738627460038736',true]])}},content:'!聊天摘要',channel:{send:async value=>commandPosts.push(value)}};
+await handleCommand({...command,channelId:'other'});
+await handleCommand({...command,member:{roles:{cache:new Map()}}});
+assert.equal(commandPosts.length,0);
+await handleCommand(command);
+assert.equal(commandPosts.length,2);
+assert.match(commandPosts[0].content,/2026-11-20 10:00 至 2026-11-20 10:15/);
+assert.match(commandPosts[1].content,/tester.*1 則/);
+assert.deepEqual(commandPosts[0].allowedMentions.parse,[]);
 console.log('Daily summary scope, pagination inputs, OpenAI contract, failure and deduplication tests passed');
