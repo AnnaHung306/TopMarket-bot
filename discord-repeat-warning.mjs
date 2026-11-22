@@ -44,7 +44,7 @@ export function createRepeatWarningHandler({ canAct = async () => true, recordDe
     });
     try {
       const selected = assets[Math.floor(random() * assets.length)];
-      await message.reply({ content: `<@${message.author.id}> 請不要刷頻，謝謝喵 (多次違反者將會被 mod 禁言)`,
+      await message.reply({ content: `<@${message.author.id}> 請不要刷頻，謝謝喵，參加活動不可刷次數！\n (多次違反者將會被 mod 禁言)`,
         allowedMentions: { parse: [], users: [message.author.id], repliedUser: false },
         files: [{ attachment: fileURLToPath(new URL(`./assets/repeat-warning/${selected.file}`, import.meta.url)), name: `police-cat-${selected.file}` }] });
     } catch (error) { console.error('Repeat warning failed:', error.message); }

@@ -25,7 +25,7 @@ assert.equal(modNotices.length,1);
 assert.match(modNotices[0].content, /歷次偵測：1 次/);
 assert.deepEqual(modNotices[0].allowedMentions,{parse:[]});
 assert.deepEqual(recorded[0], {messageId:'12345',guildId:base.guildId,channelId:base.channelId,userId:'123',detectedAt:0});
-assert.equal(sent[0].content, '<@123> 請不要刷頻，謝謝喵 (多次違反者將會被 mod 禁言)');
+assert.equal(sent[0].content, '<@123> 請不要刷頻，謝謝喵，參加活動不可刷次數！\n (多次違反者將會被 mod 禁言)');
 assert.match(sent[0].files[0].attachment, /repeat-warning[\\/]01\.gif$/);
 assert.deepEqual(sent[0].allowedMentions, {parse:[],users:['123'],repliedUser:false});
 await handler(base); await handler(base); assert.equal(sent.length, 1);

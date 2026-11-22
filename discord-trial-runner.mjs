@@ -1,6 +1,5 @@
 // Standalone, private-channel trial: do not register commands or handle wallet interactions.
 import { Client, GatewayIntentBits } from 'discord.js';
-import { createGreetingHandler } from './discord-greetings.mjs';
 import { createKeywordReplyHandler } from './discord-keyword-replies.mjs';
 import { createRepeatWarningHandler } from './discord-repeat-warning.mjs';
 import { createRepeatIncidentStore } from './discord-repeat-incidents.mjs';
@@ -37,7 +36,6 @@ client.once('clientReady', () => {
   if (!process.env.OPENAI_API_KEY?.trim()) { console.log('Daily summary disabled: API key is missing'); return; }
   summary.start();
 });
-client.on('messageCreate', createGreetingHandler(client, { canAct: lock.canAct, suppressMorning: true }));
 client.on('messageCreate', createKeywordReplyHandler({ canAct: lock.canAct }));
 if (summaryEnabled && process.env.OPENAI_API_KEY?.trim()) client.on('messageCreate', createSummaryCommand({ client, apiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_SUMMARY_MODEL?.trim() || 'gpt-6-luna', canAct: lock.canAct }));
 client.on('messageCreate', createRepeatWarningHandler({ canAct: lock.canAct, recordDetection: async incident => {
