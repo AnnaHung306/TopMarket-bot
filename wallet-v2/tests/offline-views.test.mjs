@@ -17,25 +17,27 @@ const ledger = { version: 1, wallet, catalog: [pool], cards: {}, events,
   transfers: fixture.receipts.flatMap(receipt => receiptTransfers(receipt, wallet)).map(t => ({ ...t, timestamp: times.get(t.block) })),
   coverage: { gavin: { status: 'verified', complete: true }, [pool.id]: { status: 'verified', complete: true } },
   warnings: [], asOf: '2026-11-23T00:00:00.000Z' };
-async function harness({ toolbox = false, channelConfigured = true } = {}) {
-  let queries = 0, threads = 0, renderHook, queryHook, controlPrefix;
+async function harness({ toolbox = false, channelConfigured = true, packCount = 0, initialScope = 'upgrade' } = {}) {
+  let queries = 0, threads = 0, renders = 0, loads = 0, renderHook, queryHook, controlPrefix;
   const history = [];
   const viewStore = new FileLedgerStore('work/wallet-v2/verification/offline-views');
-  const service = { load: async () => structuredClone(ledger), query: async () => { queries++; await queryHook?.(); return { ledger: structuredClone(ledger) }; } };
+  const fixtureLedger = structuredClone(ledger);
+  for (let i = 0; i < packCount; i++) fixtureLedger.catalog.push({ id: `pack:test${i}`, kind: 'packs', name: `Test Pack ${i + 1}` });
+  const service = { load: async () => { loads++; return structuredClone(fixtureLedger); }, query: async () => { queries++; await queryHook?.(); return { ledger: structuredClone(fixtureLedger) }; } };
   const resultMessage = { id: 'result-message', async edit(payload) {
-    this.payload = payload; history.push(payload);
+    this.payload = { ...this.payload, ...payload }; history.push(this.payload);
     const first = payload.components?.[0]?.toJSON().components[0].custom_id;
     if (first) controlPrefix = first.split(':').slice(0, -1).join(':');
     return this;
   } };
-  const thread = { id: 'thread-1', parentId: 'toolbox', isThread: () => true, async send(payload) { resultMessage.initial = payload; return resultMessage; } };
+  const thread = { id: 'thread-1', parentId: 'toolbox', isThread: () => true, async send(payload) { resultMessage.initial = payload; return resultMessage.edit(payload); } };
   const channel = toolbox ? { id: 'toolbox', isThread: () => false, threads: { async create() { threads++; return thread; } } } : thread;
   const createHandler = () => createV2InteractionHandler({ service, viewStore, channelId: () => channelConfigured ? 'toolbox' : '',
-    renderPoster: async report => renderHook ? renderHook(report) : Buffer.from('offline-controller-payload'), logger: { info() {}, error() {} } });
+    renderPoster: async report => { renders++; return renderHook ? renderHook(report) : Buffer.from('offline-controller-payload'); }, logger: { info() {}, error() {} } });
   const handler = createHandler();
   const interaction = { commandName: 'wallet', id: 'command', channel, channelId: channel.id,
     isChatInputCommand: () => true, isAutocomplete: () => false, user: { id: 'owner', username: 'test' },
-    options: { getString: key => ({ address: wallet, scope: 'upgrade' })[key] ?? null },
+    options: { getString: key => ({ address: wallet, scope: initialScope })[key] ?? null },
     async reply(payload) { this.replyPayload = payload; this.replied = true; },
     async deferReply() { this.deferred = true; }, async editReply(payload) {
       this.editPayload = payload; return toolbox ? { id: 'toolbox-status' } : resultMessage.edit(payload);
@@ -54,7 +56,7 @@ async function harness({ toolbox = false, channelConfigured = true } = {}) {
       async showModal(modal) { this.modal = modal.toJSON(); } };
   }
   return { handler, createHandler, interaction, component, viewStore, resultMessage, id,
-    history, get queries() { return queries; }, get threads() { return threads; },
+    history, get queries() { return queries; }, get threads() { return threads; }, get renders() { return renders; }, get loads() { return loads; },
     setRenderHook(hook) { renderHook = hook; }, setQueryHook(hook) { queryHook = hook; } };
 }
 test('offline existing-thread path edits its report directly; toolbox path creates exactly one thread', async () => {
@@ -83,6 +85,10 @@ test('offline controls isolate the owner and perform filter-only changes without
   await h.handler(h.component('dimension'));
   assert.equal(h.queries, 1);
   assert.equal((await h.viewStore.loadView(h.id)).selection.dimension, 'location');
+  assert.equal(h.renders, 1); assert.equal(h.loads, 0);
+  assert.equal(h.resultMessage.payload.content, '選項已變更，請按「更新資料」。');
+  assert.ok(h.resultMessage.payload.components.length > 0);
+  assert.deepEqual(h.resultMessage.payload.files, []);
 });
 test('offline modal dates validate before saving; state survives a new controller', async () => {
   const h = await harness();
@@ -114,13 +120,13 @@ test('offline duplicate click cannot release another operation lock or overwrite
   const h = await harness(); let release, entered;
   const ready = new Promise(resolve => { entered = resolve; });
   h.setRenderHook(async () => { entered(); return new Promise(resolve => { release = () => resolve(Buffer.from('offline-payload')); }); });
-  const first = h.handler(h.component('detail')); await ready;
+  const first = h.handler(h.component('refresh')); await ready;
   const second = h.component('dimension'); await h.handler(second);
   const third = h.component('dimension'); await h.handler(third);
   assert.match(second.replyPayload.content, /上一個操作/); assert.match(third.replyPayload.content, /上一個操作/);
   release(); await first;
   const view = await h.viewStore.loadView(h.id);
-  assert.equal(view.selection.detail, 'detail'); assert.equal(view.selection.dimension, 'location');
+  assert.equal(view.selection.detail, 'summary'); assert.equal(view.selection.dimension, 'location');
 });
 test('upgrade controls never offer pack/source/search inputs, including a persisted origin view', () => {
   const pack = { id: 'pack:' + '0x' + '1'.repeat(40), kind: 'packs', name: 'Starter Pack', address: '0x' + '1'.repeat(40) };
@@ -158,10 +164,13 @@ test('failure leaves no old PNG and retry preserves the requested period', async
   const h = await harness();
   h.setRenderHook(async () => { throw Error('simulated render failure'); });
   await h.handler(h.component('period', ['7d']));
+  assert.equal(h.renders, 1, 'changing a period only stages the request');
+  await h.handler(h.component('refresh'));
   assert.match(h.resultMessage.payload.content, /讀取失敗/);
   assert.deepEqual(h.resultMessage.payload.attachments, []); assert.deepEqual(h.resultMessage.payload.files, []);
   assert.equal((await h.viewStore.loadView(h.id)).selection.period, '7d');
-  assert.equal(h.resultMessage.payload.components[0].toJSON().components[0].label, '重試');
+  const refresh = h.resultMessage.payload.components.flatMap(row => row.toJSON().components).find(component => component.custom_id.endsWith(':refresh'));
+  assert.equal(refresh.label, '更新資料');
   h.setRenderHook(); await h.handler(h.component('refresh'));
   assert.match(h.resultMessage.payload.content, /近 7 天/);
   assert.equal(h.resultMessage.payload.files[0].name, 'wallet-v2.png');
@@ -180,12 +189,15 @@ test('late clicks from older controls cannot overwrite a newer report or start a
 });
 test('existing unversioned reports migrate on their next real action', async () => {
   const h = await harness(), saved = await h.viewStore.loadView(h.id);
-  delete saved.controlsVersion;
+  delete saved.controlsVersion; delete saved.controlCatalog; delete saved.phase;
   await h.viewStore.saveView(saved, saved.revision);
-  const legacy = h.component('refresh'); legacy.customId = `wv2:${h.id}:refresh`;
+  const legacy = h.component('period', ['7d']); legacy.customId = `wv2:${h.id}:period`;
   await h.handler(legacy);
-  const migrated = await h.viewStore.loadView(h.id);
-  assert.equal(migrated.controlsVersion, 1); assert.equal(h.queries, 2);
+  let migrated = await h.viewStore.loadView(h.id);
+  assert.equal(migrated.controlsVersion, 1); assert.equal(migrated.phase, 'draft');
+  assert.equal(h.queries, 1); assert.equal(h.renders, 1); assert.equal(h.loads, 1, 'one metadata migration, no chain query');
+  await h.handler(h.component('refresh')); migrated = await h.viewStore.loadView(h.id);
+  assert.equal(h.queries, 2); assert.equal(migrated.phase, 'ready');
   assert.match(h.resultMessage.payload.components[0].toJSON().components[0].custom_id, new RegExp(`:${migrated.revision}:scope$`));
 });
 test('a failed PNG download clears its own loading reply without changing the visible report', async () => {
@@ -195,4 +207,65 @@ test('a failed PNG download clears its own loading reply without changing the vi
   assert.match(download.editPayload.content, /下載失敗/);
   assert.deepEqual(download.editPayload.attachments, []); assert.deepEqual(download.editPayload.files, []);
   assert.strictEqual(h.resultMessage.payload, original);
+});
+test('choosing unchanged requirements leaves the report visible without loading or generation', async () => {
+  const h = await harness(), original = h.resultMessage.payload, edits = h.history.length;
+  await h.handler(h.component('scope', ['upgrade']));
+  await h.handler(h.component('period', ['all']));
+  assert.strictEqual(h.resultMessage.payload, original); assert.equal(h.history.length, edits);
+  assert.equal(h.queries, 1); assert.equal(h.renders, 1); assert.equal(h.loads, 0);
+  assert.equal((await h.viewStore.loadView(h.id)).phase, 'ready');
+});
+test('multiple requirement changes stay editable and only explicit refresh queries and renders', async () => {
+  const h = await harness();
+  await h.handler(h.component('scope', ['all']));
+  await h.handler(h.component('period', ['30d']));
+  await h.handler(h.component('detail'));
+  const draft = h.resultMessage.payload;
+  assert.equal(draft.content, '選項已變更，請按「更新資料」。');
+  assert.deepEqual(draft.files, []); assert.deepEqual(draft.attachments, []);
+  const controls = draft.components.flatMap(row => row.toJSON().components);
+  assert.ok(controls.find(item => item.custom_id.endsWith(':refresh')));
+  assert.ok(controls.find(item => item.custom_id.endsWith(':scope')));
+  assert.equal(h.queries, 1); assert.equal(h.renders, 1); assert.equal(h.loads, 0);
+  assert.equal((await h.viewStore.loadView(h.id)).phase, 'draft');
+  await h.handler(h.component('refresh'));
+  assert.equal(h.queries, 2); assert.equal(h.renders, 2);
+  assert.match(h.resultMessage.payload.content, /近 30 天/);
+  assert.equal(h.resultMessage.payload.files[0].name, 'wallet-v2.png');
+  assert.equal((await h.viewStore.loadView(h.id)).phase, 'ready');
+});
+test('drafts disable downloads and reject older download requests without exposing mismatched data', async () => {
+  const h = await harness(); await h.handler(h.component('period', ['7d']));
+  const draft = h.resultMessage.payload;
+  const controls = draft.components.flatMap(row => row.toJSON().components);
+  for (const action of ['png', 'csv']) {
+    assert.equal(controls.find(item => item.custom_id.endsWith(':' + action)).disabled, true);
+    const request = h.component(action); await h.handler(request);
+    assert.match(request.replyPayload.content, /請先按「更新資料」/);
+  }
+  assert.strictEqual(h.resultMessage.payload, draft); assert.equal(h.queries, 1); assert.equal(h.renders, 1);
+});
+test('a new controller retains pending requirements and waits for refresh', async () => {
+  const h = await harness(); await h.handler(h.component('period', ['7d']));
+  const restarted = h.createHandler();
+  await restarted(h.component('detail'));
+  assert.equal(h.queries, 1); assert.equal(h.renders, 1);
+  const saved = await h.viewStore.loadView(h.id);
+  assert.equal(saved.phase, 'draft'); assert.equal(saved.selection.period, '7d'); assert.equal(saved.selection.detail, 'detail');
+  await restarted(h.component('refresh'));
+  assert.equal(h.queries, 2); assert.match(h.resultMessage.payload.content, /近 7 天/);
+});
+test('pack navigation keeps the report and reselecting the same activity preserves a chosen pack', async () => {
+  const h = await harness({ packCount: 30, initialScope: 'all' }), original = h.resultMessage.payload;
+  await h.handler(h.component('next'));
+  assert.equal(h.resultMessage.payload.content, original.content);
+  assert.deepEqual(h.resultMessage.payload.files, original.files);
+  assert.equal((await h.viewStore.loadView(h.id)).phase, 'ready');
+  assert.equal(h.queries, 1); assert.equal(h.renders, 1);
+  await h.handler(h.component('pool', ['pack:test23']));
+  const edits = h.history.length;
+  await h.handler(h.component('scope', ['all']));
+  assert.equal((await h.viewStore.loadView(h.id)).selection.poolId, 'pack:test23');
+  assert.equal(h.history.length, edits); assert.equal(h.queries, 1); assert.equal(h.renders, 1);
 });

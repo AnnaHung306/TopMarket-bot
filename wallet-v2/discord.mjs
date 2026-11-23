@@ -22,6 +22,10 @@ const customId = (id, action, revision) => `wv2:${id}:${revision ? revision + ':
 const loading = () => ({ content: 'loading...', components: [], attachments: [], files: [], embeds: [], allowedMentions: { parse: [] } });
 const retryControls = view => view?.revision ? [new ActionRowBuilder().addComponents(new ButtonBuilder()
   .setCustomId(customId(view.id, 'refresh', view.revision)).setLabel('重試').setStyle(ButtonStyle.Primary))] : [];
+const controlCatalog = ledger => ledger.catalog.map(({ id, kind, name, enabled }) => ({ id, kind, name, enabled }));
+const controlsLedger = view => ({ catalog: view.controlCatalog || [] });
+const draftPayload = (view, content = '選項已變更，請按「更新資料」。') => ({ ...loading(), content,
+  components: viewComponents(controlsLedger(view), { ...view, phase: 'draft' }) });
 function poolChoices(ledger, view) {
   let pools = ledger.catalog.filter(pool => pool.kind === 'packs');
   if (view.search) pools = pools.filter(pool => displayPoolName(pool).toLowerCase().includes(view.search.toLowerCase()));
@@ -50,7 +54,8 @@ export function viewComponents(ledger, view) {
     select('period', '選擇期間', [['all', '全期間'], ['7d', '近 7 天'], ['30d', '近 30 天'], ['month', '本月'], ['custom', '自訂日期']]
       .map(([value, label]) => ({ label, value, default: value === view.selection.period }))),
     new ActionRowBuilder().addComponents(button('detail', view.selection.detail === 'summary' ? '詳細報表' : '收合明細'),
-      button('png', '下載 PNG'), button('csv', '匯出 CSV'), button('refresh', '更新資料', ButtonStyle.Primary)));
+      button('png', '下載 PNG').setDisabled(view.phase === 'draft'), button('csv', '匯出 CSV').setDisabled(view.phase === 'draft'),
+      button('refresh', '更新資料', ButtonStyle.Primary)));
   if (hasPackFilter(view.selection) && (pages > 1 || view.search)) {
     const navigation = [button('search', '搜尋卡包')];
     if (view.search) navigation.push(button('clear-search', '清除搜尋'));
@@ -93,8 +98,13 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
     const started = performance.now();
     const png = await renderPoster(report);
     logger.info('wallet_v2_poster', JSON.stringify({ viewId: view.id, posterMs: Math.round(performance.now() - started), bytes: png.length }));
-    return { content: textReport(report), components: viewComponents(ledger, view),
+    return { content: textReport(report),
       files: [{ attachment: png, name: 'wallet-v2.png' }], attachments: [], allowedMentions: { parse: [] } };
+  }
+  async function completed(ledger, view) {
+    const body = await payload(ledger, view);
+    const ready = await viewStore.saveView({ ...view, phase: 'ready', controlCatalog: controlCatalog(ledger) }, view.revision);
+    return { view: ready, body: { ...body, components: viewComponents(ledger, ready) } };
   }
   return async interaction => {
     const command = interaction.isChatInputCommand?.() && interaction.commandName === 'wallet';
@@ -137,11 +147,12 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
         } else status = await interaction.editReply(loading());
         showingLoading = true;
         view = { id: randomUUID().replaceAll('-', ''), ownerId: interaction.user.id, wallet,
-          channelId: thread.id, messageId: status.id, selection, poolPage: 0, controlsVersion: 1, createdAt: new Date().toISOString() };
+          channelId: thread.id, messageId: status.id, selection, poolPage: 0, phase: 'draft', controlsVersion: 1, createdAt: new Date().toISOString() };
         view = await viewStore.saveView(view);
         trace('loading');
         const { ledger } = await service.query(wallet, { scope: selection.scope });
-        await status.edit(await payload(ledger, view));
+        const result = await completed(ledger, view); view = result.view;
+        await status.edit(result.body);
         showingLoading = false; trace('ready');
         return;
       }
@@ -165,6 +176,7 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
         new ModalBuilder().setCustomId(customId(id, 'dates-submit', view.revision)).setTitle('自訂日期（台灣時間）')
           .addComponents(input('from', '起日 YYYY-MM-DD', view.selection.from), input('to', '迄日 YYYY-MM-DD', view.selection.to)));
       if (['csv', 'png'].includes(action)) {
+        if (view.phase === 'draft') return privateReply(interaction, '請先按「更新資料」產生報告，再下載。');
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         await interaction.editReply(loading());
         downloadPending = true;
@@ -177,7 +189,11 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       busy.add(id);
       acquired = true;
       const next = { ...view, selection: { ...view.selection } };
-      if (action === 'scope') { next.selection.scope = interaction.values[0]; next.selection.poolId = null; next.poolPage = 0; next.search = ''; }
+      if (action === 'scope') {
+        if (interaction.values[0] !== view.selection.scope) {
+          next.selection.scope = interaction.values[0]; next.selection.poolId = null; next.poolPage = 0; next.search = '';
+        }
+      }
       else if (action === 'pool') next.selection.poolId = interaction.values[0] === 'all' ? null : interaction.values[0];
       else if (action === 'period') next.selection.period = interaction.values[0];
       else if (action === 'detail') next.selection.detail = next.selection.detail === 'summary' ? 'detail' : 'summary';
@@ -190,23 +206,37 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       else if (action !== 'refresh') throw Error('不支援的報告操作');
       if (!SCOPES[next.selection.scope]) throw Error('無效範圍');
       dateRange(next.selection);
+      if (action !== 'refresh') {
+        const selectionChanged = JSON.stringify(next.selection) !== JSON.stringify(view.selection);
+        const menuChanged = (next.search || '') !== (view.search || '') || (next.poolPage || 0) !== (view.poolPage || 0);
+        if (!selectionChanged && !menuChanged) {
+          await interaction.deferUpdate(); trace('unchanged');
+          return;
+        }
+        await interaction.deferUpdate();
+        // Save only small menu metadata. Changing requirements never scans or renders.
+        next.controlCatalog = view.controlCatalog || controlCatalog(await service.load(view.wallet));
+        next.phase = selectionChanged ? 'draft' : view.phase || 'ready';
+        view = await viewStore.saveView({ ...next, controlsVersion: 1 }, view.revision);
+        await interaction.editReply(selectionChanged ? draftPayload(view) : { components: viewComponents(controlsLedger(view), view) });
+        trace(selectionChanged ? 'draft' : 'controls');
+        return;
+      }
       // Acknowledge and replace the old text/PNG before any ledger read, scan or render.
       await interaction.update(loading());
       showingLoading = true; trace('loading');
       // Store the requested filters before work, so an error can retry those filters.
-      view = await viewStore.saveView({ ...next, controlsVersion: 1 }, view.revision);
-      let ledger = await service.load(next.wallet);
-      const needsGavin = next.selection.scope !== 'upgrade' && !ledger.coverage.gavin?.complete;
-      const needsUpgrade = ['all', 'upgrade'].includes(next.selection.scope) && ledger.catalog.some(pool => pool.kind === 'upgrade' && pool.supported !== false && !ledger.coverage[pool.id]?.complete);
-      if (action === 'refresh' || needsGavin || needsUpgrade) ({ ledger } = await service.query(next.wallet, { scope: next.selection.scope }));
-      const body = await payload(ledger, view);
-      await interaction.editReply(body);
+      view = await viewStore.saveView({ ...next, phase: 'draft', controlsVersion: 1 }, view.revision);
+      const { ledger } = await service.query(view.wallet, { scope: view.selection.scope });
+      const result = await completed(ledger, view); view = result.view;
+      await interaction.editReply(result.body);
       showingLoading = false; trace('ready');
     } catch (error) {
       logger.error('wallet_v2_interaction_failed', error.code || error.name);
       trace('failed');
       const content = view?.revision ? '讀取失敗，請按重試。' : '讀取失敗，請重新使用 /wallet。';
-      const failure = { ...loading(), content, components: retryControls(view) };
+      const failure = view?.revision && view.controlCatalog ? draftPayload(view, '讀取失敗，請按「更新資料」重試。')
+        : { ...loading(), content, components: retryControls(view) };
       if (status) await status.edit(failure);
       else if (showingLoading) await interaction.editReply(failure);
       else if (downloadPending) await interaction.editReply({ ...loading(), content: '下載失敗，請再試一次。' });
