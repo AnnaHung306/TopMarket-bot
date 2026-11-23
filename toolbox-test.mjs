@@ -28,5 +28,11 @@ i=interaction('times');await handler(i);assert.match(i.calls[1],/無法完整取
 i=interaction('times');i.guild={...guild,channels:{fetch:async()=>new Collection([['a',{...channel,parentId:uid}]])}};await handler(i);assert.match(i.calls[1],/\*\*1 則\*\*/);assert.match(i.calls[1],/資料截止/);assert.equal(i.calls[0].flags,MessageFlags.Ephemeral);
 i=interaction('mywallet');i.channelId='thread';i.channel={isThread:()=>true,parentId:'box'};await handler(i);assert.match(i.calls[1],new RegExp(saved));
 i=interaction('mywallet');i.channelId='elsewhere';await handler(i);assert.equal(i.calls[0].flags,MessageFlags.Ephemeral);assert.match(i.calls[0].content,/bot-toolbox/);
+const modChannel='123456789012345681', modRole='123456789012345682';
+const modHandler=createToolboxHandler({sql,env:{...env,DAILY_MOD_CHANNEL_ID:modChannel,DAILY_MODERATOR_ROLE_ID:modRole},now:()=>start+1000,logger:{error(){}}});
+i=interaction('mywallet');i.channelId=modChannel;i.member={roles:{cache:new Map([[modRole,{}]])}};await modHandler(i);assert.equal(i.calls[0].flags,MessageFlags.Ephemeral);assert.match(i.calls[1],new RegExp(saved));
+i=interaction('mywallet');i.channelId=modChannel;i.member={roles:{cache:new Map()}};await modHandler(i);assert.match(i.calls[0].content,/bot-toolbox/);
+i=interaction('mywallet');i.channelId=modChannel;i.member={roles:{cache:new Map([[modRole,{}]])}};i.guildId='123456789012345683';await modHandler(i);assert.match(i.calls[0].content,/bot-toolbox/);
+i=interaction('mywallet');i.channelId='thread';i.channel={isThread:()=>true,parentId:modChannel};i.member={roles:{cache:new Map([[modRole,{}]])}};await modHandler(i);assert.match(i.calls[0].content,/bot-toolbox/);
 assert(queries.some(q=>q.includes('request_id::numeric < excluded.request_id::numeric')));
 console.log('toolbox boundary, privacy and isolation tests passed');

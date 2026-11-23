@@ -1,6 +1,7 @@
 import { ChannelType, MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { dateKey, eventTimes, isActivityDay } from './daily/time.mjs';
 import { scanSnapshotChannel } from './daily/message-snapshot.mjs';
+import { mayManageActivity } from './daily/moderator-access.mjs';
 
 const DAY = 86400000;
 const id = /^\d{17,20}$/;
@@ -47,7 +48,12 @@ export function createToolboxHandler({ sql, env = process.env, now = Date.now, l
     const allowed = env.DISCORD_WALLET_CHANNEL_ID?.trim();
     const channel = interaction.channel;
     const inToolbox = allowed && (interaction.channelId === allowed || (channel?.isThread() && channel.parentId === allowed));
-    if (!interaction.guildId || !inToolbox) return interaction.reply({ content: allowed ? '請在 bot-toolbox 使用此指令。' : '工具箱尚未完成設定，請聯絡 MOD。', flags: MessageFlags.Ephemeral });
+    const guildId = env.DAILY_GUILD_ID?.trim();
+    const modChannelId = env.DAILY_MOD_CHANNEL_ID?.trim();
+    const moderatorRoleId = env.DAILY_MODERATOR_ROLE_ID?.trim();
+    const inModChannel = [guildId, modChannelId, moderatorRoleId].every(value => id.test(value || '')) &&
+      mayManageActivity(interaction, { guildId, modChannelId, moderatorRoleId });
+    if (!interaction.guildId || (!inToolbox && !inModChannel)) return interaction.reply({ content: allowed ? '請在 bot-toolbox 使用此指令。' : '工具箱尚未完成設定，請聯絡 MOD。', flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
       if (interaction.commandName === 'times') {
