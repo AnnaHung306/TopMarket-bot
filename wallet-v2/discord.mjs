@@ -2,17 +2,16 @@ import { randomUUID, randomInt } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, ModalBuilder, SlashCommandBuilder,
   StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, ThreadAutoArchiveDuration } from 'discord.js';
-import { SCOPES, address, dateRange } from './model.mjs';
+import { SCOPES, address, dateRange, displayPoolName } from './model.mjs';
 import { buildReport, textReport } from './report.mjs';
 import { csvReport, renderPng } from './exports.mjs';
 import { mayManageActivity } from '../daily/moderator-access.mjs';
 
 // Exported definition only. Nothing in this module logs in, registers commands or changes the active bot.
-export const walletV2Command = new SlashCommandBuilder().setName('wallet').setDescription('依活動、卡池與期間分析 Top.Market 錢包')
+export const walletV2Command = new SlashCommandBuilder().setName('wallet').setDescription('查詢錢包收益，依活動與期間篩選')
   .addStringOption(option => option.setName('address').setDescription('Base 錢包地址').setRequired(true))
   .addStringOption(option => option.setName('scope').setDescription('分析範圍；也可查完再切換').addChoices(
     ...Object.entries(SCOPES).map(([value, name]) => ({ name, value }))))
-  .addStringOption(option => option.setName('pool').setDescription('指定活動池／卡池').setAutocomplete(true))
   .addStringOption(option => option.setName('period').setDescription('時間範圍').addChoices(
     { name: '全期間', value: 'all' }, { name: '近 7 天', value: '7d' }, { name: '近 30 天', value: '30d' },
     { name: '本月', value: 'month' }, { name: '自訂日期', value: 'custom' }))
@@ -21,35 +20,42 @@ export const walletV2Command = new SlashCommandBuilder().setName('wallet').setDe
 
 const customId = (id, action) => `wv2:${id}:${action}`;
 function poolChoices(ledger, view) {
-  const { scope, dimension } = view.selection;
-  let pools = ledger.catalog.filter(pool => dimension === 'origin' ? pool.kind === 'packs'
-    : scope === 'upgrade' ? pool.kind === 'upgrade' : ['packs', 'buyback'].includes(scope) ? pool.kind === 'packs' : true);
-  if (view.search) pools = pools.filter(pool => `${pool.name} ${pool.id} ${pool.address}`.toLowerCase().includes(view.search.toLowerCase()));
+  let pools = ledger.catalog.filter(pool => pool.kind === 'packs');
+  if (view.search) pools = pools.filter(pool => displayPoolName(pool).toLowerCase().includes(view.search.toLowerCase()));
   return pools;
+}
+const hasPackFilter = selection => ['all', 'packs', 'buyback'].includes(selection.scope);
+function tidySelection(selection) {
+  return { ...selection, dimension: 'location', poolId: hasPackFilter(selection) ? selection.poolId : null };
 }
 export function viewComponents(ledger, view) {
   const pools = poolChoices(ledger, view), pages = Math.max(1, Math.ceil(pools.length / 23));
   const page = Math.max(0, Math.min(view.poolPage || 0, pages - 1));
   const pagePools = pools.slice(page * 23, (page + 1) * 23);
-  const selected = ledger.catalog.find(pool => pool.id === view.selection.poolId);
+  const selected = pools.find(pool => pool.id === view.selection.poolId) || ledger.catalog.find(pool => pool.kind === 'packs' && pool.id === view.selection.poolId);
   if (selected && !pagePools.some(pool => pool.id === selected.id)) pagePools.push(selected);
-  const options = [{ label: '所有活動池／卡池', value: 'all', default: !selected },
-    ...pagePools.map(pool => ({ label: pool.name.slice(0, 100), value: pool.id, default: pool.id === selected?.id,
-      description: `${pool.enabled === false ? '已結束 · ' : ''}${pool.address}`.slice(0, 100) }))];
+  const options = [{ label: '所有卡包', value: 'all', default: !selected },
+    ...pagePools.map(pool => ({ label: displayPoolName(pool).slice(0, 100), value: pool.id, default: pool.id === selected?.id,
+      ...(pool.enabled === false ? { description: '已結束' } : {}) }))];
   const select = (action, placeholder, options) => new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
     .setCustomId(customId(view.id, action)).setPlaceholder(placeholder).addOptions(options));
   const button = (action, label, style = ButtonStyle.Secondary) => new ButtonBuilder().setCustomId(customId(view.id, action)).setLabel(label).setStyle(style);
-  return [
-    select('scope', '選擇分析範圍', Object.entries(SCOPES).map(([value, label]) => ({ label, value, default: value === view.selection.scope }))),
-    select('pool', `活動池／卡池 ${page + 1}/${pages}`, options),
+  const rows = [select('scope', '選擇收益範圍', Object.entries(SCOPES).map(([value, label]) => ({ label, value, default: value === view.selection.scope })))];
+  const showPacks = hasPackFilter(view.selection) && pools.length > 0;
+  if (showPacks) rows.push(select('pool', pages > 1 ? `選擇卡包 ${page + 1}/${pages}` : '選擇卡包', options));
+  rows.push(
     select('period', '選擇期間', [['all', '全期間'], ['7d', '近 7 天'], ['30d', '近 30 天'], ['month', '本月'], ['custom', '自訂日期']]
       .map(([value, label]) => ({ label, value, default: value === view.selection.period }))),
-    new ActionRowBuilder().addComponents(button('detail', ({ summary: '完整分析', analysis: '逐筆明細', detail: '簡要摘要' })[view.selection.detail]),
-      button('png', '下載 PNG'), button('csv', '匯出 CSV'), button('refresh', '更新資料', ButtonStyle.Primary),
-      button('dimension', view.selection.dimension === 'origin' ? '切到交易分類' : '依卡片來源')),
-    new ActionRowBuilder().addComponents(button('search', '搜尋卡池'), button('clear-search', '清除搜尋'),
-      button('previous', '上一頁卡池').setDisabled(page === 0), button('next', '下一頁卡池').setDisabled(page === pages - 1)),
-  ];
+    new ActionRowBuilder().addComponents(button('detail', view.selection.detail === 'summary' ? '詳細報表' : '收合明細'),
+      button('png', '下載 PNG'), button('csv', '匯出 CSV'), button('refresh', '更新資料', ButtonStyle.Primary)));
+  if (hasPackFilter(view.selection) && (pages > 1 || view.search)) {
+    const navigation = [button('search', '搜尋卡包')];
+    if (view.search) navigation.push(button('clear-search', '清除搜尋'));
+    if (page > 0) navigation.push(button('previous', '上一頁'));
+    if (page < pages - 1) navigation.push(button('next', '下一頁'));
+    rows.push(new ActionRowBuilder().addComponents(...navigation));
+  }
+  return rows;
 }
 function input(id, label, value = '') {
   const field = new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100);
@@ -97,18 +103,19 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       return privateReply(interaction, '請在已設定的工具箱頻道或其討論串使用錢包分析。');
     }
     if (autocomplete) {
+      if (!hasPackFilter({ scope: interaction.options.getString('scope') || 'all' })) return interaction.respond([]);
       const wallet = interaction.options.getString('address');
       if (!/^0x[\da-f]{40}$/i.test(wallet || '')) return interaction.respond([]);
       const ledger = await service.load(wallet);
       const query = String(interaction.options.getFocused()).toLowerCase();
-      return interaction.respond(ledger.catalog.filter(pool => `${pool.name} ${pool.id}`.toLowerCase().includes(query))
-        .slice(0, 25).map(pool => ({ name: pool.name.slice(0, 100), value: pool.id })));
+      return interaction.respond(ledger.catalog.filter(pool => pool.kind === 'packs' && displayPoolName(pool).toLowerCase().includes(query))
+        .slice(0, 25).map(pool => ({ name: displayPoolName(pool).slice(0, 100), value: pool.id })));
     }
     let status, view, acquired = false;
     try {
       if (command) {
         const wallet = address(interaction.options.getString('address', true).trim());
-        const selection = { scope: interaction.options.getString('scope') || 'all', poolId: interaction.options.getString('pool') || null,
+        const selection = { scope: interaction.options.getString('scope') || 'all', poolId: null,
           period: interaction.options.getString('period') || 'all', from: interaction.options.getString('from'),
           to: interaction.options.getString('to'), dimension: 'location', detail: 'summary' };
         if (!SCOPES[selection.scope]) throw Error('無效範圍');
@@ -136,9 +143,12 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       if (view.ownerId !== interaction.user.id) return privateReply(interaction, '這是其他成員的報告；請使用 /wallet 建立自己的分析。');
       if (view.channelId !== interaction.channelId || view.messageId && interaction.message?.id !== view.messageId)
         return privateReply(interaction, '報告與目前討論串不相符，請回原報告操作。');
+      view.selection = tidySelection(view.selection);
       if (busy.has(id)) return privateReply(interaction, '上一個操作正在完成，請稍候。');
+      if (['pool', 'search', 'search-submit', 'clear-search', 'previous', 'next'].includes(action) && !hasPackFilter(view.selection))
+        return privateReply(interaction, '這個活動不需要選擇卡包，點「更新資料」即可使用精簡介面。');
       if (action === 'search') return interaction.showModal(new ModalBuilder().setCustomId(customId(id, 'search-submit'))
-        .setTitle('搜尋活動池／卡池').addComponents(input('query', '名稱、活動 ID 或合約地址', view.search)));
+        .setTitle('搜尋卡包').addComponents(input('query', '卡包名稱', view.search)));
       if (action === 'period' && interaction.values?.[0] === 'custom') return interaction.showModal(
         new ModalBuilder().setCustomId(customId(id, 'dates-submit')).setTitle('自訂日期（台灣時間）')
           .addComponents(input('from', '起日 YYYY-MM-DD', view.selection.from), input('to', '迄日 YYYY-MM-DD', view.selection.to)));
@@ -155,8 +165,8 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       if (action === 'scope') { next.selection.scope = interaction.values[0]; next.selection.poolId = null; next.poolPage = 0; next.search = ''; }
       else if (action === 'pool') next.selection.poolId = interaction.values[0] === 'all' ? null : interaction.values[0];
       else if (action === 'period') next.selection.period = interaction.values[0];
-      else if (action === 'detail') next.selection.detail = ({ summary: 'analysis', analysis: 'detail', detail: 'summary' })[next.selection.detail];
-      else if (action === 'dimension') { next.selection.dimension = next.selection.dimension === 'origin' ? 'location' : 'origin'; next.selection.poolId = null; next.poolPage = 0; }
+      else if (action === 'detail') next.selection.detail = next.selection.detail === 'summary' ? 'detail' : 'summary';
+      else if (action === 'dimension') { next.selection.dimension = 'location'; next.selection.poolId = null; next.poolPage = 0; }
       else if (action === 'next') next.poolPage++;
       else if (action === 'previous') next.poolPage = Math.max(0, next.poolPage - 1);
       else if (action === 'clear-search') { next.search = ''; next.poolPage = 0; }

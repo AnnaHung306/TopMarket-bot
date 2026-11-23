@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { FileLedgerStore } from '../store.mjs';
 import { upgradeDefinition } from '../registry.mjs';
 import { decodeUpgradeLog, receiptTransfers } from '../upgrade.mjs';
-import { createV2InteractionHandler } from '../discord.mjs';
+import { createV2InteractionHandler, viewComponents } from '../discord.mjs';
 const fixture = JSON.parse(await readFile(new URL('../fixtures/public-upgrades.json', import.meta.url)));
 const definition = await upgradeDefinition(), pool = { ...definition, definition, supported: true };
 const times = new Map(fixture.blocks.map(block => [Number(block.number), Number(block.timestamp)]));
@@ -49,7 +49,7 @@ test('offline existing-thread path edits its report directly; toolbox path creat
   const inThread = await harness();
   assert.equal(inThread.threads, 0); assert.equal(inThread.queries, 1);
   assert.equal(inThread.resultMessage.payload.files[0].name, 'wallet-v2.png');
-  assert.equal(inThread.resultMessage.payload.components.length, 5);
+  assert.equal(inThread.resultMessage.payload.components.length, 3);
   const toolbox = await harness({ toolbox: true });
   assert.equal(toolbox.threads, 1); assert.equal(toolbox.queries, 1);
 });
@@ -64,13 +64,13 @@ test('offline controls isolate the owner and perform filter-only changes without
   await h.handler(denied);
   assert.match(denied.replyPayload.content, /其他成員/);
   const detail = h.component('detail'); await h.handler(detail);
-  assert.equal((await h.viewStore.loadView(h.id)).selection.detail, 'analysis');
-  await h.handler(h.component('detail'));
   assert.equal((await h.viewStore.loadView(h.id)).selection.detail, 'detail');
+  await h.handler(h.component('detail'));
+  assert.equal((await h.viewStore.loadView(h.id)).selection.detail, 'summary');
   await h.handler(h.component('period', ['7d']));
   await h.handler(h.component('dimension'));
   assert.equal(h.queries, 1);
-  assert.equal((await h.viewStore.loadView(h.id)).selection.dimension, 'origin');
+  assert.equal((await h.viewStore.loadView(h.id)).selection.dimension, 'location');
 });
 test('offline modal dates validate before saving; state survives a new controller', async () => {
   const h = await harness();
@@ -108,5 +108,23 @@ test('offline duplicate click cannot release another operation lock or overwrite
   assert.match(second.replyPayload.content, /上一個操作/); assert.match(third.replyPayload.content, /上一個操作/);
   release(); await first;
   const view = await h.viewStore.loadView(h.id);
-  assert.equal(view.selection.detail, 'analysis'); assert.equal(view.selection.dimension, 'location');
+  assert.equal(view.selection.detail, 'detail'); assert.equal(view.selection.dimension, 'location');
+});
+test('upgrade controls never offer pack/source/search inputs, including a persisted origin view', () => {
+  const pack = { id: 'pack:' + '0x' + '1'.repeat(40), kind: 'packs', name: 'Starter Pack', address: '0x' + '1'.repeat(40) };
+  const rows = viewComponents({ ...ledger, catalog: [...ledger.catalog, pack] }, { id: 'a'.repeat(32), selection: {
+    scope: 'upgrade', poolId: pack.id, dimension: 'origin', period: 'all', detail: 'summary' } }).map(row => row.toJSON());
+  const ids = rows.flatMap(row => row.components.map(component => component.custom_id.split(':').at(-1)));
+  assert.deepEqual(ids, ['scope', 'period', 'detail', 'png', 'csv', 'refresh']);
+  assert.equal(rows.length, 3);
+});
+test('small pack lists show names without contract descriptions or unused navigation', () => {
+  const pack = { id: 'pack:' + '0x' + '1'.repeat(40), kind: 'packs', name: 'Starter Pack', address: '0x' + '1'.repeat(40), enabled: false };
+  const rows = viewComponents({ ...ledger, catalog: [pack] }, { id: 'a'.repeat(32), selection: {
+    scope: 'packs', period: 'all', detail: 'summary' } }).map(row => row.toJSON());
+  assert.equal(rows.length, 4);
+  const options = rows[1].components[0].options;
+  assert.equal(options[1].label, 'Starter Pack'); assert.equal(options[1].description, '已結束');
+  assert.ok(options.every(option => !/0x/i.test(option.label + (option.description || ''))));
+  assert.ok(rows.flatMap(row => row.components).every(component => !/search|previous|next|dimension/.test(component.custom_id)));
 });

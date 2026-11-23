@@ -1,6 +1,6 @@
 # Wallet V2 功能與驗證清單
 
-核准範圍：2026-11-23 本聊天改版提案。沿用 checkout wallet-report-import、分支 main，基底 b55e3d87da6d86af18bd2f35ba89d8c3049198e2。
+初版核准範圍：2026-11-23 本聊天改版提案。沿用 checkout wallet-report-import、分支 main，原基底 b55e3d87da6d86af18bd2f35ba89d8c3049198e2。其後依使用者明確同意整合最新 main、push 及部署，最新發布與實測見 wallet-v2-deployment.md。
 
 「完成」指實作與本機驗證，不代表使用者已驗收，也不代表正式 Discord 或 Railway 已啟用。
 
@@ -49,16 +49,17 @@
 
 - [x] 正常 V2 CLI 真實查詢、保存、重開程序匯出。
 - [x] 文字、CSV、PNG DOM 指標及 Gavin 原會計總額交叉核對。
-- [x] 40 項 V2 離線檢查：會計、命名空間、持有連續性、晚加入並行、原子保存、失敗續查、篩選、輸出、controller、證據大小與個別限流重試。
+- [x] 44 項 V2 離線檢查：會計、命名空間、持有連續性、晚加入並行、原子保存、失敗續查、篩選、輸出、controller、證據大小、個別限流重試與精簡介面。
 - [x] 專用本機 PostgreSQL 真正交易、回滾、更新與新連線讀回。
 - [x] 原 npm test、npm run test:discord 通過；沒有改動舊會計或現行 bot 入口。
 - [x] 正常 CLI 以台灣日期包含／排除實際交易；來源卡池視角核對；一般及大型 PNG 親自檢視，無溢出；大型重查未重做已保存成本證據。
 - [x] 已依 acceptance/cleanup-files.txt 刪除 108 個測試 JSON；專用 PostgreSQL tmpfs 容器已停止並自動移除。真實明細、報表與研究保留。
-- [ ] 使用者審核及真正 Discord 驗收：尚未進行，保留後續授權。
+- [x] 初次部署後由使用者在 mod-only 操作，已回報收到文字／PNG，Railway 日誌吻合。
+- [ ] 試用後精簡介面與大字海報待使用者確認；不視為已驗收。
 
 ## 現行版本保護
 
-本輪不 push、不建立需上傳的 PR、不部署、不改 Railway、不連正式資料庫。npm start、舊 /wallet、每日活動與目前 Discord 註冊均不切換。本機 .env 被 Git 忽略，key 從未印入輸出或交付檔案。
+初版開發階段未 push／部署。取得使用者後續明確同意後，已整合最新每日功能與工具箱，透過同一 bot 啟用 V2 /wallet；新表與原資料表分開。本機 .env 被 Git 忽略，key 從未印入輸出或交付檔案。發布詳情以 wallet-v2-deployment.md 為準。
 
 保留既有五個未追蹤路徑：blockscout-probe-test.mjs、cat-review/、poster-preview.png、tenor-cat-review/、worker/history/blockscout-probe.js。
 
@@ -73,4 +74,4 @@
 - work/wallet-v2/acceptance/alchemy-cold.json、alchemy-warm.json：一般樣本首次／重查量測。
 - work/wallet-v2/acceptance/public-loss-resumed.*、public-large-warm.*：大型公開樣本補查／重查量測與報表。
 
-Git 收尾：本輪未提交，仍在 main（b55e3d87），沒有為本輪建立 PR 或推送。待使用者審核後再決定後續接線／發布；本機驗證不能代替正式 Discord 驗收。
+Git 收尾：依明確授權直接 push main，未另開 PR；保留原有五個未追蹤路徑。版本與驗證狀態見部署文件，本機驗證不能代替正式 Discord 驗收。

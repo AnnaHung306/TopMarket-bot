@@ -15,8 +15,16 @@
 - [x] 同 checkout 快轉整合最新 main，未遺失 V2 未提交檔案與既有五個未追蹤路徑。
 - [x] 42 項 V2 檢查、原 npm test、test:discord、daily 與 toolbox 檢查通過。
 - [x] 正式 Dockerfile 建置成功；Linux 無網路容器從真實明細用正常 CLI 產圖，2,584 ms，PNG 681,961 bytes，文字／CSV 金額一致。
-- [ ] Git 上傳明確授權、版本提交／上傳。
-- [ ] Railway 版本、設定、啟動日誌與 schema 核對。
+- [x] 使用者明確同意 push main、部署及 mod-only 實測；c3741a6 已上傳，遠端 main 核對相符。
+- [x] Railway deployment 809197e4-bb94-4f86-b319-e8e6fd607e4c SUCCESS，固定 c3741a6；新增兩個 V2 設定，21:19:50 台灣時間 bot ready，V2 schema 初始化先於登入完成。
 - [ ] 網頁 Discord mod-only 真實文字／PNG／篩選／下載／原串試用。
 
 不把 build／deploy success 或 bot ready 當作 Discord 已驗收。各步完成後補記實際 commit、deployment 與結果。
+
+使用者已於真實 Discord 回報收到文字及 PNG，並提供實際升級選單畫面。Railway 首次公開樣本查詢 3,677 ms／估算 6,432 CU；產圖 2,308 ms。其後 packs 更新 1,106 ms／462 CU。CU 為程式估算，並非儀表板實際帳務。網頁控制工具失去連線，本輪操作由使用者執行，不宣稱代理親自完成 Discord 操作。
+
+## 試用後精簡修正
+
+使用者要求放大數字、刪掉冗長資訊，並讓卡牌升級不出現卡包選項。已將主數字改為 96px、其他金額 60px；PNG 約 1150px 高，升級專屬約 721px 高。隱藏升級卡包／來源／搜尋，卡包只展示名稱，少量卡包不展示翻頁；預設文字只留收益和結果，詳細紀錄由文字展開與 CSV 提供。保留新舊 view ID 相容，舊訊息按「更新資料」即可套用新版。
+
+44 項 V2 檢查通過，包含升級不出現卡包控制、少量卡包不出現搜尋及地址。正常 CLI 已以一般、升級與大型公開錢包驗證文字／PNG／CSV 金額一致；圖片已親自檢視。精簡版上傳及 Railway 部署狀態完成後補記。

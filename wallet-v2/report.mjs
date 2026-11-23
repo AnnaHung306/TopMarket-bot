@@ -1,4 +1,4 @@
-import { SCOPES, OUTCOME_LABELS, DELIVERY_LABELS, CATEGORY_LABELS, dateRange, assetKey, money, displayTime } from './model.mjs';
+import { SCOPES, OUTCOME_LABELS, DELIVERY_LABELS, CATEGORY_LABELS, dateRange, assetKey, money, displayTime, displayPoolName } from './model.mjs';
 import { cashFlows } from './gavin.mjs';
 import { upgradeSpins } from './upgrade.mjs';
 import { traceLineage } from './lineage.mjs';
@@ -42,7 +42,7 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
   const proceedsFromUpgrade = cash.flows.filter(row => within(row) && row.direction === 'in' && row.assetActivities?.includes('upgrade') && lineagePoolMatches(row));
   const report = {
     version: 2, wallet: ledger.wallet, filter, range: { label: range.label }, asOf: ledger.asOf || null,
-    title: `${SCOPES[filter.scope]}${pool ? ' · ' + pool.name.slice(0, 100) : ''}`, poolName: pool?.name || null,
+    title: `${SCOPES[filter.scope]}${pool ? ' · ' + displayPoolName(pool).slice(0, 100) : ''}`, poolName: pool ? displayPoolName(pool) : null,
     complete, coverage, flows, pending, realized,
     cash: { inRaw: sum(flows.filter(row => row.direction === 'in'), 'raw'), outRaw: sum(flows.filter(row => row.direction === 'out'), 'raw') },
     realizedSummary: { knownPnlRaw: sum(realized.filter(row => row.pnlRaw !== null), 'pnlRaw'),
@@ -87,20 +87,21 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
   }
   const totals = row => ({ ...row, netRaw: (BigInt(row.inRaw) - BigInt(row.outRaw)).toString() });
   report.analysis = { byActivity: [...byActivity.values()].map(row => ({ ...totals(row), name: SCOPES[row.id] })),
-    byPool: [...byPool.values()].map(row => ({ ...totals(row), name: ledger.catalog.find(p => p.id === row.id)?.name || '未能唯一歸屬' })) };
+    byPool: [...byPool.values()].map(row => { const pool = ledger.catalog.find(p => p.id === row.id); return { ...totals(row), name: pool ? displayPoolName(pool) : '其他收益' }; }) };
   report.metrics = [
-    { key: 'cashIn', label: '已核實 USDC 收入', raw: report.cash.inRaw, kind: 'cash' },
-    { key: 'cashOut', label: '已核實 USDC 支出', raw: report.cash.outRaw, kind: 'cash' },
-    { key: 'cashNet', label: complete && !pending.length ? '淨現金收支' : '已識別部分淨現金收支', raw: report.cash.netRaw, kind: 'cash' },
-    { key: 'realized', label: unknownCostCount ? '可追溯已實現差額（已核實部分）' : '可追溯已實現收支差額', raw: report.realizedSummary.knownCount ? report.realizedSummary.knownPnlRaw : null, kind: 'expenditure' },
-    ...(['all', 'upgrade'].includes(filter.scope) ? [{ key: 'upgradeValue', label: '升級已結算估值變化（非現金）',
+    ...(filter.scope === 'upgrade' ? [] : [
+      { key: 'cashIn', label: '收入', raw: report.cash.inRaw, kind: 'cash' },
+      { key: 'cashOut', label: '支出', raw: report.cash.outRaw, kind: 'cash' },
+      { key: 'cashNet', label: complete && !pending.length ? '淨收支' : '淨收支（已核對部分）', raw: report.cash.netRaw, kind: 'cash' }]),
+    ...(report.realized.length ? [{ key: 'realized', label: unknownCostCount ? '已實現收益（已核對部分）' : '已實現收益', raw: report.realizedSummary.knownCount ? report.realizedSummary.knownPnlRaw : null, kind: 'expenditure' }] : []),
+    ...(['all', 'upgrade'].includes(filter.scope) && (filter.scope === 'upgrade' || selectedSpins.length || coverage.some(c => c.key.startsWith('upgrade:') && c.status !== 'verified')) ? [{ key: 'upgradeValue', label: '卡片估值變化',
       raw: coverage.some(c => c.key.startsWith('upgrade:') && c.status !== 'verified') ? null : report.upgrade.referenceChangeRaw, kind: 'reference' }] : []),
   ];
   return report;
 }
 export function describeCard(ledger, collection, tokenId) {
   const name = ledger.cards?.[assetKey(collection, tokenId)]?.name || ledger.cards?.[collection]?.name;
-  return `${name || collection.slice(0, 10) + '…'} · NFT #${tokenId}`;
+  return `${name || '卡片'} · NFT #${tokenId}`;
 }
 export function textReport(report) {
   const shortCard = label => {
@@ -108,15 +109,14 @@ export function textReport(report) {
     const suffix = / · NFT #\d+$/.exec(label)?.[0] || '';
     return label.slice(0, 54 - suffix.length).trimEnd() + '…' + suffix;
   };
-  const lines = [`**Top.Market 錢包分析 V2 · ${report.title}**`, `\`${report.wallet}\``,
-    `${report.range.label} · ${report.filter.dimension === 'origin' ? '卡片來源歸屬' : '交易發生分類'}`,
+  const lines = [`**Top.Market · ${report.title}**`, `\`${report.wallet}\``, report.range.label,
     ...report.metrics.map(metric => `${metric.label}：${money(metric.raw)}${metric.raw == null ? '' : ' USDC'}`)];
-  if (['all', 'upgrade'].includes(report.filter.scope)) {
+  if (['all', 'upgrade'].includes(report.filter.scope) && (report.filter.scope === 'upgrade' || report.upgrade.spins.length)) {
     const u = report.upgrade;
-    lines.push(`升級：本期申請 ${u.requests} 次｜本期結算成功 ${u.won}／失敗 ${u.lost}`,
-      `待結算 ${u.pending}｜救援退卡 ${u.rescued}｜待領取 ${u.claimable}`,
-      `本期結算成功率：${u.winRate === null ? '無已結算樣本' : (u.winRate * 100).toFixed(2) + '%'}`,
-      `升級卡後續已核實實收：${money(u.laterProceedsRaw)}${u.laterProceedsRaw === null ? '' : ' USDC'}`);
+    lines.push(`升級 ${u.requests} 次｜成功 ${u.won}／失敗 ${u.lost}`);
+    const pending = [[u.pending, '待結算'], [u.rescued, '已救援'], [u.claimable, '待領取']].filter(([count]) => count).map(([count, label]) => `${label} ${count}`);
+    if (pending.length) lines.push(pending.join('｜'));
+    if (u.laterProceedsRaw && BigInt(u.laterProceedsRaw) > 0n) lines.push(`升級卡後續收入：${money(u.laterProceedsRaw)} USDC`);
   }
   const extra = [];
   if (report.filter.detail === 'detail') {
@@ -125,11 +125,14 @@ export function textReport(report) {
   }
   if (report.filter.detail !== 'summary') {
     const s = report.realizedSummary;
-    extra.push(`已核實取得支出差額 ${s.knownCount} 筆：實收 ${money(s.knownProceedsRaw)} − 取得支出 ${money(s.knownCostRaw)} USDC`);
+    if (s.knownCount) extra.push(`已實現 ${s.knownCount} 筆：收入 ${money(s.knownProceedsRaw)} − 成本 ${money(s.knownCostRaw)} USDC`);
     for (const group of report.analysis.byPool.slice(0, 3)) extra.push(`${group.name.slice(0, 100)}：淨現金 ${money(group.netRaw)} USDC`);
   }
-  const footer = [`資料時間：${displayTime(report.asOf)}`, ...report.warnings.slice(0, 3).map(w => '⚠️ ' + w.slice(0, 220)),
-    '現金、取得支出差額與估值分開呈現；不含 Gas，不作稅務成本認定。'];
+  const footer = [
+    ...(!report.complete ? ['部分資料待核對'] : []),
+    ...(report.pending.length ? [`${report.pending.length} 筆金額待核對`] : []),
+    ...(report.realizedSummary.unknownCostCount ? [`${report.realizedSummary.unknownCostCount} 筆成本未知`] : []),
+    `更新：${displayTime(report.asOf)}`];
   for (const line of extra) {
     if ([...lines, line, ...footer].join('\n').length > 1900) { lines.push('其餘逐筆明細與證據請見 CSV。'); break; }
     lines.push(line);

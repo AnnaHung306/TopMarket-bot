@@ -1,4 +1,4 @@
-# Top.Market Wallet V2（本機開發版）
+# Top.Market Wallet V2
 
 本版採用 Gavin 原查詢引擎，新增獨立事件明細、升級合約解析、篩選、取得支出追蹤與共用報表。`npm start` 仍啟動原本同一個 bot；明確設定 `WALLET_V2_ENABLED=true` 時才改用 V2 `/wallet`，未設定則使用原引擎。部署追蹤見 `docs/wallet-v2-deployment.md`。
 
@@ -47,7 +47,9 @@ node scripts/wallet-v2.mjs export --wallet 0x錢包地址 --pool pack:0x卡池�
 
 `wallet-v2/discord.mjs` 匯出指令定義與 handler factory，沒有登入、註冊、啟用的副作用。`runtime.mjs` 在原本的 bot 入口選擇單一 `/wallet` handler，不能與舊 handler 同時啟用；沒有第二個 bot。
 
-整合時注入 V2 service、持久化 view store 及原本的工具箱 channel ID。handler 支援工具箱另開串／原串直接回覆、三個篩選選單、卡池搜尋與分頁、日期 Modal、三種詳細程度、PNG／CSV 下載與明確更新。只有原查詢者可改該份報告；其他成員可另外查詢自己的報告。缺少 channel 設定時拒絕處理。
+整合時注入 V2 service、持久化 view store 及原本的工具箱 channel ID。工具箱另開串／原串直接回覆；收益範圍與期間為基本選單，僅全部／抽卡／回購提供卡包名稱篩選，超過一頁才顯示搜尋及翻頁。卡牌升級不提供卡包／來源選項。只有原查詢者可改該份報告；其他成員可另外查詢自己的報告。缺少 channel 設定時拒絕處理。
+
+預設文字為收益摘要，「詳細報表」展開文字明細；PNG 固定為大字重點版，淨收支／升級估值主數字 96px，其他金額 60px，分類表格及逐筆資料不塞進圖片。卡牌升級只顯示相關收益與升級結果，不顯示無關的零收入／零支出。完整紀錄與證據保留在 CSV。使用者介面不顯示卡包合約地址或制式免責段落；有未核對資料時只用簡短事實提示。
 
 V2 另外允許已核對 guild、MOD 角色的成員在既定 `mod-only` 與其討論串試用。其他頻道維持拒絕；未設定完整 MOD 政策不開放此入口。真正 Discord 收件結果另外記錄在部署文件，不以離線 controller 檢查替代。
 

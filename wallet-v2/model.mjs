@@ -26,6 +26,10 @@ export function words(data) {
 export const integer = value => BigInt(value).toString();
 export function eventId(tx, index) { return `${CHAIN_ID}:${tx.toLowerCase()}:${Number(index)}`; }
 export const assetKey = (collection, tokenId) => `${address(collection)}:${BigInt(tokenId)}`;
+export function displayPoolName(pool) {
+  const name = String(pool.name || '').replace(/0x[\da-f]{8,}(?:…)?/gi, '').replace(/鏈上卡池\s*/g, '').trim();
+  return name || (pool.kind === 'upgrade' ? '卡牌升級' : '未命名卡包');
+}
 export function money(raw, decimals = 6) {
   if (raw === null || raw === undefined) return '未知';
   const value = BigInt(raw), abs = value < 0n ? -value : value, unit = 10n ** BigInt(decimals);
