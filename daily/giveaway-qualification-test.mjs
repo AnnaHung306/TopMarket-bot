@@ -64,17 +64,23 @@ const groupGuild={id:guildId,roles:{fetch:async()=>({position:1})},members:{me:g
 assert.deepEqual(new Set(await qualifyingMembers({guild:groupGuild,categoryId:groupId,start:eventTimes(day,'giveaway').start,end:eventTimes(day,'giveaway').start+1000})),new Set([userId,other]));
 let dayNow=eventTimes(day,'giveaway').start+1000;
 const grants=new Map(), sessions=new Map([[day,{channel_id:testChannelId,message_id:messageId}]]), cancelled=new Set([other]);
+let unclassifiedLegacy = [];
 const memberSql=async(parts,...values)=>{
   const q=parts.join('?');
+  if(q.startsWith('SELECT g.user_id,g.activity_day'))return unclassifiedLegacy;
   if(q.startsWith('SELECT user_id,activity_day'))return [...grants].map(([user_id,activity_day])=>({user_id,activity_day}));
   if(q.startsWith('SELECT channel_id,message_id'))return sessions.has(values[0])?[sessions.get(values[0])]:[];
   if(q.startsWith('SELECT 1 FROM daily_disqualifications'))return cancelled.has(values[1])?[{}]:[];
-  if(q.startsWith('SELECT activity_day FROM daily_giveaway_role_grants'))return grants.has(values[0])?[{activity_day:grants.get(values[0])}]:[];
-  if(q.startsWith('INSERT INTO daily_giveaway_role_grants')){grants.set(values[0],values[1]);return [];}
-  if(q.startsWith('DELETE FROM daily_giveaway_role_grants')){grants.delete(values[0]);return [];}
+  if(q.startsWith('SELECT activity_day FROM daily_giveaway_member_role_grants'))return grants.has(values[0])?[{activity_day:grants.get(values[0])}]:[];
+  if(q.startsWith('INSERT INTO daily_giveaway_member_role_grants')){grants.set(values[0],values[1]);return [];}
+  if(q.startsWith('DELETE FROM daily_giveaway_member_role_grants')){grants.delete(values[0]);return [];}
   throw Error(`Unexpected SQL ${q}`);
 };
 const membersBridge=createMemberGiveawayQualification({guildId,roleId,boatId,channelId:testChannelId,categoryId:groupId,client:{guilds:{fetch:async()=>groupGuild}},sql:memberSql,now:()=>dayNow});
+unclassifiedLegacy = [{user_id:userId,activity_day:'2026-11-19'}];
+await assert.rejects(membersBridge.tick(),/DAILY_GIVEAWAY_LEGACY_GRANTS_UNCLASSIFIED/);
+assert.equal(grants.size,0,'unclassified legacy records block production grants');
+unclassifiedLegacy = [];
 await membersBridge.tick();
 assert.equal(roleMembers.get(userId).has,true);
 assert.equal(roleMembers.get(other).has,false,'a cancelled member must not regain the role');

@@ -27,7 +27,10 @@ export function createMemberGiveawayQualification({guildId,roleId,boatId,channel
   if (![guildId,roleId,boatId,channelId,categoryId].every(v=>idPattern.test(v||'')) || (unverifiedRoleId && !idPattern.test(unverifiedRoleId))) throw Error('DAILY_GIVEAWAY_CONFIGURATION_INVALID');
   let running=false;
   async function initialize() {
+    // Retain legacy rows for audit; production grants have a separate ledger.
     await sql`CREATE TABLE IF NOT EXISTS daily_giveaway_role_grants (user_id text PRIMARY KEY, activity_day text NOT NULL)`;
+    await sql`CREATE TABLE IF NOT EXISTS daily_giveaway_legacy_test_grants (user_id text NOT NULL, activity_day text NOT NULL, test_role_id text NOT NULL, test_channel_id text NOT NULL, evidence text NOT NULL, classified_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(user_id,activity_day))`;
+    await sql`CREATE TABLE IF NOT EXISTS daily_giveaway_member_role_grants (user_id text PRIMARY KEY, activity_day text NOT NULL)`;
     await sql`CREATE TABLE IF NOT EXISTS daily_giveaway_sessions (day text PRIMARY KEY, channel_id text NOT NULL, message_id text NOT NULL UNIQUE)`;
     await sql`CREATE TABLE IF NOT EXISTS daily_disqualifications (day text NOT NULL, kind text NOT NULL, user_id text NOT NULL, moderator_id text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(day,kind,user_id))`;
   }
@@ -37,7 +40,9 @@ export function createMemberGiveawayQualification({guildId,roleId,boatId,channel
     try {
       const time=now();
       const day=[dateKey(time-DAY),dateKey(time)].find(d=>isActivityDay(d)&&time>=eventTimes(d,'giveaway').start&&time<eventTimes(d,'giveaway').end);
-      const grants=await sql`SELECT user_id,activity_day FROM daily_giveaway_role_grants ORDER BY activity_day,user_id`;
+      const unclassified=await sql`SELECT g.user_id,g.activity_day FROM daily_giveaway_role_grants g LEFT JOIN daily_giveaway_legacy_test_grants t ON t.user_id=g.user_id AND t.activity_day=g.activity_day AND t.test_role_id<>${roleId} AND t.test_channel_id<>${channelId} AND length(btrim(t.evidence))>0 WHERE t.user_id IS NULL ORDER BY g.activity_day,g.user_id`;
+      if(unclassified.length) throw Error('DAILY_GIVEAWAY_LEGACY_GRANTS_UNCLASSIFIED');
+      const grants=await sql`SELECT user_id,activity_day FROM daily_giveaway_member_role_grants ORDER BY activity_day,user_id`;
       const old=grants.filter(row=>row.activity_day!==day && time>=reportTime(row.activity_day,'giveaway'));
       if(!day&&!old.length) return;
       const guild=await client.guilds.fetch(guildId);
@@ -52,7 +57,7 @@ export function createMemberGiveawayQualification({guildId,roleId,boatId,channel
         try {member=await guild.members.fetch({user:row.user_id,force:true});}
         catch(error) {if(error.code!==10007) throw error;}
         if(member?.roles.cache.has(roleId)) await member.roles.remove(roleId,'Previous registered Giveaway Boat draw confirmed');
-        await sql`DELETE FROM daily_giveaway_role_grants WHERE user_id=${row.user_id} AND activity_day=${row.activity_day}`;
+        await sql`DELETE FROM daily_giveaway_member_role_grants WHERE user_id=${row.user_id} AND activity_day=${row.activity_day}`;
       }
       if(!day) return;
       // Reconcile a cancellation whose Discord role removal failed, even if
@@ -82,12 +87,12 @@ export function createMemberGiveawayQualification({guildId,roleId,boatId,channel
         const member=await guild.members.fetch({user:userId,force:true});
         if (!member.roles?.cache) throw Error('DAILY_GIVEAWAY_MEMBER_ROLES_UNAVAILABLE');
         if(member.user.bot || !member.manageable || (unverifiedRoleId && member.roles.cache.has(unverifiedRoleId))) continue;
-        const [grant]=await sql`SELECT activity_day FROM daily_giveaway_role_grants WHERE user_id=${userId}`;
+        const [grant]=await sql`SELECT activity_day FROM daily_giveaway_member_role_grants WHERE user_id=${userId}`;
         if(member.roles.cache.has(roleId)) {
           if(!grant || grant.activity_day!==day) throw Error('DAILY_GIVEAWAY_UNTRACKED_ROLE');
           continue;
         }
-        await sql`INSERT INTO daily_giveaway_role_grants(user_id,activity_day) VALUES (${userId},${day}) ON CONFLICT(user_id) DO UPDATE SET activity_day=excluded.activity_day`;
+        await sql`INSERT INTO daily_giveaway_member_role_grants(user_id,activity_day) VALUES (${userId},${day}) ON CONFLICT(user_id) DO UPDATE SET activity_day=excluded.activity_day`;
         await member.roles.add(roleId,'Qualified for daily giveaway');
       }
     } finally {running=false;}

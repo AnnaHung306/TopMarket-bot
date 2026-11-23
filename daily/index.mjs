@@ -123,6 +123,7 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
       .setLabel(label).setStyle(i === 0 ? ButtonStyle.Primary : ButtonStyle.Secondary)))];
   }
   function content(event) {
+    if (event.day >= '2026-11-24') return `📝 **每日答題**\n${activityRules(event.day,'quiz')}\n----------\n**題目：**${event.question}`;
     return `📝 **每日答題**\n${activityRules(event.day,'quiz')}\n\n**題目：**${event.question}\n點選「參加答題」並通過資格驗證後，選項會僅對你顯示。`;
   }
   async function send(channel, payload, key) {
