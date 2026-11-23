@@ -19,7 +19,7 @@ export function keywordFor(message, inScope = privateScope) {
   // Only a direct, first-person statement that the sender has lost money.
   if (/^(?:[\s，。！!,.…～~唉哎啊呜嗚]{0,8})我(?:今天|今日|剛剛|刚刚|這次|这次|剛才|刚才|真的|又|剛|刚|\s){0,3}(?:虧錢|亏钱|虧钱|亏錢)\s*(?:了|啦|囉|咯)[\s。！!…～~]*$/u.test(text)) return 'loss';
   if (/今日[開开]卡/u.test(text)) return 'opening';
-  if (/早/u.test(text) || /(?<![a-z0-9])gm(?![a-z0-9])/iu.test(text)) return 'morning';
+  if (/早安|早上好/u.test(text) || /(?<![a-z0-9])gm(?![a-z0-9])/iu.test(text)) return 'morning';
   return null;
 }
 
