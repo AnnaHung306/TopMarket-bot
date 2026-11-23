@@ -99,3 +99,25 @@ await publicDaily.handle(i);
 assert.match(i.calls.at(-1)[1].content,/尚未完成伺服器驗證/,'role changes during eligibility checks must fail closed');
 assert.equal(stored,undefined);
 console.log('public quiz verification safety tests passed');
+
+// Verified-only audience requires a complete unverified member audit before
+// offering private quiz choices, even if the requester is otherwise eligible.
+const verifiedId='10000000000000014';
+const verifiedRoleObj={permissions:{has:()=>false}};
+const auditedMember={id:'10000000000000015',roles:{cache:new Map([[unverified,true]])}};
+let auditedMemberCanView=false, audits=0;
+const verifiedActivity={...activityChannel,permissionOverwrites:{cache:new Map([[guildId,ow(guildId,false,true)],[unverified,ow(unverified,false,true)],[verifiedId,ow(verifiedId,true)]])},permissionsFor:viewer=>({has:()=>viewer===unverifiedRole ? false : viewer===auditedMember ? auditedMemberCanView : true})};
+const checkedGuild={...publicGuild,memberCount:1,roles:{cache:new Map([[unverified,unverifiedRole],[verifiedId,verifiedRoleObj]]),fetch:async()=>new Map([[unverified,unverifiedRole],[verifiedId,verifiedRoleObj]])},members:{me:{},fetch:async()=>({roles:{cache:new Map()}}),list:async()=>{audits++;return new Collection([[auditedMember.id,auditedMember]]);}},channels:{fetch:async id=>id===channelId?verifiedActivity:id===modId?moderatorChannel:new Collection([['chat',chat]])}};
+const checkedDaily=createDailyModule({client:{user:{id:botId},guilds:{fetch:async()=>checkedGuild}},sql,env:{...env,DAILY_PUBLIC_ACTIVITY_ENABLED:'true',DAILY_UNVERIFIED_ROLE_ID:unverified,DAILY_VERIFIED_ROLE_ID:verifiedId},now:()=>time,logger:{error:()=>{}}});
+time=start+60000; count=10; stored=undefined; disqualified=false;
+let checked=interaction(`daily:quiz:${day}:join`); checked.guild=checkedGuild;
+await checkedDaily.handle(checked);
+assert.equal(audits,1);
+assert.match(checked.calls.at(-1)[1].content,/選項一/);
+auditedMemberCanView=true;
+checked=interaction(`daily:quiz:${day}:join`); checked.guild=checkedGuild;
+await checkedDaily.handle(checked);
+assert.match(checked.calls.at(-1)[1].content,/無法驗證/);
+assert.equal(checked.calls.at(-1)[1].components.length,0);
+assert.equal(stored,undefined);
+console.log('verified-only quiz audience integration tests passed');

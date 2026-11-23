@@ -13,6 +13,7 @@ import { mayManageActivity, cancelCommand } from './moderator-access.mjs';
 import { recordCancellation, removeGiveawayRole } from './moderation-cancellation.mjs';
 import { quizParticipantIncidents, reviewPages } from './participant-review.mjs';
 import { assertActivityChannelPolicy } from './channel-policy.mjs';
+import { assertUnverifiedCannotView } from './verified-audience.mjs';
 export { eventTimes } from './time.mjs';
 
 const EPHEMERAL = MessageFlags.Ephemeral;
@@ -50,6 +51,7 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
   const giveawayBoatId = ids('DAILY_GIVEAWAY_BOAT_ID', env.DAILY_GIVEAWAY_BOAT_ID);
   const publicEnabled = env.DAILY_PUBLIC_ACTIVITY_ENABLED === 'true';
   const unverifiedRoleId = publicEnabled ? ids('DAILY_UNVERIFIED_ROLE_ID',env.DAILY_UNVERIFIED_ROLE_ID) : null;
+  const verifiedRoleId = publicEnabled && env.DAILY_VERIFIED_ROLE_ID ? ids('DAILY_VERIFIED_ROLE_ID',env.DAILY_VERIFIED_ROLE_ID) : null;
   if(publicEnabled && privateTestChannelId) throw Error('DAILY_PUBLIC_TEST_CONFIGURATION_INVALID');
   const snapshotsEnabled = env.DAILY_SNAPSHOT_ENABLED === 'true';
   const memberGiveawayEnabled = env.DAILY_GIVEAWAY_ENABLED === 'true';
@@ -99,8 +101,9 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
     if (!modChannel || modChannel.type !== ChannelType.GuildText) throw Error('DAILY_MOD_CHANNEL_INVALID');
     if (!modChannel.permissionsFor(guild.members.me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory])) throw Error('DAILY_MOD_CHANNEL_PERMISSIONS_MISSING');
     if (!channel.permissionsFor(guild.members.me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory])) throw Error('DAILY_CHANNEL_PERMISSIONS_MISSING');
-    if (publicEnabled) await guild.roles.fetch(unverifiedRoleId);
-    assertActivityChannelPolicy({guild,channel,modChannel,moderatorRoleId,botRoleId,botId:client.user.id,boatId:giveawayBoatId,publicEnabled,unverifiedRoleId,testUserId:privateTestChannelId && giveawayQualification ? env.DAILY_GIVEAWAY_TEST_USER_ID : null});
+    if (publicEnabled) await guild.roles.fetch();
+    assertActivityChannelPolicy({guild,channel,modChannel,moderatorRoleId,botRoleId,botId:client.user.id,boatId:giveawayBoatId,publicEnabled,unverifiedRoleId,verifiedRoleId,testUserId:privateTestChannelId && giveawayQualification ? env.DAILY_GIVEAWAY_TEST_USER_ID : null});
+    if (verifiedRoleId) await assertUnverifiedCannotView({guild,channel,unverifiedRoleId});
     return { guild, channel, modChannel };
   }
   // Reconstruct counts from the actual message history at admission, so reconnects
