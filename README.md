@@ -34,6 +34,10 @@ Railway 日誌的 `wallet_query` 會記錄查詢時間、原生分頁數、RPC H
 
 需要 Node.js 22+、Discord Bot、Alchemy Base API key，以及 PostgreSQL 資料庫。使用 Railway PostgreSQL 時設定 `DATABASE_DRIVER=postgres` 並將 `DATABASE_URL` 指向資料庫服務；未設定此選項時沿用 Neon。設定 `DISCORD_TOKEN`、`DISCORD_CLIENT_ID`、`ALCHEMY_API_KEY`、`DATABASE_URL`；可選 `DISCORD_GUILD_ID`，讓指令在指定伺服器較快出現。必須將 `DISCORD_WALLET_CHANNEL_ID` 設為 bot-toolbox 的頻道 ID，所有身分組的 `/wallet` 都只接受該頻道及其所屬討論串；其他頻道及其討論串會收到私密提示。設定缺漏、空字串或僅空白時，`/wallet` 會私密回覆設定未完成，其他 Bot 功能可繼續運作。Token 與資料庫連線字串應保存為 Railway 變數，切勿提交或貼在公開訊息中。
 
+`/times`、`/bindwallet address` 與 `/mywallet` 可在 bot-toolbox 及其討論串使用，結果只回覆本人。`/times` 使用啟用的每日活動設定與 `DAILY_GROUP_CATEGORY_ID`，讀取所有該分類下文字頻道的完整歷史，失敗時不回報計數。非活動期間不提供本場計數。`/bindwallet` 使用既有 `DATABASE_URL` 儲存每個伺服器和使用者的地址；資料表由 bot 在首次使用時建立，因此資料庫帳號須有建表權限。此功能僅記錄地址，並未驗證錢包所有權。使用 `/mywallet` 可私密查看；再次使用 `/bindwallet` 可更改。此功能與既有 `/wallet` 報表彼此獨立。
+
+MOD 也可在 `DAILY_MOD_CHANNEL_ID` 指定的 mod-only 頻道使用這三個指令；伺服器會核對 `DAILY_GUILD_ID` 和 `DAILY_MODERATOR_ROLE_ID`，不開放 mod-only 下的討論串。綁定使用正式資料庫，變更後與 bot-toolbox 讀到的地址相同。
+
 1. 在 Discord Developer Portal 建立 Application 與 Bot，取得 Application ID 和 Bot Token。使用 OAuth2 URL Generator 勾選 `bot` 和 `applications.commands`，並給機器人「檢視頻道」「傳送訊息」「建立公開討論串」「在討論串傳送訊息」「附加檔案」權限，再邀請到伺服器。這個機器人不需要訊息內容等 privileged intents。
 2. 在 Railway 建立從本儲存庫部署的服務，設定上述變數。Railway 使用 `npm start` 執行常駐程序；請維持單一實例。可使用 Railway PostgreSQL，並以服務參照提供 `DATABASE_URL`。不需要公開網域或 HTTP 服務。
 3. 若使用私人 MOD 頻道，讓 `@everyone` 無法檢視頻道，允許 MOD 身分組，並單獨允許機器人檢視、發言、建立公開討論串與附加檔案；將頻道 ID 設為 `DISCORD_WALLET_CHANNEL_ID`。置頂使用說明後，等待部署成功，在該頻道輸入 `/wallet` 並填入 Base 地址。若使用全域指令，Discord 的指令同步可能需要一些時間。

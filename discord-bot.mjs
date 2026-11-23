@@ -6,6 +6,7 @@ import { formatReport } from './discord-report.mjs';
 import { createWalletHandler } from './discord-interaction.mjs';
 import { createWalletQuery } from './discord-wallet-query.mjs';
 import { createDailyModule } from './daily/index.mjs';
+import { createToolboxHandler, toolboxCommands } from './toolbox.mjs';
 
 try { loadEnvFile(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 for (const key of ['DISCORD_TOKEN', 'DISCORD_CLIENT_ID']) {
@@ -38,6 +39,7 @@ client.once('clientReady', async () => {
     const app = process.env.DISCORD_CLIENT_ID;
     const route = process.env.DISCORD_GUILD_ID ? Routes.applicationGuildCommands(app, process.env.DISCORD_GUILD_ID) : Routes.applicationCommands(app);
     await rest.post(route, { body: command.toJSON() });
+    for (const body of toolboxCommands) await rest.post(route, { body });
     if (daily) {
       try {
         for (const body of daily.commands) await rest.post(Routes.applicationGuildCommands(app, daily.guildId), { body });
@@ -51,5 +53,11 @@ client.on('interactionCreate', createWalletHandler({
   queryWallet, renderPoster, formatReport,
   configured: () => Boolean(process.env.ALCHEMY_API_KEY?.trim() && process.env.DATABASE_URL?.trim()),
 }));
+let toolboxDatabase;
+const getToolboxDatabase = () => toolboxDatabase ||= database();
+const toolboxSql = (...args) => getToolboxDatabase()(...args);
+toolboxSql.transaction = queries => getToolboxDatabase().transaction(queries);
+const toolboxHandler = createToolboxHandler({ sql: toolboxSql });
+client.on('interactionCreate', interaction => void toolboxHandler(interaction).catch(error => console.error('TOOLBOX_INTERACTION_FAILED', error)));
 if (daily) client.on('interactionCreate', interaction => void daily.handle(interaction).catch(error => console.error('DAILY_INTERACTION_FAILED', error)));
 await client.login(process.env.DISCORD_TOKEN);
