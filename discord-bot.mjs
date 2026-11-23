@@ -18,7 +18,9 @@ const [{ walletCachePage }, { renderGavinPoster: renderPoster }] = await Promise
 ]);
 const command = new SlashCommandBuilder().setName('wallet').setDescription('查詢 Top.Market 錢包收支摘要')
   .addStringOption(option => option.setName('address').setDescription('Base 錢包地址').setRequired(true));
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const intents = [GatewayIntentBits.Guilds];
+if (process.env.DAILY_ENABLED === 'true' && process.env.DAILY_PUBLIC_ACTIVITY_ENABLED === 'true' && process.env.DAILY_VERIFIED_ROLE_ID) intents.push(GatewayIntentBits.GuildMembers);
+const client = new Client({ intents });
 let daily;
 if (process.env.DAILY_ENABLED === 'true') {
   try {
