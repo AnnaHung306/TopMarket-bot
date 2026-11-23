@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import { ChannelType, Collection, MessageFlags, MessageType } from 'discord.js';
+import { activeWindow, countMessages, createToolboxHandler } from './toolbox.mjs';
+
+const t = s => Date.parse(s + '+08:00');
+assert.equal(activeWindow(t('2026-11-20T09:59:59')), null);
+assert.equal(activeWindow(t('2026-11-20T10:00:00')).start, t('2026-11-20T10:00:00'));
+assert.equal(activeWindow(t('2026-11-21T08:59:59')).start, t('2026-11-20T10:00:00'));
+for (const date of ['2026-11-21T09:00:00','2026-11-21T10:00:00','2026-11-22T12:00:00','2026-11-23T09:59:59']) assert.equal(activeWindow(t(date)), null);
+assert.equal(activeWindow(t('2026-11-23T10:00:00')).start, t('2026-11-23T10:00:00'));
+const uid='123456789012345678', gid='123456789012345679', iid='123456789012345680';
+const start=t('2026-11-23T10:00:00'), end=start+1000;
+const message=(n, extra={})=>({id:String(144000000000000000n+BigInt(n)),createdTimestamp:start+500,type:MessageType.Default,author:{id:uid,bot:false},...extra});
+const channel={parentId:'category',type:ChannelType.GuildText,permissionsFor:()=>({has:()=>true}),messages:{fetch:async()=>new Collection([[message(1).id,message(1)],[message(2).id,message(2,{author:{id:uid,bot:true}})]])}};
+const guild={members:{me:{}},channels:{fetch:async()=>new Collection([['a',channel],['thread',{...channel,type:ChannelType.PublicThread}]])}};
+assert.equal(await countMessages({guild,categoryId:'category',userId:uid,start,end}),1);
+await assert.rejects(countMessages({guild:{...guild,channels:{fetch:async()=>new Collection([['a',{...channel,permissionsFor:()=>({has:()=>false})}]])}},categoryId:'category',userId:uid,start,end}),/PERMISSIONS_MISSING/);
+let saved, queries=[];
+const sql=async (strings,...values)=>{const q=strings.join('?');queries.push(q);if(q.includes('INSERT INTO discord_wallet_bindings')) {saved=values[2];return [{address:saved}];} if(q.includes('SELECT address')) return saved?[{address:saved}]:[];return [];};
+sql.transaction = async queries => Promise.all(queries);
+const env={DISCORD_WALLET_CHANNEL_ID:'box',DAILY_ENABLED:'true',DAILY_GUILD_ID:gid,DAILY_GROUP_CATEGORY_ID:uid};
+const handler=createToolboxHandler({sql,env,now:()=>start+1000,logger:{error(){}}});
+function interaction(name,address='0x'+'A'.repeat(40)) {return {isChatInputCommand:()=>true,commandName:name,guildId:gid,guild,user:{id:uid},id:iid,channelId:'box',channel:{isThread:()=>false},options:{getString:()=>address},calls:[],async reply(v){this.calls.push(v)},async deferReply(v){this.calls.push(v)},async editReply(v){this.calls.push(v)}}}
+let i=interaction('bindwallet');await handler(i);assert.equal(i.calls[0].flags,MessageFlags.Ephemeral);assert.match(i.calls[1],/尚未透過簽名驗證/);assert.equal(saved,'0x'+'a'.repeat(40));
+i=interaction('mywallet');await handler(i);assert.match(i.calls[1],new RegExp(saved));
+i=interaction('bindwallet','private key');await handler(i);assert.match(i.calls[1],/格式不正確/);
+i=interaction('times');await handler(i);assert.match(i.calls[1],/無法完整取得資料/);
+i=interaction('times');i.guild={...guild,channels:{fetch:async()=>new Collection([['a',{...channel,parentId:uid}]])}};await handler(i);assert.match(i.calls[1],/\*\*1 則\*\*/);assert.match(i.calls[1],/資料截止/);assert.equal(i.calls[0].flags,MessageFlags.Ephemeral);
+i=interaction('mywallet');i.channelId='thread';i.channel={isThread:()=>true,parentId:'box'};await handler(i);assert.match(i.calls[1],new RegExp(saved));
+i=interaction('mywallet');i.channelId='elsewhere';await handler(i);assert.equal(i.calls[0].flags,MessageFlags.Ephemeral);assert.match(i.calls[0].content,/bot-toolbox/);
+assert(queries.some(q=>q.includes('request_id::numeric < excluded.request_id::numeric')));
+console.log('toolbox boundary, privacy and isolation tests passed');
