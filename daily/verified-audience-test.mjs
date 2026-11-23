@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import {Collection,PermissionFlagsBits} from 'discord.js';
+import {assertUnverifiedCannotView} from './verified-audience.mjs';
+const unverified='unverified';
+const member=(id,roles)=>({id,roles:{cache:new Set(roles)}});
+const safe=member('1',[unverified]), normal=member('2',[]);
+let visible=false, calls=0;
+const guild={memberCount:2,members:{list:async()=>{calls++; return new Collection([[safe.id,safe],[normal.id,normal]]);}}};
+const channel={permissionsFor:m=>({has:permission=>{assert.equal(permission,PermissionFlagsBits.ViewChannel);return m===safe && visible;}})};
+await assertUnverifiedCannotView({guild,channel,unverifiedRoleId:unverified});
+visible=true;
+await assert.rejects(()=>assertUnverifiedCannotView({guild,channel,unverifiedRoleId:unverified}),/DAILY_UNVERIFIED_MEMBER_CAN_VIEW/);
+visible=false; guild.memberCount=3;
+await assert.rejects(()=>assertUnverifiedCannotView({guild,channel,unverifiedRoleId:unverified}),/DAILY_MEMBER_SCAN_INCOMPLETE/);
+guild.memberCount=2; guild.members.list=async()=>{throw Error('MISSING_PRIVILEGED_INTENT');};
+await assert.rejects(()=>assertUnverifiedCannotView({guild,channel,unverifiedRoleId:unverified}),/MISSING_PRIVILEGED_INTENT/);
+console.log('verified audience safety tests passed');
+
+// Pagination must inspect beyond the first 1000 members and reject duplicates.
+const bulk=Array.from({length:1000},(_,i)=>member(String(i+10),[]));
+const last=member('1010',[unverified]);
+const paged={memberCount:1001,members:{list:async({after})=>after ? new Collection([[last.id,last]]) : new Collection(bulk.map(m=>[m.id,m]))}};
+let denyLast=true;
+const pgChannel={permissionsFor:m=>({has:()=>m===last && !denyLast})};
+await assertUnverifiedCannotView({guild:paged,channel:pgChannel,unverifiedRoleId:unverified});
+denyLast=false;
+await assert.rejects(()=>assertUnverifiedCannotView({guild:paged,channel:pgChannel,unverifiedRoleId:unverified}),/DAILY_UNVERIFIED_MEMBER_CAN_VIEW/);
+paged.members.list=async({after})=>after ? new Collection([[bulk[0].id,bulk[0]]]) : new Collection(bulk.map(m=>[m.id,m]));
+await assert.rejects(()=>assertUnverifiedCannotView({guild:paged,channel:pgChannel,unverifiedRoleId:unverified}),/DAILY_MEMBER_SCAN_INCOMPLETE/);
+console.log('verified audience pagination tests passed');

@@ -27,3 +27,15 @@ assert.throws(()=>assertActivityChannelPolicy({...policy,modChannel:publicChanne
 assert.throws(()=>assertActivityChannelPolicy({...policy,publicEnabled:false}),/PRIVATE_CHANNEL_REQUIRED/);
 assert.doesNotThrow(()=>assertActivityChannelPolicy({...policy,channel:privateChannel,publicEnabled:false}));
 console.log('activity channel policy tests passed');
+
+// The verified-only channel must deny everyone and unverified while allowing
+// precisely the explicitly configured verified role.
+const verifiedRole={permissions:{has:()=>false}};
+const verifiedGuild={id:'guild',roles:{cache:new Map([['unverified',{permissions:{has:()=>false}}],['verified',verifiedRole]])}};
+const verifiedChannel=makeChannel('public',[overwrite('guild',false,true),overwrite('unverified',false,true),overwrite('verified',true)]);
+const verifiedPolicy={...policy,guild:verifiedGuild,channel:verifiedChannel,verifiedRoleId:'verified'};
+assert.doesNotThrow(()=>assertActivityChannelPolicy(verifiedPolicy));
+assert.throws(()=>assertActivityChannelPolicy({...verifiedPolicy,channel:makeChannel('public',[overwrite('guild',false,true),overwrite('unverified',false,true)])}),/POLICY_INVALID/);
+assert.throws(()=>assertActivityChannelPolicy({...verifiedPolicy,channel:makeChannel('public',[overwrite('guild',false,true),overwrite('unverified',false,true),overwrite('verified',true),overwrite('other',true)])}),/EXTRA_ACCESS/);
+assert.throws(()=>assertActivityChannelPolicy({...verifiedPolicy,verifiedRoleId:'unverified'}),/VERIFIED_ROLE_INVALID/);
+console.log('verified-only channel policy tests passed');
