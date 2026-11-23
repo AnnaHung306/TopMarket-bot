@@ -1,0 +1,9 @@
+{
+  "implementation": "0x8e09eaeee3e0287e9ad9b56f6cb75afa47293d42",
+  "sourceUrl": "https://sourcify.dev/server/v2/contract/8453/0x8e09eaeee3e0287e9ad9b56f6cb75afa47293d42?fields=all",
+  "runtimeMatch": "exact_match",
+  "sourceSha256": "55f3bfef3877a90fc0eb9a7a6d68ea4e5ff9b0e115cff517712944edd268a00f",
+  "selector": "0x1e679c45",
+  "beaconSlot": "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
+  "proofVersion": 1
+}

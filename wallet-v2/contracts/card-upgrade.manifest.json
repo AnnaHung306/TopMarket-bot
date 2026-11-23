@@ -1,0 +1,408 @@
+{
+  "id": "upgrade:1",
+  "kind": "upgrade",
+  "name": "Pokemon Card Upgrade",
+  "chainId": 8453,
+  "address": "0xbf78ef98b783035c1244f706ffababea6e7457cb",
+  "startBlock": 55066201,
+  "implementation": "0xea3c293ac13bfa7b0a4b3a9c8b6bcb5b51676ccd",
+  "verifiedAt": "2026-11-09T05:54:32Z",
+  "sourceUrl": "https://sourcify.dev/server/v2/contract/8453/0xea3c293ac13bfa7b0a4b3a9c8b6bcb5b51676ccd?fields=all",
+  "officialUrl": "https://api.top.market/api/card-upgrades/pools",
+  "sourceSha256": "00fab17680cc3c220371b8f7f3d4a64a739c24a05463aae521ef8b2f75549ab6",
+  "abiFile": "card-upgrade.abi.json",
+  "events": [
+    {
+      "signature": "CardClaimable(uint256,address,address,uint32)",
+      "signatureHash4": "0x56bd3ba3",
+      "signatureHash32": "0x56bd3ba36d075a458f8ab258df8e65638e93e85341e18f037f8926676bbf849a"
+    },
+    {
+      "signature": "CardClaimed(uint256,address,address,uint32)",
+      "signatureHash4": "0xfb67e8f3",
+      "signatureHash32": "0xfb67e8f3531409e1131adb7efa47be55f3628ed4131422985bb212716c36390f"
+    },
+    {
+      "signature": "CardFlushedToReceiver(address,uint32,address)",
+      "signatureHash4": "0x494452ed",
+      "signatureHash32": "0x494452ed52c81737f04cbc4adcd3db5b09128bada6da3b5c6c4fce8b44e97c30"
+    },
+    {
+      "signature": "CardOwedToReceiver(address,uint32)",
+      "signatureHash4": "0x64abe6ed",
+      "signatureHash32": "0x64abe6edb938ed203956ac0cdf23c7d9bf21040f260a9e934190cf519e52ebd6"
+    },
+    {
+      "signature": "CardReceiverSet(address)",
+      "signatureHash4": "0x4af478cb",
+      "signatureHash32": "0x4af478cb760fc1ea2d7d771e5f5ddc2d2e3dfd05284ea05d56f3fd74d66fbafd"
+    },
+    {
+      "signature": "ChanceRangeSet(uint16,uint16)",
+      "signatureHash4": "0x54c303d5",
+      "signatureHash32": "0x54c303d5b2adb8e5da2a14ee2813f65a0f5ed5b1585bdb506a24ac62fa14f1c1"
+    },
+    {
+      "signature": "EdgeBpsSet(uint16)",
+      "signatureHash4": "0x3be7ebd6",
+      "signatureHash32": "0x3be7ebd6dd17c4e4d85abd1d4f13eb411a5a77356cb790d2b9f852875cf78d9b"
+    },
+    {
+      "signature": "Initialized(uint64)",
+      "signatureHash4": "0xc7f505b2",
+      "signatureHash32": "0xc7f505b2f371ae2175ee4913f4499e1f2633a7b5936321eed1cdaeb6115181d2"
+    },
+    {
+      "signature": "MaxPriceAgeSet(uint256)",
+      "signatureHash4": "0x461309d8",
+      "signatureHash32": "0x461309d8133f14d74856f2194a28d8637335793efa5804fe202b798919f71ff7"
+    },
+    {
+      "signature": "MaxTargetValueSet(uint256)",
+      "signatureHash4": "0xbf4bdd55",
+      "signatureHash32": "0xbf4bdd553a93cc19ac89b33081fb5ba1326223c0a945d42ee4dcd091c31dd66e"
+    },
+    {
+      "signature": "MinStakeValueSet(uint256)",
+      "signatureHash4": "0xf77e45e5",
+      "signatureHash32": "0xf77e45e53d9bbbcc9eff61e711ced07a23d36321d732145ab9dba45777afdfee"
+    },
+    {
+      "signature": "OperatorSet(address,bool)",
+      "signatureHash4": "0x1a594081",
+      "signatureHash32": "0x1a594081ae893ab78e67d9b9e843547318164322d32c65369d78a96172d9dc8f"
+    },
+    {
+      "signature": "OracleSet(address)",
+      "signatureHash4": "0x3f32684a",
+      "signatureHash32": "0x3f32684a32a11dabdbb8c0177de80aa3ae36a004d75210335b49e544e48cd0aa"
+    },
+    {
+      "signature": "OwnershipTransferred(address,address)",
+      "signatureHash4": "0x8be0079c",
+      "signatureHash32": "0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0"
+    },
+    {
+      "signature": "OwnershipTransferStarted(address,address)",
+      "signatureHash4": "0x38d16b8c",
+      "signatureHash32": "0x38d16b8cac22d99fc7c124b9cd0de2d3fa1faef420bfe791d8c362d765e22700"
+    },
+    {
+      "signature": "Paused(address)",
+      "signatureHash4": "0x62e78cea",
+      "signatureHash32": "0x62e78cea01bee320cd4e420270b5ea74000d11b0c9f74754ebdbfc544b05a258"
+    },
+    {
+      "signature": "PauserUpdated(address)",
+      "signatureHash4": "0xa4336c0c",
+      "signatureHash32": "0xa4336c0cb1e245b95ad204faed7e940d6dc999684fd8b5e1ff597a0c4efca8ab"
+    },
+    {
+      "signature": "PrizeDeposited(address,uint32)",
+      "signatureHash4": "0xe2416472",
+      "signatureHash32": "0xe2416472bac6d895732bbf197ced40fc1d1fbf9212f474b75fa6765a9b271578"
+    },
+    {
+      "signature": "PrizeWithdrawn(address,uint32,address)",
+      "signatureHash4": "0x63280d2a",
+      "signatureHash32": "0x63280d2a0ae6b10958ffa534f8be3be9c642967c0c4af256adb5dd5853458c65"
+    },
+    {
+      "signature": "RandomnessSourceSet(address,address)",
+      "signatureHash4": "0xdafc2de8",
+      "signatureHash32": "0xdafc2de8f313d7e784112f257be84f98d542f695e9d169c30d94e47f742026c9"
+    },
+    {
+      "signature": "Unpaused(address)",
+      "signatureHash4": "0x5db9ee0a",
+      "signatureHash32": "0x5db9ee0a495bf2e6ff9c91a7834c1ba4fdd244a5e8aa4e537bd38aeae4b073aa"
+    },
+    {
+      "signature": "Upgraded(address)",
+      "signatureHash4": "0xbc7cd75a",
+      "signatureHash32": "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"
+    },
+    {
+      "signature": "UpgradeRequested(uint256,address,address,uint256,address,uint32,uint256,address,uint32,uint256,uint16,uint16)",
+      "signatureHash4": "0xb388c00a",
+      "signatureHash32": "0xb388c00afae52f337a4c0fadb7fe662c72263dd6ed392c157490c400a3bf9c5b"
+    },
+    {
+      "signature": "UpgradeRescued(uint256,address)",
+      "signatureHash4": "0x1da6aa7c",
+      "signatureHash32": "0x1da6aa7c1dca4284db647290a89e5ebdac25fec11f10e3d8d15fd15db31c3b33"
+    },
+    {
+      "signature": "UpgradeSettled(uint256,bool,uint256)",
+      "signatureHash4": "0x4d9cb600",
+      "signatureHash32": "0x4d9cb6005e99028733e3536d221295437f11c22540124352be01660b8f3364ae"
+    }
+  ],
+  "functions": [
+    {
+      "signature": "acceptOwnership()",
+      "signatureHash4": "0x79ba5097",
+      "signatureHash32": "0x79ba5097e5519a381a52113cdcc59540d13f73fd9d26abc0453484a096cc96f2"
+    },
+    {
+      "signature": "BPS()",
+      "signatureHash4": "0x249d39e9",
+      "signatureHash32": "0x249d39e95dcf38deb6c884103e990949e9d7e5d370eee3d20091aba0a46aa824"
+    },
+    {
+      "signature": "cardReceiver()",
+      "signatureHash4": "0x642c1045",
+      "signatureHash32": "0x642c104567f9a86d6cac6875ec7442f83403bdf191435ace401479f92996e888"
+    },
+    {
+      "signature": "chanceRange()",
+      "signatureHash4": "0x62ac04ce",
+      "signatureHash32": "0x62ac04ce460d7195d422cd7f59aca958862c0dcafe91fc29816c0539e7253f39"
+    },
+    {
+      "signature": "claimable(uint256)",
+      "signatureHash4": "0xd1d58b25",
+      "signatureHash32": "0xd1d58b2592c9120b9afb9110cb45f01075d34ac21a7eece5700f12af5f0977ed"
+    },
+    {
+      "signature": "claim(uint256)",
+      "signatureHash4": "0x379607f5",
+      "signatureHash32": "0x379607f58d976a91dd60b78d74592fb4bb001d7e08e70945c78343ec21864f46"
+    },
+    {
+      "signature": "depositPrizes(address,uint32[])",
+      "signatureHash4": "0xd7502c68",
+      "signatureHash32": "0xd7502c684c953ea522d7f1fe0b15c6f489184ed87b504732509041b79ecba2b0"
+    },
+    {
+      "signature": "edgeBps()",
+      "signatureHash4": "0x48f5d78b",
+      "signatureHash32": "0x48f5d78bd135452bd5759b757b39cdcbdf1a499b0e65e3131e6ebf07475a8731"
+    },
+    {
+      "signature": "flushToReceiver(address,uint32[])",
+      "signatureHash4": "0xb3b4f4a4",
+      "signatureHash32": "0xb3b4f4a46ab5d37fa112c2395f95b909a5bdb32ee1da42e40238ce4c698de464"
+    },
+    {
+      "signature": "initialize(address,address,address,address)",
+      "signatureHash4": "0xf8c8765e",
+      "signatureHash32": "0xf8c8765ee2e07faacf411acb42c2679d11a62bbb592c00db577834d7e7793b05"
+    },
+    {
+      "signature": "isOperator(address)",
+      "signatureHash4": "0x6d70f7ae",
+      "signatureHash32": "0x6d70f7aed2fef4fefe8becca5b6d4426a0b73b6d76820f010cf67171394e7337"
+    },
+    {
+      "signature": "isWin(uint256,uint256,uint16,uint256)",
+      "signatureHash4": "0xa13220e4",
+      "signatureHash32": "0xa13220e450ad6ae7a1a9e03826729dd9658b36c96c18aa0261457881259ecb53"
+    },
+    {
+      "signature": "MAX_CHANCE_CEIL_BPS()",
+      "signatureHash4": "0xd1e37542",
+      "signatureHash32": "0xd1e3754205274cf9b13d6f6483a772f45e824060ef5e7474aa8e0d9796e6fb9b"
+    },
+    {
+      "signature": "MAX_EDGE_BPS()",
+      "signatureHash4": "0x787c3ad1",
+      "signatureHash32": "0x787c3ad18f044319beb80b8b74f8ed6d79c8d22f5541916a84420cfe53a16209"
+    },
+    {
+      "signature": "maxPriceAge()",
+      "signatureHash4": "0x1584410a",
+      "signatureHash32": "0x1584410aa95930d18e3771ea386548a0c09571dd7f4986d7f76b66064a120c53"
+    },
+    {
+      "signature": "maxTargetValue()",
+      "signatureHash4": "0x5c9fdc20",
+      "signatureHash32": "0x5c9fdc20e30f9ac0c2c8c2e85e311a8961c8c43df60ff2905f282d1c34b39207"
+    },
+    {
+      "signature": "MIN_CHANCE_FLOOR_BPS()",
+      "signatureHash4": "0x5cbd997d",
+      "signatureHash32": "0x5cbd997d257bd426b4b7add207ba05f8b1ba87db7a4e4fc816a667a61b39851e"
+    },
+    {
+      "signature": "minStakeValue()",
+      "signatureHash4": "0xa8d6e68e",
+      "signatureHash32": "0xa8d6e68eb26f142a4525a3cd7b36ea1a8a4a0379f92a63a4f01b35e7ddee5cf6"
+    },
+    {
+      "signature": "nextSpinId()",
+      "signatureHash4": "0x3e51112d",
+      "signatureHash32": "0x3e51112d1017fa3e4236633c70d3105e08f1e0d5cbf08f30de6a10280596c597"
+    },
+    {
+      "signature": "onRandomness(uint256,uint256)",
+      "signatureHash4": "0x8b5b8818",
+      "signatureHash32": "0x8b5b881800994c271e52ab8ff16d6c3253fb28a79cdb892d188074e742fd872d"
+    },
+    {
+      "signature": "OPERATOR_RESCUE_DELAY()",
+      "signatureHash4": "0xf049e37c",
+      "signatureHash32": "0xf049e37c042cc1b421d4ed41f58db2e688d66fbb4594083b1726cb4208485c94"
+    },
+    {
+      "signature": "oracle()",
+      "signatureHash4": "0x7dc0d1d0",
+      "signatureHash32": "0x7dc0d1d053709daf7666fa92d95a4a378b3697fa925497d6f41c4277db580555"
+    },
+    {
+      "signature": "owedToReceiver(address,uint32)",
+      "signatureHash4": "0xb8395c5d",
+      "signatureHash32": "0xb8395c5d4ecf9188a34be7c16f749e84c8f9a59376979e17afa3bafba44fcea4"
+    },
+    {
+      "signature": "owner()",
+      "signatureHash4": "0x8da5cb5b",
+      "signatureHash32": "0x8da5cb5b36e7f68c1d2e56001220cdbdd3ba2616072f718acfda4a06441a807d"
+    },
+    {
+      "signature": "pause()",
+      "signatureHash4": "0x8456cb59",
+      "signatureHash32": "0x8456cb591a934d53f6ccc6332123a165a1f3562907bf11330d847a29ca49eb89"
+    },
+    {
+      "signature": "paused()",
+      "signatureHash4": "0x5c975abb",
+      "signatureHash32": "0x5c975abbf8c4d6efa68fc896e233763eb503f2318260b7bf59b19412913788b2"
+    },
+    {
+      "signature": "pauser()",
+      "signatureHash4": "0x9fd0506d",
+      "signatureHash32": "0x9fd0506d3bd949b37917c87d166ecf8f995a73e2e836c023cd83ac84880e089d"
+    },
+    {
+      "signature": "pendingOwner()",
+      "signatureHash4": "0xe30c3978",
+      "signatureHash32": "0xe30c3978ddd82956a01b5cb08d17f1a2d73e636aeefb7b36f896e41d4c2aab90"
+    },
+    {
+      "signature": "pendingSpins()",
+      "signatureHash4": "0xe325bd22",
+      "signatureHash32": "0xe325bd22de22c9bab47b2364fbf19503faa052a2ccaa451de3c91c61ee239e3b"
+    },
+    {
+      "signature": "PLAYER_RESCUE_DELAY()",
+      "signatureHash4": "0x9412af02",
+      "signatureHash32": "0x9412af025acb04a579453add88b9cd66f92717de60450dd7d3d3fbcca1428fea"
+    },
+    {
+      "signature": "prizeStatus(address,uint32)",
+      "signatureHash4": "0x987ba7aa",
+      "signatureHash32": "0x987ba7aa6a3809bc9e0d6360724c1081f0c6aecceb00c95a79c28a04f6463d83"
+    },
+    {
+      "signature": "proxiableUUID()",
+      "signatureHash4": "0x52d1902d",
+      "signatureHash32": "0x52d1902ddf94a87b87c42e6ab3aff7da3c30beb57dc65dd86cb2543522a55a4c"
+    },
+    {
+      "signature": "quote(address,uint32,address,uint32)",
+      "signatureHash4": "0x91ba7363",
+      "signatureHash32": "0x91ba736356f6fe1f19ad938c98b6d5dd4d94fae3acce0b44d47170dc86f0c218"
+    },
+    {
+      "signature": "randomnessSource()",
+      "signatureHash4": "0xb7b67172",
+      "signatureHash32": "0xb7b6717274159fb4ef4ecee9756ce21e54e6055a3c336148a2ff58c3db8fb079"
+    },
+    {
+      "signature": "renounceOwnership()",
+      "signatureHash4": "0x715018a6",
+      "signatureHash32": "0x715018a616b5f2044428f6fadb7deef4ce9ca76ef60ea57978964ad137bbe7ae"
+    },
+    {
+      "signature": "rescue(uint256)",
+      "signatureHash4": "0x6ac053ad",
+      "signatureHash32": "0x6ac053ad7a25618f857c6fcaf076ff48480a5ac3b5f7bf61f64f9697c9a9be1c"
+    },
+    {
+      "signature": "setCardReceiver(address)",
+      "signatureHash4": "0xe77b2421",
+      "signatureHash32": "0xe77b24214c685581cba419465bc8dd9505d7e8da459ed83d475c9809a5917e6c"
+    },
+    {
+      "signature": "setChanceRange(uint16,uint16)",
+      "signatureHash4": "0x76127dd0",
+      "signatureHash32": "0x76127dd007f4ddef6ddd9d0e5906224c29cb21c064dab7f176170e8b94cc6f1e"
+    },
+    {
+      "signature": "setEdgeBps(uint16)",
+      "signatureHash4": "0x87a0c651",
+      "signatureHash32": "0x87a0c651e1d1a4e1eec4ddd41092c1d8eb8d19c213c6d39c9da5b9b88863d6e5"
+    },
+    {
+      "signature": "setMaxPriceAge(uint256)",
+      "signatureHash4": "0x56447ce8",
+      "signatureHash32": "0x56447ce8efa9de0b4e174ec60fede4874674ace8bd52019efe0fa3c2ce358409"
+    },
+    {
+      "signature": "setMaxTargetValue(uint256)",
+      "signatureHash4": "0x00993f5d",
+      "signatureHash32": "0x00993f5dee9d01a48d1e65cd38e05c16c5bdbf8a1e46bb05ece4ac6fa45db7f2"
+    },
+    {
+      "signature": "setMinStakeValue(uint256)",
+      "signatureHash4": "0x4d985944",
+      "signatureHash32": "0x4d98594484561182a28d9c31113cc70b8f5c0e3839ec286c561ab10167eb6967"
+    },
+    {
+      "signature": "setOperator(address,bool)",
+      "signatureHash4": "0x558a7297",
+      "signatureHash32": "0x558a7297e60ce7d5583faecd6aae4a6ab582122664c6d398de0fd446fc6bd50c"
+    },
+    {
+      "signature": "setOracle(address)",
+      "signatureHash4": "0x7adbf973",
+      "signatureHash32": "0x7adbf9732151c9ba5807f1a83b7f9a18ced7df6c790bf0711b23fd9b9bee2061"
+    },
+    {
+      "signature": "setPauser(address)",
+      "signatureHash4": "0x2d88af4a",
+      "signatureHash32": "0x2d88af4a90eeee848e18db58b5bfd0d4bcf5a510adeec7efba761b19b03efc69"
+    },
+    {
+      "signature": "setRandomnessSource(address)",
+      "signatureHash4": "0xe07275f7",
+      "signatureHash32": "0xe07275f7cdd6dc1066dac0851ecb2c8c3576f89aa120f4a155b0cc6ff77f8f81"
+    },
+    {
+      "signature": "spins(uint256)",
+      "signatureHash4": "0x8315c264",
+      "signatureHash32": "0x8315c2642c16167639b353262b39363faffa748e04e132b3f463b9c8082ec1a1"
+    },
+    {
+      "signature": "transferOwnership(address)",
+      "signatureHash4": "0xf2fde38b",
+      "signatureHash32": "0xf2fde38b092330466c661fc723d5289b90272a3e580e3187d1d7ef788506c557"
+    },
+    {
+      "signature": "unpause()",
+      "signatureHash4": "0x3f4ba83a",
+      "signatureHash32": "0x3f4ba83af89dc9793996d9e56b8abe6dc88cd97c9c2bb23027806e9c1ffd54dc"
+    },
+    {
+      "signature": "upgrade(address,uint32,address,uint32,uint16)",
+      "signatureHash4": "0x942d0da4",
+      "signatureHash32": "0x942d0da450be2f3376750f219ded4dd438f7c3b81e4a6078e5cd71a419a88569"
+    },
+    {
+      "signature": "UPGRADE_INTERFACE_VERSION()",
+      "signatureHash4": "0xad3cb1cc",
+      "signatureHash32": "0xad3cb1cc5c2df3b903ea43f30f77a80ecfeefbed7932a4a8e68c92af99e41dfd"
+    },
+    {
+      "signature": "upgradeToAndCall(address,bytes)",
+      "signatureHash4": "0x4f1ef286",
+      "signatureHash32": "0x4f1ef2866b98625bdfefae89411f7a82754ac4089eff8e78c8832329a538337f"
+    },
+    {
+      "signature": "withdrawPrizes(address,uint32[],address)",
+      "signatureHash4": "0x8290dd9d",
+      "signatureHash32": "0x8290dd9d5a5f52968d851cbbb96df5af2b91a016079d25bac57d3b65e4ed9d69"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import { createWalletHandler } from './discord-interaction.mjs';
 import { createWalletQuery } from './discord-wallet-query.mjs';
 import { createDailyModule } from './daily/index.mjs';
 import { createToolboxHandler, toolboxCommands } from './toolbox.mjs';
+import { createProductionWalletV2 } from './wallet-v2/runtime.mjs';
 
 try { loadEnvFile(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 for (const key of ['DISCORD_TOKEN', 'DISCORD_CLIENT_ID']) {
@@ -17,7 +18,8 @@ const [{ walletCachePage }, { renderGavinPoster: renderPoster }] = await Promise
   import('./worker/wallet-cache.js'),
   import('./discord-gavin-poster.mjs'),
 ]);
-const command = new SlashCommandBuilder().setName('wallet').setDescription('查詢 Top.Market 錢包收支摘要')
+const walletV2 = await createProductionWalletV2();
+const command = walletV2?.command || new SlashCommandBuilder().setName('wallet').setDescription('查詢 Top.Market 錢包收支摘要')
   .addStringOption(option => option.setName('address').setDescription('Base 錢包地址').setRequired(true));
 const intents = [GatewayIntentBits.Guilds];
 if (process.env.DAILY_ENABLED === 'true' && process.env.DAILY_PUBLIC_ACTIVITY_ENABLED === 'true' && process.env.DAILY_VERIFIED_ROLE_ID) intents.push(GatewayIntentBits.GuildMembers);
@@ -49,10 +51,11 @@ client.once('clientReady', async () => {
     console.log(`Discord bot ready: ${client.user.tag}`);
   } catch (error) { console.error('Discord 指令註冊失敗', error.message); process.exitCode = 1; client.destroy(); }
 });
-client.on('interactionCreate', createWalletHandler({
+const walletHandler = walletV2?.handle || createWalletHandler({
   queryWallet, renderPoster, formatReport,
   configured: () => Boolean(process.env.ALCHEMY_API_KEY?.trim() && process.env.DATABASE_URL?.trim()),
-}));
+});
+client.on('interactionCreate', interaction => void walletHandler(interaction).catch(error => console.error('WALLET_INTERACTION_FAILED', error.code || error.name)));
 let toolboxDatabase;
 const getToolboxDatabase = () => toolboxDatabase ||= database();
 const toolboxSql = (...args) => getToolboxDatabase()(...args);
