@@ -51,6 +51,8 @@ node scripts/wallet-v2.mjs export --wallet 0x錢包地址 --pool pack:0x卡池�
 
 預設文字為收益摘要，「詳細報表」展開文字明細；PNG 固定為大字重點版，淨收支／升級估值主數字 96px，其他金額 60px，分類表格及逐筆資料不塞進圖片。卡牌升級只顯示相關收益與升級結果，不顯示無關的零收入／零支出。完整紀錄與證據保留在 CSV。使用者介面不顯示卡包合約地址或制式免責段落；有未核對資料時只用簡短事實提示。
 
+按更新、切換範圍／期間或展開明細時，先以 `loading...` 替換原訊息並移除舊 PNG／按鈕，完成查詢、計算與產圖後才一起展示文字與 PNG。失敗顯示重試，不拿舊報表填回；篩選意圖先持久化，重試沿用該篩選。按鈕帶 view revision，較舊版本或延遲送達的互動不會覆寫新結果；既有無版本報告於下次操作自動遷移。`wallet_v2_action` 記錄觸發動作與 loading／ready／failed／stale，不新增背景排程。
+
 V2 另外允許已核對 guild、MOD 角色的成員在既定 `mod-only` 與其討論串試用。其他頻道維持拒絕；未設定完整 MOD 政策不開放此入口。真正 Discord 收件結果另外記錄在部署文件，不以離線 controller 檢查替代。
 
 正式啟用需同時設定 `WALLET_V2_ENABLED=true`、`WALLET_V2_DATABASE_URL`、原本的 Alchemy key 與工具箱 channel。部署版明確允許在既有 PostgreSQL 增加 `wallet_v2_*` 三張表；不遷移、不覆寫舊錢包／每日活動／地址綁定表。
