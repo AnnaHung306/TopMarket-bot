@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { FileLedgerStore } from '../wallet-v2/store.mjs';
 import { buildReport } from '../wallet-v2/report.mjs';
-import { money } from '../wallet-v2/model.mjs';
+import { amount } from '../wallet-v2/report-text.mjs';
 import { summarizeWalletEvents, displayWalletTotals } from '../worker/report/accounting.js';
 const { values } = parseArgs({ options: { wallet: { type: 'string' }, prefix: { type: 'string' },
   'ledger-dir': { type: 'string', default: 'work/wallet-v2/ledger' } } });
@@ -30,7 +30,7 @@ const rows = parseCsv(csv.toString());
 for (const metric of report.metrics) {
   const row = rows.find(row => row.record_type === 'metric' && row.id === metric.key);
   assert.equal(row?.raw_usdc, metric.raw ?? '');
-  assert.ok(text.toString().includes(`${metric.label}：${money(metric.raw)}`));
+  assert.ok(text.toString().includes(`${metric.label}：${amount(metric.raw)}`));
   assert.ok(html.toString().includes(`data-key="${metric.key}" data-raw="${metric.raw ?? 'unknown'}"`));
 }
 assert.ok(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])));

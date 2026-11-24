@@ -56,3 +56,7 @@
 59 項本機檢查通過，包括慢速 view 讀取前已 ACK、失效 callback 不重送、舊 revision 不覆寫、已確認／待確認持倉、質押分類及成本／現金欄位區分。公開樣本淨收支 -982 USDC 與 Gavin 一致。正式 Dockerfile 已建置；無網路 Linux 容器使用同 checkout 最新 wallet-v2 模組、既有真實公開 ledger 與正常 CLI 產出 1120×1007 PNG（339,721 bytes、2,035 ms），文字／CSV／PNG 原始金額核對通過，已親自檢視 emoji、字級及排版。實際 Discord 結果完成後另記。
 
 另觀察到既有每日活動的 DAILY_PRIVATE_MOD_CHANNEL_REQUIRED_EXTRA_ACCESS 與 DAILY_MEMBER_SCAN_INCOMPLETE 告警。未將它們當作本次錢包失敗原因，也未放寬既有保護或更改權限；仍需核對 mod-only 允許查看的額外角色／成員及每日成員掃描狀態。
+
+功能版 9a848df 已 push main 並部署於既有 discord-bot；部署 fd0aad50-54cd-4394-9d5d-43f8804b5534 SUCCESS，2026-11-24 15:02:32（台灣時間）bot ready。V2 正式環境沿用既有資料庫及環境變數。網頁可登入並讀取 mod-only，但點擊操作遇到控制連線 deadline，已請使用者從原報告更新，尚不宣稱代理完成 Discord 操作驗收。
+
+後續驗證文件及 verifier 的未知值顯示核對調整不含 bot 執行程式變更，因此服務維持固定功能版 9a848df。本機 83 個測試暫存檔與本輪 Docker 測試映像已清理，真實 ledger 與報表保留。GitHub 已核對無 main 的開啟中 PR；本次依既有明確授權直接上傳 main，未建立 PR。
