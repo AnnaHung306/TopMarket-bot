@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { MessageFlags } from 'discord.js';
+import { ChannelType, MessageFlags } from 'discord.js';
 import { createWalletHandler } from './discord-interaction.mjs';
 import { createWalletQuery } from './discord-wallet-query.mjs';
 
@@ -11,8 +11,10 @@ function interaction(wallet = address, userId = '123456789012345678', inThread =
   const edits = [], messages = [], replies = [];
   const thread = {
     id: userId,
+    type: ChannelType.PrivateThread,
     parentId,
     isThread: () => true,
+    members: { async add(id) { assert.equal(id, userId); } },
     async send(payload) {
       messages.push(payload);
       return { async edit(value) { edits.push(value); } };
@@ -22,11 +24,13 @@ function interaction(wallet = address, userId = '123456789012345678', inThread =
     id: userId, commandName: 'wallet', isChatInputCommand: () => true,
     options: { getString: () => wallet }, channelId: inThread ? thread.id : 'allowed-channel',
     user: { id: userId, username: 'test-user' }, member: { displayName: '測試用戶' },
+    guild: { members: { me: { id: 'bot' } } },
     edits, messages, replies, createdThreads: 0,
-    async deferReply() { this.deferred = true; },
-    channel: inThread ? thread : { isThread: () => false, threads: { async create(options) {
+    async deferReply(options) { this.deferred = true; this.deferFlags = options?.flags; },
+    channel: inThread ? thread : { type: ChannelType.GuildText, permissionsFor: () => ({ has: () => true }), isThread: () => false, threads: { async create(options) {
       request.createdThreads++;
       assert.equal(options.name, '測試用戶 錢包報表查詢');
+      assert.equal(options.type, ChannelType.PrivateThread); assert.equal(options.invitable, false);
       return thread;
     } } },
     async reply(payload) { replies.push(payload); },
@@ -93,7 +97,7 @@ const originalError = console.error;
 try {
   console.error = () => {};
   await createWalletHandler(base)(denied);
-  assert.match(denied.replies.at(-1), /建立公開討論串/);
+  assert.match(denied.replies.at(-1), /建立私人討論串/);
 
   const deniedThread = interaction(address, 'denied-thread', true);
   deniedThread.channel.send = async () => { throw Object.assign(Error('missing thread send permission'), { code: 50013 }); };
@@ -152,6 +156,7 @@ await Promise.all([firstDelivery, secondDelivery]);
 
 for (const request of [first, second, ...others]) {
   assert.equal(request.createdThreads, 1);
+  assert.equal(request.deferFlags, MessageFlags.Ephemeral);
   assert.equal(request.replies[0].content, '貓貓正在努力工作，請稍後... 完成後會拍拍通知');
   assert.equal(request.replies[0].files[0].name, 'cat-wait.gif');
   assert.ok(request.replies[1].content.includes('<#' + request.user.id + '>'));

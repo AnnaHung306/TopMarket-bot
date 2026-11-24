@@ -1,4 +1,5 @@
-import { MessageFlags, ThreadAutoArchiveDuration } from 'discord.js';
+import { MessageFlags } from 'discord.js';
+import { isPrivateWalletThread, privateWalletThread } from './discord-wallet-thread.mjs';
 import { readFile } from 'node:fs/promises';
 import { randomInt } from 'node:crypto';
 
@@ -68,8 +69,9 @@ export function createWalletHandler({ queryWallet, renderPoster, formatReport, c
     let status, thread;
     let stage = 'discord_setup';
     try {
-      await interaction.deferReply();
-      if (inThread) {
+      const inPrivateThread = isPrivateWalletThread(interaction.channel);
+      await interaction.deferReply(inPrivateThread ? {} : { flags: MessageFlags.Ephemeral });
+      if (inPrivateThread) {
         thread = interaction.channel;
         await interaction.editReply({ content: waitingText });
       } else {
@@ -79,15 +81,11 @@ export function createWalletHandler({ queryWallet, renderPoster, formatReport, c
           files: animation.files,
         });
         try {
-          thread = await interaction.channel.threads.create({
-            name: threadName(interaction),
-            autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
-            reason: 'Top.Market wallet report',
-          });
-          await interaction.editReply({ content: `${waitingText}\n進度與報表請見 <#${thread.id}>` });
+          thread = await privateWalletThread(interaction, threadName(interaction));
+          await interaction.editReply({ content: `${waitingText}\n🔒 私人報表請見 <#${thread.id}>`, attachments: [], files: [] });
         } catch (error) {
           console.error('無法建立錢包討論串', error.code || error.name);
-          await interaction.editReply('已收到查詢，但無法建立討論串。請確認機器人在此頻道有「建立公開討論串」及「在討論串傳送訊息」權限。');
+          await interaction.editReply(error.userMessage || '無法建立私人討論串，請確認機器人的「建立私人討論串」及「在討論串傳送訊息」權限。');
           return;
         }
       }

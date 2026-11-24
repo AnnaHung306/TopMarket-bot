@@ -1,12 +1,13 @@
 import { randomUUID, randomInt } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, ModalBuilder, SlashCommandBuilder,
-  StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, ThreadAutoArchiveDuration } from 'discord.js';
+  StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { SCOPES, address, dateRange, displayPoolName } from './model.mjs';
 import { buildReport, textReport } from './report.mjs';
 import { SCOPE_EMOJI } from './report-text.mjs';
 import { csvReport, renderPng } from './exports.mjs';
 import { mayManageActivity } from '../daily/moderator-access.mjs';
+import { isPrivateWalletThread, privateWalletThread } from '../discord-wallet-thread.mjs';
 
 // Exported definition only. Nothing in this module logs in, registers commands or changes the active bot.
 export const walletV2Command = new SlashCommandBuilder().setName('wallet').setDescription('查詢錢包收益，依活動與期間篩選')
@@ -152,13 +153,14 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
           to: interaction.options.getString('to'), dimension: 'location', detail: 'summary' };
         if (!SCOPES[selection.scope]) throw Error('無效範圍');
         dateRange(selection);
-        await interaction.deferReply();
+        const inPrivateThread = isPrivateWalletThread(interaction.channel);
+        await interaction.deferReply(inPrivateThread ? {} : { flags: MessageFlags.Ephemeral });
         let thread = interaction.channel;
-        if (!thread?.isThread?.()) {
-          await interaction.editReply({ content: '貓貓正在核對錢包資料，完成後會在討論串通知。', files: [await waitingGif()] });
+        if (!inPrivateThread) {
+          await interaction.editReply({ content: '🔒 貓貓正在建立私人錢包討論串…', files: [await waitingGif()] });
           const name = String(interaction.member?.displayName || interaction.user.username).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 70);
-          thread = await interaction.channel.threads.create({ name: `${name} 錢包分析 V2`, autoArchiveDuration: ThreadAutoArchiveDuration.OneDay });
-          await interaction.editReply({ content: `錢包分析進度與報告：<#${thread.id}>` });
+          thread = await privateWalletThread(interaction, `${name} 錢包分析 V2`, { logger });
+          await interaction.editReply({ content: `🔒 私人錢包報告：<#${thread.id}>`, attachments: [], files: [], allowedMentions: { parse: [] } });
           status = await thread.send(loading());
         } else status = await interaction.editReply(loading());
         showingLoading = true;
@@ -261,15 +263,16 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
           busy.add(latest.id); acquired = true; view = latest;
           view = await viewStore.saveView({ ...view, phase: 'draft', controlsVersion: 1 }, view.revision);
           await interaction.message.edit(draftPayload(view, '⏱️ 這次操作已逾時，請再按「更新資料」。'));
-        } else if (command && interaction.channel?.send) {
+        } else if (command && isPrivateWalletThread(interaction.channel) && interaction.channel?.send) {
           await interaction.channel.send({ content: '⏱️ Discord 連線逾時，請重新使用 /wallet。', allowedMentions: { parse: [] } });
         }
         return;
       }
-      const content = view?.revision ? '讀取失敗，請按重試。' : '讀取失敗，請重新使用 /wallet。';
+      const content = error.userMessage || (view?.revision ? '讀取失敗，請按重試。' : '讀取失敗，請重新使用 /wallet。');
       const failure = view?.revision && view.controlCatalog ? draftPayload(view, '讀取失敗，請按「更新資料」重試。')
         : { ...loading(), content, components: retryControls(view) };
       if (status) await status.edit(failure);
+      else if (command && interaction.deferred) await interaction.editReply(failure);
       else if (showingLoading) await interaction.message.edit(failure);
       else if (downloadPending) await interaction.editReply({ ...loading(), content: '下載失敗，請再試一次。' });
       else if (interaction.deferred || interaction.replied) await interaction.followUp({ content, flags: MessageFlags.Ephemeral });

@@ -6,6 +6,7 @@ import { FileLedgerStore } from '../store.mjs';
 import { upgradeDefinition } from '../registry.mjs';
 import { decodeUpgradeLog, receiptTransfers } from '../upgrade.mjs';
 import { createV2InteractionHandler, viewComponents } from '../discord.mjs';
+import { ChannelType, MessageFlags, PermissionFlagsBits, PermissionsBitField } from 'discord.js';
 const fixture = JSON.parse(await readFile(new URL('../fixtures/public-upgrades.json', import.meta.url)));
 const definition = await upgradeDefinition(), pool = { ...definition, definition, supported: true };
 const times = new Map(fixture.blocks.map(block => [Number(block.number), Number(block.timestamp)]));
@@ -18,9 +19,12 @@ const ledger = { version: 1, wallet, catalog: [pool], cards: {}, events,
   coverage: { gavin: { status: 'verified', complete: true }, [pool.id]: { status: 'verified', complete: true } },
   warnings: [], asOf: '2026-11-23T00:00:00.000Z' };
 const privateBody = interaction => interaction.replyPayload || interaction.followUpPayload || interaction.editPayload;
-async function harness({ toolbox = false, channelConfigured = true, packCount = 0, initialScope = 'upgrade' } = {}) {
+async function harness({ toolbox = false, publicThread = false, privatePermission = true, invitationError = false,
+  threadCreateError = false, returnedPublicThread = false, parentCached = true,
+  initialAckExpired = false, channelConfigured = true, packCount = 0, initialScope = 'upgrade' } = {}) {
   let queries = 0, threads = 0, renders = 0, loads = 0, renderHook, queryHook, controlPrefix;
-  const history = [];
+  const history = [], invitations = [], createOptions = [], publicMessages = [];
+  let archived = false, parentFetches = 0;
   const viewStore = new FileLedgerStore('work/wallet-v2/verification/offline-views');
   const fixtureLedger = structuredClone(ledger);
   for (let i = 0; i < packCount; i++) fixtureLedger.catalog.push({ id: `pack:test${i}`, kind: 'packs', name: `Test Pack ${i + 1}` });
@@ -31,20 +35,37 @@ async function harness({ toolbox = false, channelConfigured = true, packCount = 
     if (first) controlPrefix = first.split(':').slice(0, -1).join(':');
     return this;
   } };
-  const thread = { id: 'thread-1', parentId: 'toolbox', isThread: () => true, async send(payload) { resultMessage.initial = payload; return resultMessage.edit(payload); } };
-  const channel = toolbox ? { id: 'toolbox', isThread: () => false, threads: { async create() { threads++; return thread; } } } : thread;
+  const thread = { id: 'thread-1', type: ChannelType.PrivateThread, parentId: 'toolbox', isThread: () => true,
+    members: { async add(id) { if (invitationError) throw Error('invite failed'); invitations.push(id); } },
+    async setArchived(value) { archived = value; },
+    async send(payload) { resultMessage.initial = payload; return resultMessage.edit(payload); } };
+  const permissions = new PermissionsBitField([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessagesInThreads,
+    PermissionFlagsBits.AttachFiles, ...(privatePermission ? [PermissionFlagsBits.CreatePrivateThreads] : [])]);
+  const parent = { id: 'toolbox', type: ChannelType.GuildText, isThread: () => false, permissionsFor: () => permissions,
+    async send(payload) { publicMessages.push(payload); }, threads: { async create(options) {
+      if (threadCreateError) throw Error('create failed');
+      threads++; createOptions.push(options);
+      return returnedPublicThread ? { ...thread, type: ChannelType.PublicThread } : thread;
+    } } };
+  thread.parent = parent;
+  const channel = toolbox ? parent : publicThread ? { id: 'public-source', type: ChannelType.PublicThread,
+    isThread: () => true, parentId: parent.id, ...(parentCached ? { parent } : {}), async send(payload) { publicMessages.push(payload); } } : thread;
   const createHandler = () => createV2InteractionHandler({ service, viewStore, channelId: () => channelConfigured ? 'toolbox' : '',
     renderPoster: async report => { renders++; return renderHook ? renderHook(report) : Buffer.from('offline-controller-payload'); }, logger: { info() {}, error() {} } });
   const handler = createHandler();
   const interaction = { commandName: 'wallet', id: 'command', channel, channelId: channel.id,
     isChatInputCommand: () => true, isAutocomplete: () => false, user: { id: 'owner', username: 'test' },
+    guild: { members: { me: { id: 'bot' } }, channels: { fetch: async () => { parentFetches++; return parent; } } },
     options: { getString: key => ({ address: wallet, scope: initialScope })[key] ?? null },
     async reply(payload) { this.replyPayload = payload; this.replied = true; },
-    async deferReply() { this.deferred = true; }, async editReply(payload) {
-      this.editPayload = payload; return toolbox ? { id: 'toolbox-status' } : resultMessage.edit(payload);
+    async deferReply(options) {
+      if (initialAckExpired) throw Object.assign(Error('Unknown interaction'), { code: 10062 });
+      this.deferred = true; this.ephemeral = Boolean(options?.flags & MessageFlags.Ephemeral);
+    }, async editReply(payload) {
+      this.editPayload = payload; return toolbox || publicThread ? { id: 'toolbox-status' } : resultMessage.edit(payload);
     } };
   await handler(interaction);
-  const id = resultMessage.payload?.components[0].toJSON().components[0].custom_id.split(':')[1];
+  const id = resultMessage.payload?.components?.[0]?.toJSON().components[0].custom_id.split(':')[1];
   function component(action, values = [], userId = 'owner') {
     return { customId: `${controlPrefix}:${action}`, message: resultMessage, channel: thread, channelId: thread.id,
       isChatInputCommand: () => false, isAutocomplete: () => false, user: { id: userId }, values,
@@ -57,16 +78,47 @@ async function harness({ toolbox = false, channelConfigured = true, packCount = 
       async showModal(modal) { this.modal = modal.toJSON(); } };
   }
   return { handler, createHandler, interaction, component, viewStore, resultMessage, id,
-    history, get queries() { return queries; }, get threads() { return threads; }, get renders() { return renders; }, get loads() { return loads; },
+    history, invitations, createOptions, publicMessages, get archived() { return archived; },
+    get parentFetches() { return parentFetches; },
+    get queries() { return queries; }, get threads() { return threads; }, get renders() { return renders; }, get loads() { return loads; },
     setRenderHook(hook) { renderHook = hook; }, setQueryHook(hook) { queryHook = hook; } };
 }
-test('offline existing-thread path edits its report directly; toolbox path creates exactly one thread', async () => {
+test('existing private-thread replies stay in place; toolbox creates a private thread and invites only its requester', async () => {
   const inThread = await harness();
   assert.equal(inThread.threads, 0); assert.equal(inThread.queries, 1);
   assert.equal(inThread.resultMessage.payload.files[0].name, 'wallet-v2.png');
   assert.equal(inThread.resultMessage.payload.components.length, 3);
   const toolbox = await harness({ toolbox: true });
   assert.equal(toolbox.threads, 1); assert.equal(toolbox.queries, 1);
+  assert.equal(toolbox.createOptions[0].type, ChannelType.PrivateThread);
+  assert.equal(toolbox.createOptions[0].invitable, false);
+  assert.deepEqual(toolbox.invitations, ['owner']);
+  assert.equal(toolbox.interaction.ephemeral, true);
+  assert.match(toolbox.interaction.editPayload.content, /私人錢包報告/);
+  assert.deepEqual(toolbox.publicMessages, []);
+});
+test('a new /wallet in a public thread creates a private sibling instead of publishing in the old thread', async () => {
+  const h = await harness({ publicThread: true, parentCached: false });
+  assert.equal(h.threads, 1); assert.equal(h.queries, 1);
+  assert.equal(h.createOptions[0].type, ChannelType.PrivateThread);
+  assert.deepEqual(h.invitations, ['owner']); assert.deepEqual(h.publicMessages, []);
+  assert.equal(h.interaction.ephemeral, true);
+  assert.equal(h.parentFetches, 1);
+  assert.equal((await h.viewStore.loadView(h.id)).channelId, 'thread-1');
+});
+test('missing private permission or failed create/invite never query or fall back to a public report', async () => {
+  for (const options of [{ privatePermission: false }, { threadCreateError: true }, { invitationError: true }, { returnedPublicThread: true }]) {
+    const h = await harness({ toolbox: true, ...options });
+    assert.equal(h.queries, 0); assert.equal(h.renders, 0); assert.equal(h.id, undefined);
+    assert.equal(h.interaction.ephemeral, true); assert.deepEqual(h.publicMessages, []);
+    assert.match(h.interaction.editPayload.content, /私人討論串/);
+    if (options.invitationError) assert.equal(h.archived, true);
+    if (options.privatePermission === false) assert.equal(h.threads, 0);
+  }
+});
+test('an expired initial public command is logged without publishing a channel fallback', async () => {
+  const h = await harness({ toolbox: true, initialAckExpired: true });
+  assert.equal(h.threads, 0); assert.equal(h.queries, 0); assert.deepEqual(h.publicMessages, []);
 });
 test('offline missing channel config rejects before any query or thread', async () => {
   const h = await harness({ channelConfigured: false });

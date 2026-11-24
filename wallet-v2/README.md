@@ -57,6 +57,10 @@ node scripts/wallet-v2.mjs export --wallet 0x錢包地址 --pool pack:0x卡池�
 
 V2 另外允許已核對 guild、MOD 角色的成員在既定 `mod-only` 與其討論串試用。其他頻道維持拒絕；未設定完整 MOD 政策不開放此入口。真正 Discord 收件結果另外記錄在部署文件，不以離線 controller 檢查替代。
 
+新 `/wallet` 在工具箱或公開討論串觸發時，於所屬文字頻道建立私人討論串（`PrivateThread`、`invitable: false`），僅加入查詢者；進度與連結以 ephemeral 回覆。已在私人討論串時直接回覆原串。具備管理討論串或管理員權限的人仍能查看。建立或加入失敗即停止，不改傳公開報表。舊討論串、舊報告與既有按鈕不搬移、不刪除；這項調整只影響之後新發起的 `/wallet`，不是舊報告隱私轉換。
+
+bot 在父文字頻道需具備檢視頻道、建立私人討論串、在討論串傳送訊息與附加檔案權限。程式不自動調整伺服器權限。私人串建立規則放在共用 `discord-wallet-thread.mjs`，V2 與明確選用的 legacy handler 都沿用。
+
 正式啟用需同時設定 `WALLET_V2_ENABLED=true`、`WALLET_V2_DATABASE_URL`、原本的 Alchemy key 與工具箱 channel。部署版明確允許在既有 PostgreSQL 增加 `wallet_v2_*` 三張表；不遷移、不覆寫舊錢包／每日活動／地址綁定表。
 
 ## 新活動研究
