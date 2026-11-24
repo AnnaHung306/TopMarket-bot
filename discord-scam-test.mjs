@@ -45,11 +45,13 @@ export function classifyScamTest(message, inScope = privateScope) {
   return null;
 }
 
-export function createScamTestHandler({ checkLinks = createLinkChecker(), now = Date.now, canAct = async () => true, inScope = privateScope, getModChannel = moderatorChannel } = {}) {
+export function createScamTestHandler({ checkLinks = createLinkChecker(), now = Date.now, canAct = async () => true, inScope = privateScope, getModChannel = moderatorChannel, targetOnly = false } = {}) {
   let lastUnavailableAlert = 0;
   return async message => {
-    if (!eligibleMessage(message, inScope) || !await canAct()) return;
+    if (!inScope(message) || typeof message.content !== 'string' || message.system || !message.author?.id) return;
+    if (message.client?.user?.id && message.author.id === message.client.user.id) return;
     const blockedInvite = BLOCKED_INVITE.test(message.content.normalize('NFKC'));
+    if ((!blockedInvite && (targetOnly || !eligibleMessage(message, inScope))) || !await canAct()) return;
     let result;
     if (blockedInvite) {
       result = message.channelId === MOD_CHANNEL ? '已刪除測試訊息' : '已刪除訊息';
@@ -86,5 +88,20 @@ export function createScamTestHandler({ checkLinks = createLinkChecker(), now = 
         allowedMentions: { parse: [] },
       });
     } catch (error) { console.error('Scam test alert failed:', error.message); }
+  };
+}
+
+// Edits can add the specified link after the initial message was delivered.
+export function createScamUpdateHandler(options = {}) {
+  const inScope = options.inScope || privateScope;
+  const handle = createScamTestHandler({ ...options, inScope, targetOnly: true });
+  return async (oldMessage, newMessage) => {
+    if (!inScope(newMessage)) return;
+    if (!newMessage.partial && oldMessage.content === newMessage.content) return;
+    if (newMessage.partial) {
+      try { newMessage = await newMessage.fetch(); }
+      catch (error) { console.error('Edited message could not be checked:', error.message); return; }
+    }
+    await handle(newMessage);
   };
 }

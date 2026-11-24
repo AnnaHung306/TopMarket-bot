@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { classifyScamTest, createScamTestHandler } from './discord-scam-test.mjs';
+import { classifyScamTest, createScamTestHandler, createScamUpdateHandler } from './discord-scam-test.mjs';
 import { createLinkChecker, splitLinks } from './discord-link-check.mjs';
 const base = { guildId: '1541304826674155550', channelId: '1572821315507855430', author: { id: '123', bot: false } };
 const positives = [
@@ -37,6 +37,20 @@ assert.match(alert.content, /刪除失敗/);
 deleted = false; alert = null;
 await createScamTestHandler({ checkLinks: async () => { throw Error('must not look up blocked link'); }, getModChannel: async () => { assert.ok(deleted, 'delete before resolving MOD channel'); return { send: async value => { alert = value; } }; } })({ ...base, content: 'http://discordapp.com/invite/complaint', delete: async () => { deleted = true; } });
 assert.ok(deleted); assert.match(alert.content, /攔截指定的不安全邀請連結/); assert.match(alert.content, /已刪除/);
+for (const extra of [{ author: { id: '321', bot: true } }, { webhookId: '123' }]) {
+  deleted = false;
+  await createScamTestHandler()({ ...base, ...extra, content: 'http://discordapp.com/invite/complaint', delete: async () => { deleted = true; }, channel: { send: async () => {} } });
+  assert.ok(deleted, 'target link from bot or webhook should be deleted');
+}
+deleted = false;
+await createScamTestHandler()({ ...base, author: { id: '999', bot: true }, client: { user: { id: '999' } }, content: 'http://discordapp.com/invite/complaint', delete: async () => { deleted = true; } });
+assert.equal(deleted, false, 'own bot messages are excluded');
+const handleEdit = createScamUpdateHandler();
+await handleEdit({ content: 'original' }, { ...base, content: 'edited http://discordapp.com/invite/complaint', delete: async () => { deleted = true; }, channel: { send: async () => {} } });
+assert.ok(deleted, 'link added by editing should be deleted');
+deleted = false;
+await handleEdit({ content: 'original' }, { ...base, content: '請輸入助記詞', delete: async () => { deleted = true; } });
+assert.equal(deleted, false, 'other rules are not applied to edits');
 assert.deepEqual(splitLinks('看看 https://example.com/airdrop?secret=private').hosts, ['example.com']);
 let queries = [];
 const checker = createLinkChecker({ fetchImpl: async url => {

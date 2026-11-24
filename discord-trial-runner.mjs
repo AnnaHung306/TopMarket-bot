@@ -1,10 +1,10 @@
 // Standalone, private-channel trial: do not register commands or handle wallet interactions.
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, GatewayIntentBits, Partials } from 'discord.js';
 import { createKeywordReplyHandler } from './discord-keyword-replies.mjs';
 import { createRepeatWarningHandler } from './discord-repeat-warning.mjs';
 import { createRepeatIncidentStore } from './discord-repeat-incidents.mjs';
 import { latestScheduledWindow } from './discord-repeat-windows.mjs';
-import { createScamTestHandler } from './discord-scam-test.mjs';
+import { createScamTestHandler, createScamUpdateHandler } from './discord-scam-test.mjs';
 import { acquireTrialLock } from './discord-trial-lock.mjs';
 import { startDailySummary } from './discord-daily-summary.mjs';
 import { createSummaryLifecycle } from './discord-summary-lifecycle.mjs';
@@ -23,7 +23,7 @@ const summaryEnabled = process.env.DISCORD_DAILY_SUMMARY_ENABLED === 'true';
 const communityEnabled = process.env.DISCORD_COMMUNITY_MODERATION_ENABLED === 'true';
 const inScope = createChannelScope({ communityEnabled });
 const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent];
-const client = new Client({ intents });
+const client = new Client({ intents, partials: [Partials.Message] });
 const incidentPool = new pg.Pool({ connectionString: process.env.TRIAL_DATABASE_URL });
 const incidentStore = createRepeatIncidentStore(incidentPool);
 let shuttingDown = false;
@@ -49,7 +49,10 @@ client.on('messageCreate', createRepeatWarningHandler({ canAct: lock.canAct, inS
   const counts = await incidentStore.countDetections({ ...incident, giveaway, quiz });
   return { ...counts, giveawayWindow: giveaway, quizWindow: quiz };
 } }));
-if (scamTestEnabled) client.on('messageCreate', createScamTestHandler({ canAct: lock.canAct, inScope }));
+if (scamTestEnabled) {
+  client.on('messageCreate', createScamTestHandler({ canAct: lock.canAct, inScope }));
+  client.on('messageUpdate', createScamUpdateHandler({ canAct: lock.canAct, inScope }));
+}
 const heartbeat = setInterval(async () => {
   if (shuttingDown || await lock.canAct()) return;
   console.log(lock.superseded ? 'New private channel trial instance is taking over' : 'Trial coordination connection lost; stopping this instance');
