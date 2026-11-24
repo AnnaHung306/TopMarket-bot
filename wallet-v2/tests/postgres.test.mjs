@@ -24,3 +24,40 @@ test('actual PostgreSQL transaction persists events and rolls back a stale revis
     await assert.rejects(store.saveView({ id: randomBytes(16).toString('hex'), ownerId: 'test-owner' }, 5), /revision conflict/);
   } finally { await store.close(); }
 });
+
+test('large saves preserve unchanged tuples and a later failed batch rolls the entire checkpoint back', async () => {
+  const store = new PostgresLedgerStore(connection), wallet = '0x' + randomBytes(20).toString('hex');
+  try {
+    await store.initialize();
+    const events = Array.from({ length: 1200 }, (_, i) => ({ id: `event:${i}`, block: i + 1, logIndex: i % 5,
+      timestamp: 1794211092 + i, proof: 'proof-'.repeat(500), category: 'test' }));
+    const first = await store.save(wallet, 0, { ...await store.load(wallet), events });
+    const tuples = () => store.pool.query('SELECT id,xmin::text FROM wallet_v2_events WHERE wallet=$1 ORDER BY id', [wallet]);
+    const before = (await tuples()).rows;
+    const second = await store.save(wallet, first.revision, first);
+    assert.deepEqual((await tuples()).rows, before, 'an unchanged event must not create a new MVCC tuple');
+    assert.deepEqual(await store.load(wallet), second);
+    const broken = [...events, { id: 'invalid-last-batch', block: 99999, timestamp: 'invalid bigint' }];
+    await assert.rejects(store.save(wallet, second.revision, { ...second, events: broken }), /bigint/);
+    assert.deepEqual(await store.load(wallet), second, 'all earlier batches and the head revision must roll back');
+    const changed = structuredClone(second); changed.events[5].proof = 'corrected';
+    await store.save(wallet, second.revision, changed);
+    const after = (await tuples()).rows;
+    assert.equal(after.filter((row, i) => row.xmin !== before[i].xmin).length, 1);
+  } finally { await store.close(); }
+});
+
+test('a checked-out PostgreSQL client can disconnect without an unhandled error or loss of later connections', async () => {
+  const errors = [], store = new PostgresLedgerStore(connection, { logger: { error: (...args) => errors.push(args) } });
+  let client;
+  try {
+    await store.initialize(); client = await store.pool.connect();
+    const { rows } = await client.query('SELECT pg_backend_pid() AS pid');
+    const disconnected = new Promise(resolve => client.once('error', resolve));
+    await store.pool.query('SELECT pg_terminate_backend($1)', [rows[0].pid]);
+    await disconnected;
+    client.release(true); client = null;
+    assert.ok(errors.some(row => row[0] === 'postgres_connection_error'));
+    assert.deepEqual((await store.load('0x' + '1'.repeat(40))).events, []);
+  } finally { client?.release(true); await store.close(); }
+});

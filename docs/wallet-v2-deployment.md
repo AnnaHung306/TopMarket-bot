@@ -72,3 +72,17 @@
 - 管理員／具備管理討論串權限者仍可查看私人串；invitable: false 限制一般成員自行邀請其他人，不阻止管理員管理。
 
 24 項 V2 controller 檢查、legacy guard／同錢包並行交付與 8 種等待 GIF 檢查通過，包含無父頻道快取、失敗不查鏈／不公開送出、意外收到公開串時拒絕，以及既有三階段報表操作。這些是隔離檢查，不是 Discord 實際驗收。需取得本次 push／部署同意後，才可在 mod-only 驗證建立私人串、加入查詢者、文字／PNG 與回覆；不得到一般成員可見頻道測試。
+
+## louisuuuu 持續 loading：資料庫寫滿與程序退出
+
+使用者已同意推送私人串功能供 tool-box 使用，並指定先不做 Discord 驗證；之後另要求處理 louisuuuu 一直 loading。此輪不發出新的 Discord 測試訊息或錢包指令，既有故障報告的修復屬使用者要求的維修。
+
+2026-11-24 16:31、16:32、16:38（台灣時間），Railway Postgres 在 INSERT INTO wallet_v2_events 發生 53100／No space left on device，包含 jsonb_to_recordset 暫存檔寫入失敗。16:33:14 又在寫入 WAL 時 PANIC，自動重啟資料庫；同秒 bot 因 Client 的未處理 error event（Connection terminated unexpectedly）退出，16:34:23 才再次 ready。16:33:08 的 view 012e8539c5df4332bfa902d800d198bb 因程序退出沒有 ready／failed 終點。工具箱唯讀畫面確認 louisuuuu 在 16:31 與 16:33 各開一串；未公開其錢包地址。
+
+Postgres 磁碟總量為 500 MB，調查時常駐用量約 444 MB；容量不足及大型交易的暫存／WAL 高峰共同造成此次故障。已提出擴為 2 GB 的具體建議，尚待使用者同意，不刪除正式資料換取空間。
+
+修正保留原 Gavin 查詢和全部事件：同一個 checkpoint 交易內分批寫入（每批約 512 KiB／最多 500 筆），失敗整筆回滾；ON CONFLICT 僅在事件實際變更時 UPDATE，避免重複版本與 WAL。事件讀取改在 Node 對既有物件參考排序，避免 PostgreSQL 排序完整 JSON 時產生大型暫存檔。這些不是掃描配額、背景續掃或截短錢包歷史。
+
+V2 與共用 PostgreSQL adapter 均處理 pool／checked-out client 的斷線事件；交易回滾失敗不掩蓋原錯誤。V2 設定連線與單筆 SQL 的故障等待上限，沒有整份錢包的時間／CU 配額。loading 狀態持久化；啟動時只修復仍顯示 loading... 且由 bot 發出的舊中斷訊息，改回原選項及更新按鈕，不查鏈、不產圖、不移動報告、不定時排程，不改動使用者自行停在選項草稿或已完成報告。
+
+64 項 V2 檢查、3 項實際隔離 PostgreSQL 檢查及原 Postgres adapter 檢查通過。Postgres 強制斷線後程序存活，後續新連線可用；1200 筆多批寫入的後批失敗會回滾前批，未變更事件的 xmin 不變，修正單筆只更新單筆。既有 89,262,428 bytes／42,861 事件公開 ledger 實際重播首次寫入 4,446 ms、重存 3,539 ms，未變更事件版本與原始收益數據一致；此為本機資料庫結果，不是 louisuuuu 的重新查詢或 Railway 耗時。

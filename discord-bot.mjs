@@ -42,6 +42,10 @@ client.once('clientReady', async () => {
     const route = process.env.DISCORD_GUILD_ID ? Routes.applicationGuildCommands(app, process.env.DISCORD_GUILD_ID) : Routes.applicationCommands(app);
     await rest.post(route, { body: command.toJSON() });
     for (const body of toolboxCommands) await rest.post(route, { body });
+    if (walletV2) {
+      try { console.info('wallet_v2_startup_recovery', JSON.stringify(await walletV2.recoverInterruptedReports(client))); }
+      catch (error) { console.error('WALLET_V2_STARTUP_RECOVERY_FAILED', error.code || error.name); }
+    }
     if (daily) {
       try {
         for (const body of daily.commands) await rest.post(Routes.applicationGuildCommands(app, daily.guildId), { body });

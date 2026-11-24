@@ -1,8 +1,10 @@
 import { neon } from '@neondatabase/serverless';
 import pg from 'pg';
+import { protectPostgresPool } from './pg-pool-errors.js';
 
 let pool;
 export function postgresSql(connectionPool) {
+  protectPostgresPool(connectionPool);
   function sql(strings, ...values) {
     const text = strings.reduce((result, part, index) => result + (index ? `$${index}` : '') + part, '');
     const run = async client => (await client.query(text, values)).rows;

@@ -26,7 +26,7 @@ const retryControls = view => view?.revision ? [new ActionRowBuilder().addCompon
   .setCustomId(customId(view.id, 'refresh', view.revision)).setLabel('重試').setStyle(ButtonStyle.Primary))] : [];
 const controlCatalog = ledger => ledger.catalog.map(({ id, kind, name, enabled }) => ({ id, kind, name, enabled }));
 const controlsLedger = view => ({ catalog: view.controlCatalog || [] });
-const draftPayload = (view, content = '選項已變更，請按「更新資料」。') => ({ ...loading(), content,
+export const draftPayload = (view, content = '選項已變更，請按「更新資料」。') => ({ ...loading(), content,
   components: viewComponents(controlsLedger(view), { ...view, phase: 'draft' }) });
 function poolChoices(ledger, view) {
   let pools = ledger.catalog.filter(pool => pool.kind === 'packs');
@@ -165,7 +165,8 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
         } else status = await interaction.editReply(loading());
         showingLoading = true;
         view = { id: randomUUID().replaceAll('-', ''), ownerId: interaction.user.id, wallet,
-          channelId: thread.id, messageId: status.id, selection, poolPage: 0, phase: 'draft', controlsVersion: 1, createdAt: new Date().toISOString() };
+          channelId: thread.id, messageId: status.id, selection, poolPage: 0, phase: 'loading', controlsVersion: 1,
+          runStartedAt: new Date().toISOString(), createdAt: new Date().toISOString() };
         view = await viewStore.saveView(view);
         trace('loading');
         const { ledger } = await service.query(wallet, { scope: selection.scope });
@@ -194,7 +195,7 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
         new ModalBuilder().setCustomId(customId(id, 'dates-submit', view.revision)).setTitle('自訂日期（台灣時間）')
           .addComponents(input('from', '起日 YYYY-MM-DD', view.selection.from), input('to', '迄日 YYYY-MM-DD', view.selection.to)));
       if (['csv', 'png'].includes(action)) {
-        if (view.phase === 'draft') return privateReply(interaction, '請先按「更新資料」產生報告，再下載。');
+        if (view.phase !== 'ready' && view.phase != null) return privateReply(interaction, '請先按「更新資料」產生報告，再下載。');
         await interaction.editReply(loading());
         downloadPending = true;
         const report = buildReport(await service.load(view.wallet), view.selection);
@@ -243,7 +244,7 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       await interaction.message.edit(loading());
       showingLoading = true; trace('loading');
       // Store the requested filters before work, so an error can retry those filters.
-      view = await viewStore.saveView({ ...next, phase: 'draft', controlsVersion: 1 }, view.revision);
+      view = await viewStore.saveView({ ...next, phase: 'loading', runStartedAt: new Date().toISOString(), controlsVersion: 1 }, view.revision);
       const { ledger } = await service.query(view.wallet, { scope: view.selection.scope });
       const result = await completed(ledger, view); view = result.view;
       await interaction.message.edit(result.body);
@@ -267,6 +268,11 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
           await interaction.channel.send({ content: '⏱️ Discord 連線逾時，請重新使用 /wallet。', allowedMentions: { parse: [] } });
         }
         return;
+      }
+      if (view?.revision && (view.phase === 'loading' || showingLoading)) {
+        view = { ...view, phase: 'draft' };
+        try { view = await viewStore.saveView(view, view.revision); }
+        catch (stateError) { logger.error('wallet_v2_failure_state_unsaved', view.id, stateError.code || stateError.name); }
       }
       const content = error.userMessage || (view?.revision ? '讀取失敗，請按重試。' : '讀取失敗，請重新使用 /wallet。');
       const failure = view?.revision && view.controlCatalog ? draftPayload(view, '讀取失敗，請按「更新資料」重試。')
