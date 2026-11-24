@@ -86,3 +86,11 @@ Postgres 磁碟總量為 500 MB，調查時常駐用量約 444 MB；容量不足
 V2 與共用 PostgreSQL adapter 均處理 pool／checked-out client 的斷線事件；交易回滾失敗不掩蓋原錯誤。V2 設定連線與單筆 SQL 的故障等待上限，沒有整份錢包的時間／CU 配額。loading 狀態持久化；啟動時只修復仍顯示 loading... 且由 bot 發出的舊中斷訊息，改回原選項及更新按鈕，不查鏈、不產圖、不移動報告、不定時排程，不改動使用者自行停在選項草稿或已完成報告。
 
 64 項 V2 檢查、3 項實際隔離 PostgreSQL 檢查及原 Postgres adapter 檢查通過。Postgres 強制斷線後程序存活，後續新連線可用；1200 筆多批寫入的後批失敗會回滾前批，未變更事件的 xmin 不變，修正單筆只更新單筆。既有 89,262,428 bytes／42,861 事件公開 ledger 實際重播首次寫入 4,446 ms、重存 3,539 ms，未變更事件版本與原始收益數據一致；此為本機資料庫結果，不是 louisuuuu 的重新查詢或 Railway 耗時。
+
+上述公開樣本重播後，本機 PostgreSQL 總量 78 MB，pg_stat_database 的 temp_files=0、temp_bytes=0。62 個本輪測試 JSON 與隔離容器 wallet-v2-loading-regression／測試資料已依清單清除；正式資料與來源 ledger 保留。
+
+私人串 9587437 與根因修正 a5343fa 已依本次授權推送 main。Railway discord-bot 固定 a5343fa，部署 c80c855c-20e6-4433-9306-358b388530d4 SUCCESS，17:00:25（台灣時間）ready。啟動修復檢查 7 筆 view，只編輯 1 筆仍為 loading 的中斷訊息。已親自以 Discord 網頁唯讀確認 louisuuuu 原串 1574704407772397680 的訊息 1574704411706523762 顯示中斷提示、更新按鈕與停用中的 PNG／CSV；未代他重跑查詢或生成新報表，也未執行私人串實測。該截圖擷取遇到瀏覽器控制逾時，未取得截圖檔，不宣稱已保存圖片證據。
+
+17:05:59，另一個同遭資料庫事故影響的 discord-mod-trial 已只重啟原部署 3317aa52-7232-41f3-8ade-7b96d2cc607c，回報 ready／scam detection enabled／Community monitoring enabled。維持原來源 codex/mod-greetings-test-20261119 / 77ea6d6，未換成 main、未變更設定、未另外觸發測試。
+
+容量設定網頁已確認仍是 Trial、500 MB，沒有 Live Resize 控制；[Railway 文件](https://docs.railway.com/volumes/reference) 僅對付費方案提供擴容。已更正先前只估算儲存費的提案，請使用者明確決定是否升 Hobby（最低 US$5／月、含 US$5 用量額度）再擴為 2 GB。未取得此額外付費同意前，未變更方案、容量或帳單。保留 500 MB 時仍有實際容量不足的風險，不能把程式回歸通過說成容量已解決或 louisuuuu 已完成重查。
