@@ -33,7 +33,15 @@ for (const content of negatives) assert.equal(classifyScamTest({ ...base, conten
 assert.equal(classifyScamTest({ ...base, channelId: 'another', content: positives[0] }), null);
 assert.equal(classifyScamTest({ ...base, author: { bot: true }, content: positives[0] }), null);
 assert.equal(classifyScamTest({ ...base, webhookId: '123', content: positives[0] }), null);
-assert.equal(classifyScamTest({ ...base, channelId: '1548950663008878683', content: 'http://discord.gg/complaint' }, () => true), null, 'new rule must stay in mod-only for trial');
+for (const channelId of ['1548950663008878683', '1541307245311164496']) {
+  assert.match(classifyScamTest({ ...base, channelId, content: 'http://discord.gg/complaint' }, () => true), /攔截指定/);
+  let communityDeleted = false, communityAlert;
+  await createScamTestHandler({ inScope: () => true, getModChannel: async () => ({ send: async value => { communityAlert = value; } }) })({
+    ...base, channelId, content: 'http://discord.gg/complaint', delete: async () => { communityDeleted = true; },
+  });
+  assert.ok(communityDeleted);
+  assert.match(communityAlert.content, /已刪除訊息/);
+}
 let deleted = false, alert;
 await createScamTestHandler()({ ...base, content: positives[0], delete: async () => { deleted = true; }, channel: { send: async value => { alert = value; } } });
 assert.ok(deleted); assert.match(alert.content, /疑似詐騙/); assert.match(alert.content, /已刪除/); assert.deepEqual(alert.allowedMentions, { parse: [] });
