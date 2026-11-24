@@ -9,6 +9,9 @@ const positives = [
   'Free Nitro https://example.invalid', 'verify your wallet https://example.invalid',
   '請輸入助記詞', '我要買你的 NFT，先支付中介手續費',
   '加我好友下載遊戲測試版', '你的資產可以追回，先支付驗證費',
+  'http://discordapp.com/invite/complaint',
+  'https://discordapp.com/invite/complaint?x=1',
+  '不要點 http://discordapp.com/invite/complaint，這是詐騙',
 ];
 const negatives = [
   '早安', '加我好友一起玩', 'add me as a friend', '今天有空投活動嗎？',
@@ -18,6 +21,8 @@ const negatives = [
   'https://example.com/airdrop/verify-wallet', 'http://example.com/free-nitro',
   'https://airdrop.example.com/whitelist', 'www.example.com/airdrop',
   '空投活動資訊 https://example.com/airdrop', '討論 NFT 白名單 https://example.com/whitelist',
+  'https://discordapp.com/invite/another', 'https://discordapp.com/invite/complaint2',
+  'https://notdiscordapp.com/invite/complaint',
 ];
 for (const content of positives) assert.ok(classifyScamTest({ ...base, content }), content);
 for (const content of negatives) assert.equal(classifyScamTest({ ...base, content }), null, content);
@@ -29,6 +34,9 @@ await createScamTestHandler()({ ...base, content: positives[0], delete: async ()
 assert.ok(deleted); assert.match(alert.content, /疑似詐騙/); assert.match(alert.content, /已刪除/); assert.deepEqual(alert.allowedMentions, { parse: [] });
 await createScamTestHandler()({ ...base, content: positives[0], delete: async () => { throw Error('no permission'); }, channel: { send: async value => { alert = value; } } });
 assert.match(alert.content, /刪除失敗/);
+deleted = false; alert = null;
+await createScamTestHandler({ checkLinks: async () => { throw Error('must not look up blocked link'); }, getModChannel: async () => { assert.ok(deleted, 'delete before resolving MOD channel'); return { send: async value => { alert = value; } }; } })({ ...base, content: 'http://discordapp.com/invite/complaint', delete: async () => { deleted = true; } });
+assert.ok(deleted); assert.match(alert.content, /攔截指定的不安全邀請連結/); assert.match(alert.content, /已刪除/);
 assert.deepEqual(splitLinks('看看 https://example.com/airdrop?secret=private').hosts, ['example.com']);
 let queries = [];
 const checker = createLinkChecker({ fetchImpl: async url => {
