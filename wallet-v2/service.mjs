@@ -8,23 +8,31 @@ import { scanUpgrades, receiptTransfers } from './upgrade.mjs';
 import { verifyAdapterAcquisitions } from './acquisition-evidence.mjs';
 import { updateCardLabels } from './card-labels.mjs';
 import { compactReceipt, observeEvidence, pruneTransfers, receiptContext } from './evidence.mjs';
+import { querySources, localDay, freshForDay, recordSourceChecks } from './freshness.mjs';
 
 const unique = rows => [...new Map(rows.map(row => [row.id, row])).values()];
-const required = scope => scope === 'all' ? ['gavin', 'upgrade'] : [scope === 'upgrade' ? 'upgrade' : 'gavin'];
 
 export function createWalletV2Service({ store, readerFactory = () => createReader(), catalogLoader = loadCatalog,
-  gavinScanner = scanGavin, upgradeScanner = scanUpgrades, logger = console } = {}) {
+  gavinScanner = scanGavin, upgradeScanner = scanUpgrades, logger = console, now = Date.now } = {}) {
   if (!store) throw Error('V2 persistent store is required');
   const active = new Map();
   async function run(wallet, flight, { scope, onProgress } = {}) {
     const began = performance.now();
     let ledger = await store.load(wallet);
     if (ledger.version !== SCHEMA_VERSION) throw Error('Unsupported V2 schema');
+    if (!flight.force && freshForDay(ledger, [...flight.sources], localDay(now()))) {
+      const usage = { units: 0, requests: 0, retries: 0, splits: 0, methods: {}, provider: 'database',
+        queryId: flight.id, pages: 0, queryMs: Math.round(performance.now() - began), estimated: true, cacheHit: true };
+      logger.info('wallet_v2_query', JSON.stringify({ wallet, scope, ...usage }));
+      return { ledger, usage };
+    }
     ledger.receipts ||= {}; ledger.blocks ||= {}; ledger.ownershipCoverage ||= {};
     const reader = observeEvidence(readerFactory(), () => ledger);
+    flight.reader = reader;
     const chain = await reader.rpc('eth_chainId', []);
     if (Number(chain) !== 8453) throw Error('V2 只接受 Base Mainnet，RPC 鏈別不符');
     const head = await reader.rpc('eth_getBlockByNumber', ['finalized', false]);
+    const checkedAt = new Date(now()).toISOString();
     if (!head?.hash || !Number.isSafeInteger(Number(head.number))) throw Error('Cannot verify finalized Base head');
     const through = Number(head.number);
     ledger.blocks[through] = { hash: head.hash, timestamp: Number(head.timestamp) };
@@ -138,26 +146,30 @@ export function createWalletV2Service({ store, readerFactory = () => createReade
     }
     await hydrate([]);
     await updateCardLabels(ledger);
+    recordSourceChecks(ledger, processed, through, checkedAt);
     ledger = await store.save(wallet, ledger.revision, ledger);
-    const usage = { ...reader.stats, queryId: flight.id, pages, queryMs: Math.round(performance.now() - began), estimated: true };
+    const usage = { ...reader.stats, queryId: flight.id, pages, queryMs: Math.round(performance.now() - began), estimated: true, cacheHit: false };
     logger.info('wallet_v2_query', JSON.stringify({ wallet, scope, ...usage }));
     return { ledger, usage };
   }
   const api = {
     async query(walletValue, options = {}) {
       if (!SCOPES[options.scope || 'all']) throw Error('無效報表範圍');
-      const wallet = address(walletValue), sources = required(options.scope || 'all');
+      const wallet = address(walletValue), sources = querySources(options.scope || 'all'), day = localDay(now());
       const existing = active.get(wallet);
       if (existing) {
         sources.forEach(source => existing.sources.add(source));
+        if (options.force) existing.force = true;
         const result = await existing.promise;
-        const missing = sources.includes('gavin') && !result.ledger.coverage.gavin?.complete ||
-          sources.includes('upgrade') && result.ledger.catalog.some(pool => pool.kind === 'upgrade' && pool.supported !== false &&
-            result.ledger.coverage[pool.id]?.status !== 'unsupported' && !result.ledger.coverage[pool.id]?.complete);
+        const missing = !freshForDay(result.ledger, sources, day) || options.force && result.usage.cacheHit;
         return missing ? api.query(wallet, options) : result;
       }
-      const flight = { id: randomUUID(), sources: new Set(sources) };
-      flight.promise = run(wallet, flight, options).finally(() => active.delete(wallet));
+      const flight = { id: randomUUID(), sources: new Set(sources), force: Boolean(options.force), began: performance.now() };
+      flight.promise = run(wallet, flight, options).catch(error => {
+        logger.error('wallet_v2_query_failed', JSON.stringify({ wallet, scope: options.scope || 'all',
+          ...flight.reader?.stats, queryId: flight.id, queryMs: Math.round(performance.now() - flight.began), estimated: true }));
+        throw error;
+      }).finally(() => active.delete(wallet));
       active.set(wallet, flight); return flight.promise;
     },
     load: wallet => store.load(address(wallet)),

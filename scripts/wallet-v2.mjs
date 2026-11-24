@@ -18,13 +18,15 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   storage: { type: 'string', default: 'file' }, 'rpc-url': { type: 'string' }, help: { type: 'boolean' },
   'rpc-concurrency': { type: 'string', default: '12' }, 'rpc-batch-size': { type: 'string', default: '25' },
   'rpc-min-interval': { type: 'string', default: '0' },
+  refresh: { type: 'boolean', default: false },
 } });
 if (values.help || !values.wallet) {
   console.log('V2 local entry (does not log in to Discord or use the existing DB):\n' +
     'node scripts/wallet-v2.mjs query --wallet 0x… [--scope upgrade|all|packs|raffle|market|buyback|staking|campaign]\n' +
     'node scripts/wallet-v2.mjs export --wallet 0x… [--pool pool-id] [--period custom --from YYYY-MM-DD --to YYYY-MM-DD]\n' +
     '--rpc-url explicitly selects a provider; without it ALCHEMY_API_KEY is required.\n' +
-    '--local-dir chooses the separate persistent ledger. --output chooses the report file prefix.');
+    '--local-dir chooses the separate persistent ledger. --output chooses the report file prefix.\n' +
+    'query reuses verified same-day data; --refresh explicitly requests a new chain check.');
   process.exit(values.help ? 0 : 1);
 }
 let store;
@@ -45,7 +47,7 @@ try {
   const selection = { scope: values.scope, poolId: values.pool || null, period: values.period,
     from: values.from, to: values.to, dimension: values.dimension, detail: values.view || (values.detail ? 'detail' : 'summary') };
   let ledger, usage = null;
-  if (command === 'query') ({ ledger, usage } = await service.query(wallet, { scope: values.scope,
+  if (command === 'query') ({ ledger, usage } = await service.query(wallet, { scope: values.scope, force: values.refresh,
     onProgress: progress => console.log('wallet_v2_progress', JSON.stringify(progress)) }));
   else ledger = await service.load(wallet);
   if (!ledger.asOf) throw Error('此錢包尚無 V2 明細；請先使用 query');

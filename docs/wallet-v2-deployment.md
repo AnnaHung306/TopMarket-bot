@@ -94,3 +94,31 @@ V2 與共用 PostgreSQL adapter 均處理 pool／checked-out client 的斷線事
 17:05:59，另一個同遭資料庫事故影響的 discord-mod-trial 已只重啟原部署 3317aa52-7232-41f3-8ade-7b96d2cc607c，回報 ready／scam detection enabled／Community monitoring enabled。維持原來源 codex/mod-greetings-test-20261119 / 77ea6d6，未換成 main、未變更設定、未另外觸發測試。
 
 容量設定網頁已確認仍是 Trial、500 MB，沒有 Live Resize 控制；[Railway 文件](https://docs.railway.com/volumes/reference) 僅對付費方案提供擴容。已更正先前只估算儲存費的提案，請使用者明確決定是否升 Hobby（最低 US$5／月、含 US$5 用量額度）再擴為 2 GB。未取得此額外付費同意前，未變更方案、容量或帳單。保留 500 MB 時仍有實際容量不足的風險，不能把程式回歸通過說成容量已解決或 louisuuuu 已完成重查。
+
+## 2026-11-24 21:24–21:31：原卷擴容與服務恢復
+
+使用者回報已開通 Railway，授權恢復資料庫／錢包／社群服務並保留原資料；本次仍未授權 Git push，低用量改版維持本機待審。本機沿用 main／7648291 與全部既有未提交工作。
+
+升級方案後原卷仍 500 MB，Postgres 因 WAL 空間不足持續 CRASHED。Railway connector 沒有既有卷 resize 參數，瀏覽器 CDP 點擊又無法送出；改用使用者開啟的同一 Railway 視窗原生操作。設定頁僅提供 1 GB／5 GB，已告知並將原 volume `ebfd5adf-994b-4abe-a53a-c479abd1ffcd` 擴為 **5000 MB**，維持 `/var/lib/postgresql/data`／原服務／原區域。沒有換卷、清空、刪 WAL、重設資料庫或改 PostgreSQL major version。Railway 自動留下「Online resize to 5000MB」**488 MB** 備份，未執行還原。此帳戶 UI 顯示新建備份／PITR 需 Pro，本輪沒有升級 Pro 或設定新備份排程。
+
+擴容完成後舊 PostgreSQL deployment 變為 REMOVED、服務離線；使用原 PostgreSQL 18 image／原既有 build 重新部署，產生 `62bb78e2-fb7b-4fcc-9bba-d6ce8f7d7a72`。21:26:16 日誌確認 redo、end-of-recovery checkpoint 完成，出現 `database system is ready to accept connections`。不是新建空資料庫。
+
+已親自從 Railway 正常 Database 頁面執行唯讀 SELECT：資料庫大小 **154 MB**、`pg_is_in_recovery=false`，可讀到 **4 個錢包、82,664 筆 V2 事件、11 份報告 view、5 筆 daily_events、68 筆 daily_entries、2 筆 daily_giveaway_sessions**。這證明現有資料可讀，不代表已完成逐筆歷史／全部財務資料的完整性驗收。服務 disk 指標約 0.774 GB／5 GB，包含資料、WAL 等；不能把 database_size 與 volume_usage 當同一數字。
+
+恢復後唯讀保存活動與摘要基準：11/23 quiz 的開題／結果／MOD 結果訊息 ID 與既有 result hash 可讀，已結算；11/24 quiz 保留原開題訊息、尚未結算；另外三筆歷史 giveaway／missing 記錄保留。摘要表 11/20、11/21、11/23、11/24 四筆均為 sent。沒有手動 tick、重抽、清空活動或發出測試公告。社群服務原版摘要使用日期主鍵 claim，衝突不重送；本輪唯讀取得其固定 commit 查核，未切換本機分支或覆寫檔案。
+
+資料庫正常後，僅重啟 `discord-mod-trial` 原部署 `3317aa52-7232-41f3-8ade-7b96d2cc607c`，維持原分支 `codex/mod-greetings-test-20261119`／`77ea6d6`。21:30:34 日誌回報 coordination lock、ready、scam detection enabled、Community monitoring enabled，Chinese 權限 view=true／manageMessages=true。錢包服務沒有更換或重啟程式，仍為 `a5343fa`／`c80c855c-20e6-4433-9306-358b388530d4`；既有 pool 隨資料庫恢復而繼續使用。
+
+21:31 Railway health 核對三服務均 Online、running replica 皆 1、無 pending changes。從 21:26:17 至此次核對，Postgres 無新的 FATAL／PANIC／No space 日誌，錢包服務無新的 deploy 錯誤日誌；未把這個短觀察區間描述成永久不會失敗。
+
+原生工具在開啟 Discord 新分頁時因無法可靠確認網址而停止，本輪未送出新的 /wallet 或公開測試訊息。已請使用者僅在 mod-only 以既有公開樣本執行一次，待核對文字／PNG 及 server query log；目前未宣稱這部分已驗收，也未完成社群重啟後活動 hash 的第二次比對。低用量版尚未推送、尚未部署；同日零 RPC／0 CU 是先前隔離檢查結果，不是現行 a5343fa 的新功能。
+
+本機證據位於被忽略的 `work/wallet-v2/acceptance/`：`2026-11-24-resize-backup.png`、`2026-11-24-database-readonly-check.png`、`2026-11-24-daily-recovery-before.json`、`2026-11-24-summary-recovery-before.json`。保留用於審閱，不混入正式素材或上傳 Git。此次沒有新單元測試暫存／測試容器需要清理；既有未追蹤檔案保留。
+
+## 2026-11-24：確認恢復收件並同意發布低用量 V2
+
+使用者回覆「有出來了，可以push了，依舊是v2不要改名字」。正式 a5343fa 日誌核對公開樣本查詢於 22:02:46 完成 ready，queryMs=2608、估算 3206 CU／36 次 RPC 傳輸／0 retries，handler 至 ready 6443 ms；文字／PNG 送達由使用者確認。這是原版恢復後的增量同步，不是新快取版的 0 CU 命中或全歷史冷查。
+
+本次獲准推送低用量改版至 AnnaHung306/TopMarket-bot 的 main 並沿用原 Railway discord-bot 部署，維持 V2 命名、/wallet 指令、私人串、既有活動／抽獎／工具箱功能。推送前 main 與遠端同為 7648291；19 個審閱檔案 hash 全數一致，80 項既有隔離檢查對應的執行程式未再改動。此次另包含上述恢復紀錄及授權狀態文件更新；既有五項未追蹤工作、.env、ledger 與截圖均不納入 commit。
+
+新行為：普通同日 /wallet 重用資料庫；明確「更新資料」強制同步；跨日只更新被查詢錢包。沒有每日額度、背景批量刷新或其他供應商備援。來源完成時間存於既有 snapshot JSON，舊 ledger 在第一次成功增量核對後才可命中。後續部署結果以實際 commit／Railway ready 日誌及 mod-only 的 cacheHit／CU／收件核對為準，不提前宣稱新版本線上驗收完成。

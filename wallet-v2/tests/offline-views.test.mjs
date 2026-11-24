@@ -23,12 +23,12 @@ async function harness({ toolbox = false, publicThread = false, privatePermissio
   threadCreateError = false, returnedPublicThread = false, parentCached = true,
   initialAckExpired = false, channelConfigured = true, packCount = 0, initialScope = 'upgrade' } = {}) {
   let queries = 0, threads = 0, renders = 0, loads = 0, renderHook, queryHook, controlPrefix;
-  const history = [], invitations = [], createOptions = [], publicMessages = [];
+  const history = [], invitations = [], createOptions = [], publicMessages = [], queryOptions = [];
   let archived = false, parentFetches = 0;
   const viewStore = new FileLedgerStore('work/wallet-v2/verification/offline-views');
   const fixtureLedger = structuredClone(ledger);
   for (let i = 0; i < packCount; i++) fixtureLedger.catalog.push({ id: `pack:test${i}`, kind: 'packs', name: `Test Pack ${i + 1}` });
-  const service = { load: async () => { loads++; return structuredClone(fixtureLedger); }, query: async () => { queries++; await queryHook?.(); return { ledger: structuredClone(fixtureLedger) }; } };
+  const service = { load: async () => { loads++; return structuredClone(fixtureLedger); }, query: async (_wallet, options) => { queries++; queryOptions.push(options); await queryHook?.(); return { ledger: structuredClone(fixtureLedger) }; } };
   const resultMessage = { id: 'result-message', async edit(payload) {
     this.payload = { ...this.payload, ...payload }; history.push(this.payload);
     const first = payload.components?.[0]?.toJSON().components[0].custom_id;
@@ -78,7 +78,7 @@ async function harness({ toolbox = false, publicThread = false, privatePermissio
       async showModal(modal) { this.modal = modal.toJSON(); } };
   }
   return { handler, createHandler, interaction, component, viewStore, resultMessage, id,
-    history, invitations, createOptions, publicMessages, get archived() { return archived; },
+    history, invitations, createOptions, publicMessages, queryOptions, get archived() { return archived; },
     get parentFetches() { return parentFetches; },
     get queries() { return queries; }, get threads() { return threads; }, get renders() { return renders; }, get loads() { return loads; },
     setRenderHook(hook) { renderHook = hook; }, setQueryHook(hook) { queryHook = hook; } };
@@ -168,6 +168,8 @@ test('offline downloads do not mutate the visible report; refresh explicitly req
   assert.equal(h.queries, 1);
   await h.handler(h.component('refresh'));
   assert.equal(h.queries, 2);
+  assert.equal(h.queryOptions[0].force, undefined, 'new commands may reuse the persisted daily cache');
+  assert.equal(h.queryOptions[1].force, true, 'the explicit update button always requests a chain refresh');
 });
 test('offline duplicate click cannot release another operation lock or overwrite its filter', async () => {
   const h = await harness(); let release, entered;

@@ -68,7 +68,7 @@ export async function htmlReport(report) {
     <div class="wallet">${escape(report.wallet)}</div><div class="subtitle">${escape(report.range.label)}</div>
     <div class="metrics">${cards}</div>${holdings}${upgrade}
     ${!report.complete || report.pending.length || report.realizedSummary.unknownCostCount ? `<div class="notice">${[!report.complete ? '部分資料待核對' : '', report.pending.length ? report.pending.length + ' 筆金額待核對' : '', report.realizedSummary.unknownCostCount ? report.realizedSummary.unknownCostCount + ' 筆成本未知' : ''].filter(Boolean).join(' · ')}</div>` : ''}
-    <div class="footer">${escape(displayTime(report.asOf))}</div></article></body></html>`;
+    <div class="footer">資料截至：${escape(displayTime(report.asOf))}</div></article></body></html>`;
 }
 let browserPromise;
 export async function posterBrowser() {

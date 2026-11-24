@@ -48,7 +48,7 @@ export function textReport(report) {
   const footer = ['', ...(!report.complete ? ['🔎 部分資料待核對'] : []),
     ...(report.pending.length ? [`🔎 ${report.pending.length} 筆金額待核對`] : []),
     ...(report.realizedSummary.unknownCostCount ? [`🔎 ${report.realizedSummary.unknownCostCount} 筆成本未知`] : []),
-    `🕒 更新：${displayTime(report.asOf)}`];
+    `🕒 資料截至：${displayTime(report.asOf)}`];
   for (const line of extra) {
     if ([...lines, line, ...footer].join('\n').length > 1850) { lines.push('📄 完整明細請見 CSV。'); break; }
     lines.push(line);

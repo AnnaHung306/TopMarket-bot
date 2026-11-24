@@ -3,6 +3,7 @@ export { textReport } from './report-text.mjs';
 import { cashFlows } from './gavin.mjs';
 import { upgradeSpins } from './upgrade.mjs';
 import { traceLineage } from './lineage.mjs';
+import { reportAsOf } from './freshness.mjs';
 
 const sum = (rows, field) => rows.reduce((total, row) => total + BigInt(row[field] ?? '0'), 0n).toString();
 export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
@@ -43,7 +44,7 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
   const proceedsFromUpgrade = cash.flows.filter(row => within(row) && row.direction === 'in' && row.assetActivities?.includes('upgrade') && lineagePoolMatches(row));
   const upgradeRealized = realized.filter(row => row.activities.includes('upgrade'));
   const report = {
-    version: 2, wallet: ledger.wallet, filter, range: { label: range.label }, asOf: ledger.asOf || null,
+    version: 2, wallet: ledger.wallet, filter, range: { label: range.label }, asOf: reportAsOf(ledger, filter.scope),
     title: `${SCOPES[filter.scope]}${pool ? ' · ' + displayPoolName(pool).slice(0, 100) : ''}`, poolName: pool ? displayPoolName(pool) : null,
     complete, coverage, flows, pending, realized,
     cash: { inRaw: sum(flows.filter(row => row.direction === 'in'), 'raw'), outRaw: sum(flows.filter(row => row.direction === 'out'), 'raw') },

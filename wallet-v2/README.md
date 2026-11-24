@@ -10,7 +10,7 @@
 - 簡要摘要、完整分析、逐筆明細。文字／PNG／CSV 共用 `buildReport()`；CSV 另保留完整交易、付款、成本與核對證據。
 - 現金收支、可追溯已實現取得支出差額、升級參考估值分開，未核實的成本不當成零，Gas 不計入 USDC。
 - 原始卡池歸屬與交易發生分類是不同視角，不能再次相加。抽卡視圖包含同卡池對應回購，不能再與回購視圖重複加總。
-- 同錢包的同時查詢共用一次工作；只換現有明細的篩選不發 RPC，只有明確更新或欠缺活動明細時才查鏈。
+- 同錢包的同時查詢共用一次工作；新 `/wallet` 優先重用台灣同日已完成的資料，首次、跨日首次或缺少該來源時才查鏈。「更新資料」明確強制查鏈；更改選項不自行查鏈。
 - 沒有每日額度、背景掃描服務或定時重掃。保留實際 RPC 的並行控制、供應端分頁與短暫錯誤重試，不自動換資料來源。
 
 「全部」指已支援且已登錄的合約來源，不是對所有未知未來活動的完整性承諾。新升級池未核實時會標示未支援，不當成零收益；其他新活動需依下方流程接入。
@@ -25,7 +25,7 @@ node scripts/wallet-v2.mjs export --wallet 0x錢包地址 --scope upgrade --peri
 node scripts/wallet-v2.mjs export --wallet 0x錢包地址 --pool pack:0x卡池合約 --dimension origin --view analysis
 ```
 
-`query` 取得最新 finalized 明細並增量保存；`export` 只讀既有明細，不載入 key、不連 RPC。預設本機資料放在 `work/wallet-v2/ledger/`，輸出放在 `work/wallet-v2/reports/`。可用 `--local-dir` 和 `--output` 明確指定。每次輸出包含 `.txt`、`.png`、`.csv`、完整 `.json` 及同一份報表的 `.html`，不是另做的 demo。
+`query` 重用同日已完成的明細；需要更新時，取得最新 finalized 明細並增量保存。`query --refresh` 對應 Discord「更新資料」，強制重新查鏈。`export` 只讀既有明細，不載入 key、不連 RPC。預設本機資料放在 `work/wallet-v2/ledger/`，輸出放在 `work/wallet-v2/reports/`。可用 `--local-dir` 和 `--output` 明確指定。每次輸出包含 `.txt`、`.png`、`.csv`、完整 `.json` 及同一份報表的 `.html`，不是另做的 demo。
 
 `--scope`：`all`、`packs`、`upgrade`、`raffle`、`market`、`buyback`、`staking`、`campaign`。`--view`：`summary`、`analysis`、`detail`。
 
@@ -82,3 +82,7 @@ node --test --test-reporter=dot wallet-v2/tests/accounting.test.mjs wallet-v2/te
 `postgres.test.mjs` 另外要求專用本機測試容器，且只接受 loopback port 55439；不會連 Railway。`fixtures` 的公開交易回執與歷史 getter 回傳來自真正 Base RPC。合成會計情境僅用於單元測試，不作產品預覽資料。
 
 用量按方法表估算，包含重試與被供應端拒絕的範圍查詢，實際 CU 以 Alchemy 儀表板為準。本機耗時不是 Railway 效能。
+
+## V2 按需每日快取
+
+詳細規則與驗證入口見 `docs/wallet-v2-daily-cache.md`。此修改沿用既有三張資料表，沒有建立新排程、每日額度、強制冷卻或其他供應商備援。Alchemy 帳戶本身的上限由使用者管理，程式不變更。

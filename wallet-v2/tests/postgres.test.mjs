@@ -2,8 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { PostgresLedgerStore } from '../store.mjs';
+import { createWalletV2Service } from '../service.mjs';
+import { WALLET_HISTORY_START } from '../gavin.mjs';
 const connection = process.env.WALLET_V2_TEST_DATABASE_URL;
 if (!connection || !/^postgres(?:ql)?:\/\/[^/]+@(?:127\.0\.0\.1|localhost):55439\//.test(connection)) throw Error('Tests require the dedicated local V2 PostgreSQL container');
+
+test('daily query cache survives a real PostgreSQL reconnect without RPC or a new revision', async () => {
+  const firstStore = new PostgresLedgerStore(connection), wallet = '0x' + randomBytes(20).toString('hex');
+  let readerCount = 0, secondStore;
+  const now = () => Date.parse('2026-11-24T10:00:00Z');
+  try {
+    await firstStore.initialize();
+    const service = createWalletV2Service({ store: firstStore, now, logger: { info() {}, error() {} },
+      catalogLoader: async () => ({ pools: [], cards: {}, unsupported: [] }),
+      readerFactory: () => { readerCount++; return { stats: { units: 20 }, batch: async () => [],
+        rpc: async method => method === 'eth_chainId' ? '0x2105'
+          : { number: '0x' + (WALLET_HISTORY_START + 1).toString(16), hash: 'isolated-cache-test', timestamp: '0x6b03eba3' } }; },
+      gavinScanner: async (_reader, _wallet, from, to) => ({ from, to, events: [], warnings: [] }) });
+    const fresh = await service.query(wallet); await firstStore.close();
+    secondStore = new PostgresLedgerStore(connection);
+    const restarted = createWalletV2Service({ store: secondStore, now, logger: { info() {}, error() {} },
+      readerFactory: () => { throw Error('cached query must not construct an RPC reader'); } });
+    const cached = await restarted.query(wallet);
+    assert.equal(readerCount, 1); assert.equal(cached.usage.units, 0); assert.equal(cached.usage.cacheHit, true);
+    assert.deepEqual(cached.ledger, fresh.ledger);
+    assert.equal((await secondStore.load(wallet)).revision, fresh.ledger.revision);
+  } finally {
+    if (!firstStore.pool.ended) await firstStore.close(); await secondStore?.close();
+  }
+});
 test('actual PostgreSQL transaction persists events and rolls back a stale revision; views survive new connection', async () => {
   const store = new PostgresLedgerStore(connection);
   const wallet = '0x' + randomBytes(20).toString('hex'), id = randomBytes(16).toString('hex');

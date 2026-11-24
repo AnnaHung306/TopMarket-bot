@@ -245,7 +245,7 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       showingLoading = true; trace('loading');
       // Store the requested filters before work, so an error can retry those filters.
       view = await viewStore.saveView({ ...next, phase: 'loading', runStartedAt: new Date().toISOString(), controlsVersion: 1 }, view.revision);
-      const { ledger } = await service.query(view.wallet, { scope: view.selection.scope });
+      const { ledger } = await service.query(view.wallet, { scope: view.selection.scope, force: true });
       const result = await completed(ledger, view); view = result.view;
       await interaction.message.edit(result.body);
       showingLoading = false; trace('ready');

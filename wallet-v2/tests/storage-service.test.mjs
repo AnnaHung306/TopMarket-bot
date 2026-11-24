@@ -87,7 +87,7 @@ test('changed finalized block hash is rejected before another checkpoint is comm
   const before = await store.load(wallet);
   const broken = createWalletV2Service({ store, readerFactory: () => reader({ head: WALLET_HISTORY_START + 20, changedBlock: before.coverage.gavin.through }),
     catalogLoader, logger: quiet, gavinScanner: async () => { throw Error('must not scan'); } });
-  await assert.rejects(broken.query(wallet, { scope: 'packs' }), /no longer matches/);
+  await assert.rejects(broken.query(wallet, { scope: 'packs', force: true }), /no longer matches/);
   assert.deepEqual(await store.load(wallet), before);
 });
 test('missing receipt is a hard evidence failure, not an empty successful wallet', async () => {

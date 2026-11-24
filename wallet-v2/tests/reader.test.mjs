@@ -10,7 +10,7 @@ test('explicit provider never receives an Alchemy key and CU estimates do not im
   reader.stats.units = 1000000000;
   assert.equal(await reader.rpc('eth_getCode', ['0x' + '1'.repeat(40), 'latest']), '0x1');
   assert.equal(calls[0].headers.authorization, undefined);
-  assert.equal(reader.stats.units, 1000000026);
+  assert.equal(reader.stats.units, 1000000020);
   assert.throws(() => createReader({ alchemyKey: '' }), /明確設定/);
 });
 test('provider log-range errors split the same provider without losing boundary blocks', async () => {

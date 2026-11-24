@@ -1,8 +1,8 @@
 // Explicit endpoint selection only. No switch to another provider on failure.
-const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 26,
+const units = { eth_call: 26, eth_getLogs: 60, eth_getTransactionReceipt: 20, eth_getCode: 20,
   eth_getStorageAt: 20, eth_chainId: 0, eth_getBlockByNumber: 20, alchemy_getAssetTransfers: 120 };
 export function createReader({ rpcUrl, alchemyKey = process.env.ALCHEMY_API_KEY, fetchImpl = fetch, signal, concurrency = 12,
-  batchSize = 25, minIntervalMs = 0 } = {}) {
+  batchSize = 25, minIntervalMs = 0, acquireRpc } = {}) {
   if (!rpcUrl && !alchemyKey?.trim()) throw Error('V2 需要明確設定 Alchemy key 或 RPC URL');
   const url = rpcUrl || 'https://base-mainnet.g.alchemy.com/v2';
   if (!/^https:\/\//.test(url)) throw Error('RPC endpoint must use HTTPS');
@@ -19,16 +19,20 @@ export function createReader({ rpcUrl, alchemyKey = process.env.ALCHEMY_API_KEY,
         const sendAt = Math.max(Date.now(), nextRequest);
         nextRequest = sendAt + minIntervalMs;
         if (sendAt > Date.now()) await delay(sendAt - Date.now());
-        stats.requests++;
-        for (const method of methods) { stats.units += units[method] ?? 80; stats.methods[method] = (stats.methods[method] || 0) + 1; }
-        let response;
+        const release = await acquireRpc?.(signal);
+        let response, data;
         try {
+          signal?.throwIfAborted();
+          stats.requests++;
+          for (const method of methods) { stats.units += units[method] ?? 80; stats.methods[method] = (stats.methods[method] || 0) + 1; }
           response = await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json',
             ...(!rpcUrl ? { authorization: `Bearer ${alchemyKey.trim()}` } : {}) }, body: JSON.stringify(payload),
             signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000) });
+          data = await response.json().catch(error => { if (response.ok) throw error; return null; });
         } catch { throw Error('RPC 連線失敗；未切換其他資料來源'); }
-        if (response.ok) return response.json();
-        const failure = await response.json().catch(() => null);
+        finally { release?.(); }
+        if (response.ok) return data;
+        const failure = data;
         // Alchemy can use HTTP 400 for normal JSON-RPC range/result-size errors.
         // Preserve the structured error so the same-provider range parser can handle it.
         if (response.status === 400 && failure?.error) return failure;
