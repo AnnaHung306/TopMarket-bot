@@ -6,6 +6,7 @@ import { decodeUpgradeLog, receiptTransfers, upgradeSpins } from '../upgrade.mjs
 import { buildReport, textReport } from '../report.mjs';
 import { csvReport } from '../exports.mjs';
 import { assetKey, dateRange, taipeiDay, eventId, money } from '../model.mjs';
+import { STAKE } from '../../worker/index.js';
 import { viewComponents, walletV2Command } from '../discord.mjs';
 
 const fixture = JSON.parse(await readFile(new URL('../fixtures/public-upgrades.json', import.meta.url)));
@@ -44,6 +45,7 @@ test('verified public spin 148: decode request, independently recompute win and 
   assert.match(textReport(report), /45\.00/);
   assert.match(csvReport(report), /"upgradeValue".*"45000000"/);
   assert.equal(report.upgrade.laterProceedsRaw, null);
+  assert.match(textReport(report), /升級後已實現收益：待確認/);
 });
 test('verified public spin 144 loses; no cash outflow is invented from its 45 reference-value stake', () => {
   const ledger = sampleLedger('144');
@@ -124,7 +126,52 @@ test('verified acquisition expenditure follows the winning NFT; oracle values ar
   assert.equal(report.realized[0].pnlRaw, '170000000');
   assert.equal(report.upgrade.referenceChangeRaw, '45000000');
   assert.equal(report.upgrade.laterProceedsRaw, '250000000');
+  assert.equal(report.upgrade.realizedPnlRaw, '170000000');
+  assert.match(textReport(report), /🏆 升級後已實現收益：170\.00 USDC/);
   assert.equal(report.realized[0].originPoolId, originPool.id);
+});
+test('holdings separate checked wallet, staking and unverified ownership, with costs kept out of cash CSV fields', () => {
+  const ledger = withAcquisition(sampleLedger());
+  const known = buildReport(ledger);
+  assert.equal(known.holdingsSummary.walletCount, 1);
+  assert.equal(known.holdingsSummary.knownCostRaw, '80000000');
+  assert.equal(known.upgrade.laterProceedsRaw, '0');
+  assert.match(textReport(known), /📥 升級卡後續收入：0\.00 USDC/);
+  assert.match(textReport(known), /🏆 升級後已實現收益：尚未實現/);
+  assert.match(csvReport(known), /"holding"/);
+  const csv = csvReport(known).replace(/^\ufeff/, '').split('\r\n').map(row => row.slice(1, -1).split('","'));
+  const holdingRow = csv.find(row => row[0] === 'holding');
+  assert.equal(holdingRow[csv[0].indexOf('raw_usdc')], '');
+  assert.equal(holdingRow[csv[0].indexOf('acquisition_expenditure_raw')], '80000000');
+  const stake = { id: 'stake-transfer', kind: 'nft', collection: request148.targetCollection, tokenId: request148.targetTokenId,
+    tx: '0x' + '8'.repeat(64), block: request148.block + 100, logIndex: 2, timestamp: request148.timestamp + 200, from: wallet, to: STAKE };
+  ledger.transfers.push(stake);
+  ledger.events.push({ ...stake, id: 'stake-event', legacyId: stake.tx + ':0x1', category: 'staked', logIndex: 1 });
+  const staked = buildReport(ledger, { scope: 'staking', detail: 'detail' });
+  assert.equal(staked.holdingsSummary.walletCount, 0);
+  assert.equal(staked.holdingsSummary.stakedCount, 1);
+  assert.equal(staked.holdingsSummary.knownCostRaw, '80000000');
+  assert.match(textReport(staked), /🔒 質押 1 張/);
+  assert.match(textReport(staked), /🃏 持倉明細/);
+  ledger.ownershipCoverage = {};
+  const uncertain = buildReport(ledger);
+  assert.equal(uncertain.holdingsSummary.stakedCount, 0);
+  assert.equal(uncertain.holdingsSummary.unverifiedCount, 1);
+  assert.match(textReport(uncertain), /🔎 1 張持有狀態待確認/);
+});
+test('report menus and compact text use consistent category emoji without changing the three-state controls', () => {
+  const ledger = withAcquisition(sampleLedger());
+  for (const detail of ['summary', 'detail']) {
+    const text = textReport(buildReport(ledger, { detail }));
+    assert.ok(text.length < 1900);
+    assert.match(text, detail === 'summary' ? /📊 簡要報表/ : /📋 詳細報表/);
+    const rows = viewComponents(ledger, { id: '1'.repeat(32), revision: 1, phase: 'draft', selection: { scope: 'all', period: 'all', detail } }).map(row => row.toJSON());
+    const buttons = rows.flatMap(row => row.components).filter(c => c.type === 2);
+    assert.equal(buttons.find(b => b.label === (detail === 'summary' ? '詳細報表' : '收合明細')).emoji.name, detail === 'summary' ? '📋' : '🔽');
+    assert.equal(buttons.find(b => b.label === '更新資料').emoji.name, '🔄');
+    assert.ok(buttons.find(b => b.label === '下載 PNG').disabled);
+    assert.ok(rows[0].components[0].options.every(o => o.emoji?.name));
+  }
 });
 test('out-and-back transfers break continuity and prevent fabricated zero-cost realized profit', () => {
   const ledger = withSale(withAcquisition(sampleLedger()));

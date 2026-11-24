@@ -4,6 +4,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, ModalBuilde
   StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, ThreadAutoArchiveDuration } from 'discord.js';
 import { SCOPES, address, dateRange, displayPoolName } from './model.mjs';
 import { buildReport, textReport } from './report.mjs';
+import { SCOPE_EMOJI } from './report-text.mjs';
 import { csvReport, renderPng } from './exports.mjs';
 import { mayManageActivity } from '../daily/moderator-access.mjs';
 
@@ -11,7 +12,7 @@ import { mayManageActivity } from '../daily/moderator-access.mjs';
 export const walletV2Command = new SlashCommandBuilder().setName('wallet').setDescription('查詢錢包收益，依活動與期間篩選')
   .addStringOption(option => option.setName('address').setDescription('Base 錢包地址').setRequired(true))
   .addStringOption(option => option.setName('scope').setDescription('分析範圍；也可查完再切換').addChoices(
-    ...Object.entries(SCOPES).map(([value, name]) => ({ name, value }))))
+    ...Object.entries(SCOPES).map(([value, name]) => ({ name: `${SCOPE_EMOJI[value]} ${name}`, value }))))
   .addStringOption(option => option.setName('period').setDescription('時間範圍').addChoices(
     { name: '全期間', value: 'all' }, { name: '近 7 天', value: '7d' }, { name: '近 30 天', value: '30d' },
     { name: '本月', value: 'month' }, { name: '自訂日期', value: 'custom' }))
@@ -41,18 +42,19 @@ export function viewComponents(ledger, view) {
   const pagePools = pools.slice(page * 23, (page + 1) * 23);
   const selected = pools.find(pool => pool.id === view.selection.poolId) || ledger.catalog.find(pool => pool.kind === 'packs' && pool.id === view.selection.poolId);
   if (selected && !pagePools.some(pool => pool.id === selected.id)) pagePools.push(selected);
-  const options = [{ label: '所有卡包', value: 'all', default: !selected },
-    ...pagePools.map(pool => ({ label: displayPoolName(pool).slice(0, 100), value: pool.id, default: pool.id === selected?.id,
+  const options = [{ label: '所有卡包', value: 'all', emoji: { name: '📦' }, default: !selected },
+    ...pagePools.map(pool => ({ label: displayPoolName(pool).slice(0, 100), value: pool.id, emoji: { name: '📦' }, default: pool.id === selected?.id,
       ...(pool.enabled === false ? { description: '已結束' } : {}) }))];
   const select = (action, placeholder, options) => new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
     .setCustomId(customId(view.id, action, view.revision)).setPlaceholder(placeholder).addOptions(options));
-  const button = (action, label, style = ButtonStyle.Secondary) => new ButtonBuilder().setCustomId(customId(view.id, action, view.revision)).setLabel(label).setStyle(style);
-  const rows = [select('scope', '選擇收益範圍', Object.entries(SCOPES).map(([value, label]) => ({ label, value, default: value === view.selection.scope })))];
+  const icons = { detail: view.selection.detail === 'summary' ? '📋' : '🔽', png: '🖼️', csv: '📄', refresh: '🔄', search: '🔍', 'clear-search': '🧹', previous: '⬅️', next: '➡️' };
+  const button = (action, label, style = ButtonStyle.Secondary) => new ButtonBuilder().setCustomId(customId(view.id, action, view.revision)).setLabel(label).setEmoji(icons[action]).setStyle(style);
+  const rows = [select('scope', '選擇收益範圍', Object.entries(SCOPES).map(([value, label]) => ({ label, value, emoji: { name: SCOPE_EMOJI[value] }, default: value === view.selection.scope })))];
   const showPacks = hasPackFilter(view.selection) && pools.length > 0;
   if (showPacks) rows.push(select('pool', pages > 1 ? `選擇卡包 ${page + 1}/${pages}` : '選擇卡包', options));
   rows.push(
     select('period', '選擇期間', [['all', '全期間'], ['7d', '近 7 天'], ['30d', '近 30 天'], ['month', '本月'], ['custom', '自訂日期']]
-      .map(([value, label]) => ({ label, value, default: value === view.selection.period }))),
+      .map(([value, label]) => ({ label, value, emoji: { name: '🗓️' }, default: value === view.selection.period }))),
     new ActionRowBuilder().addComponents(button('detail', view.selection.detail === 'summary' ? '詳細報表' : '收合明細'),
       button('png', '下載 PNG').setDisabled(view.phase === 'draft'), button('csv', '匯出 CSV').setDisabled(view.phase === 'draft'),
       button('refresh', '更新資料', ButtonStyle.Primary)));
@@ -88,7 +90,11 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
   channelId = () => process.env.DISCORD_WALLET_CHANNEL_ID?.trim(), modPolicy = () => ({}), logger = console } = {}) {
   if (!service || !viewStore) throw Error('V2 service and persistent view store are required');
   const busy = new Set();
-  const privateReply = (interaction, content) => interaction.reply({ content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+  const privateReply = (interaction, content) => {
+    const body = { content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } };
+    if (interaction.deferred && interaction.ephemeral) return interaction.editReply(body);
+    return interaction.deferred || interaction.replied ? interaction.followUp(body) : interaction.reply(body);
+  };
   function permitted(interaction) {
     const allowed = typeof channelId === 'function' ? channelId() : channelId?.trim();
     return walletLocationAllowed(interaction, allowed, typeof modPolicy === 'function' ? modPolicy() : modPolicy);
@@ -125,10 +131,20 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
         .slice(0, 25).map(pool => ({ name: displayPoolName(pool).slice(0, 100), value: pool.id })));
     }
     let status, view, acquired = false, showingLoading = false, downloadPending = false;
-    const started = performance.now(), action = command ? 'query' : match?.[3];
+    const started = performance.now(), receivedAt = Date.now(), action = command ? 'query' : match?.[3];
     const trace = stage => logger.info('wallet_v2_action', JSON.stringify({ interactionId: interaction.id,
-      viewId: view?.id, action, stage, elapsedMs: Math.round(performance.now() - started) }));
+      viewId: view?.id, action, stage, at: new Date().toISOString(),
+      receivedAgeMs: Number.isFinite(interaction.createdTimestamp) ? Math.max(0, receivedAt - interaction.createdTimestamp) : undefined,
+      elapsedMs: Math.round(performance.now() - started) }));
     try {
+      // Component callbacks expire quickly: acknowledge before database access.
+      // Modal opening must itself be the initial response, so it stays separate.
+      const opensModal = action === 'search' || action === 'period' && interaction.values?.[0] === 'custom';
+      if (match && !opensModal) {
+        if (['csv', 'png'].includes(action)) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        else await interaction.deferUpdate();
+        trace('acknowledged');
+      }
       if (command) {
         const wallet = address(interaction.options.getString('address', true).trim());
         const selection = { scope: interaction.options.getString('scope') || 'all', poolId: null,
@@ -177,7 +193,6 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
           .addComponents(input('from', '起日 YYYY-MM-DD', view.selection.from), input('to', '迄日 YYYY-MM-DD', view.selection.to)));
       if (['csv', 'png'].includes(action)) {
         if (view.phase === 'draft') return privateReply(interaction, '請先按「更新資料」產生報告，再下載。');
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         await interaction.editReply(loading());
         downloadPending = true;
         const report = buildReport(await service.load(view.wallet), view.selection);
@@ -210,35 +225,52 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
         const selectionChanged = JSON.stringify(next.selection) !== JSON.stringify(view.selection);
         const menuChanged = (next.search || '') !== (view.search || '') || (next.poolPage || 0) !== (view.poolPage || 0);
         if (!selectionChanged && !menuChanged) {
-          await interaction.deferUpdate(); trace('unchanged');
+          trace('unchanged');
           return;
         }
-        await interaction.deferUpdate();
+        if (!interaction.deferred && !interaction.replied) await interaction.deferUpdate();
         // Save only small menu metadata. Changing requirements never scans or renders.
         next.controlCatalog = view.controlCatalog || controlCatalog(await service.load(view.wallet));
         next.phase = selectionChanged ? 'draft' : view.phase || 'ready';
         view = await viewStore.saveView({ ...next, controlsVersion: 1 }, view.revision);
-        await interaction.editReply(selectionChanged ? draftPayload(view) : { components: viewComponents(controlsLedger(view), view) });
+        await interaction.message.edit(selectionChanged ? draftPayload(view) : { components: viewComponents(controlsLedger(view), view) });
         trace(selectionChanged ? 'draft' : 'controls');
         return;
       }
       // Acknowledge and replace the old text/PNG before any ledger read, scan or render.
-      await interaction.update(loading());
+      await interaction.message.edit(loading());
       showingLoading = true; trace('loading');
       // Store the requested filters before work, so an error can retry those filters.
       view = await viewStore.saveView({ ...next, phase: 'draft', controlsVersion: 1 }, view.revision);
       const { ledger } = await service.query(view.wallet, { scope: view.selection.scope });
       const result = await completed(ledger, view); view = result.view;
-      await interaction.editReply(result.body);
+      await interaction.message.edit(result.body);
       showingLoading = false; trace('ready');
     } catch (error) {
       logger.error('wallet_v2_interaction_failed', error.code || error.name);
       trace('failed');
+      if (Number(error.code) === 10062) {
+        trace('expired');
+        // Never send a second callback using an expired token. Use the bot's
+        // message endpoint, only after rechecking owner, location and revision.
+        if (match && interaction.message?.edit) {
+          const latest = await viewStore.loadView(match[1]);
+          if (!latest || latest.ownerId !== interaction.user.id || latest.channelId !== interaction.channelId ||
+            latest.messageId !== interaction.message.id || busy.has(latest.id) ||
+            match[2] && Number(match[2]) !== latest.revision || !match[2] && latest.controlsVersion === 1) return;
+          busy.add(latest.id); acquired = true; view = latest;
+          view = await viewStore.saveView({ ...view, phase: 'draft', controlsVersion: 1 }, view.revision);
+          await interaction.message.edit(draftPayload(view, '⏱️ 這次操作已逾時，請再按「更新資料」。'));
+        } else if (command && interaction.channel?.send) {
+          await interaction.channel.send({ content: '⏱️ Discord 連線逾時，請重新使用 /wallet。', allowedMentions: { parse: [] } });
+        }
+        return;
+      }
       const content = view?.revision ? '讀取失敗，請按重試。' : '讀取失敗，請重新使用 /wallet。';
       const failure = view?.revision && view.controlCatalog ? draftPayload(view, '讀取失敗，請按「更新資料」重試。')
         : { ...loading(), content, components: retryControls(view) };
       if (status) await status.edit(failure);
-      else if (showingLoading) await interaction.editReply(failure);
+      else if (showingLoading) await interaction.message.edit(failure);
       else if (downloadPending) await interaction.editReply({ ...loading(), content: '下載失敗，請再試一次。' });
       else if (interaction.deferred || interaction.replied) await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
       else await privateReply(interaction, content);

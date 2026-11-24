@@ -17,6 +17,7 @@ const ledger = { version: 1, wallet, catalog: [pool], cards: {}, events,
   transfers: fixture.receipts.flatMap(receipt => receiptTransfers(receipt, wallet)).map(t => ({ ...t, timestamp: times.get(t.block) })),
   coverage: { gavin: { status: 'verified', complete: true }, [pool.id]: { status: 'verified', complete: true } },
   warnings: [], asOf: '2026-11-23T00:00:00.000Z' };
+const privateBody = interaction => interaction.replyPayload || interaction.followUpPayload || interaction.editPayload;
 async function harness({ toolbox = false, channelConfigured = true, packCount = 0, initialScope = 'upgrade' } = {}) {
   let queries = 0, threads = 0, renders = 0, loads = 0, renderHook, queryHook, controlPrefix;
   const history = [];
@@ -76,7 +77,7 @@ test('offline controls isolate the owner and perform filter-only changes without
   const h = await harness();
   const denied = h.component('detail', [], 'other-member');
   await h.handler(denied);
-  assert.match(denied.replyPayload.content, /其他成員/);
+  assert.match(privateBody(denied).content, /其他成員/);
   const detail = h.component('detail'); await h.handler(detail);
   assert.equal((await h.viewStore.loadView(h.id)).selection.detail, 'detail');
   await h.handler(h.component('detail'));
@@ -123,7 +124,7 @@ test('offline duplicate click cannot release another operation lock or overwrite
   const first = h.handler(h.component('refresh')); await ready;
   const second = h.component('dimension'); await h.handler(second);
   const third = h.component('dimension'); await h.handler(third);
-  assert.match(second.replyPayload.content, /上一個操作/); assert.match(third.replyPayload.content, /上一個操作/);
+  assert.match(privateBody(second).content, /上一個操作/); assert.match(privateBody(third).content, /上一個操作/);
   release(); await first;
   const view = await h.viewStore.loadView(h.id);
   assert.equal(view.selection.detail, 'summary'); assert.equal(view.selection.dimension, 'location');
@@ -180,10 +181,10 @@ test('late clicks from older controls cannot overwrite a newer report or start a
   await h.handler(h.component('detail'));
   const completed = h.resultMessage.payload, count = h.history.length;
   await h.handler(late);
-  assert.match(late.replyPayload.content, /最新/);
+  assert.match(privateBody(late).content, /最新/);
   const legacy = h.component('refresh'); legacy.customId = `wv2:${h.id}:refresh`;
   await h.handler(legacy);
-  assert.match(legacy.replyPayload.content, /最新/);
+  assert.match(privateBody(legacy).content, /最新/);
   assert.strictEqual(h.resultMessage.payload, completed); assert.equal(h.history.length, count);
   assert.equal(h.queries, 1);
 });
@@ -242,7 +243,7 @@ test('drafts disable downloads and reject older download requests without exposi
   for (const action of ['png', 'csv']) {
     assert.equal(controls.find(item => item.custom_id.endsWith(':' + action)).disabled, true);
     const request = h.component(action); await h.handler(request);
-    assert.match(request.replyPayload.content, /請先按「更新資料」/);
+    assert.match(privateBody(request).content, /請先按「更新資料」/);
   }
   assert.strictEqual(h.resultMessage.payload, draft); assert.equal(h.queries, 1); assert.equal(h.renders, 1);
 });
@@ -268,4 +269,32 @@ test('pack navigation keeps the report and reselecting the same activity preserv
   await h.handler(h.component('scope', ['all']));
   assert.equal((await h.viewStore.loadView(h.id)).selection.poolId, 'pack:test23');
   assert.equal(h.history.length, edits); assert.equal(h.queries, 1); assert.equal(h.renders, 1);
+});
+test('component acknowledgement happens before a delayed view lookup', async () => {
+  const h = await harness(), interaction = h.component('refresh');
+  const load = h.viewStore.loadView.bind(h.viewStore); let release, entered;
+  const reached = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  h.viewStore.loadView = async id => { assert.equal(interaction.deferred, true); entered(); await gate; return load(id); };
+  const pending = h.handler(interaction); await reached;
+  assert.equal(interaction.deferred, true); assert.equal(h.queries, 1);
+  release(); await pending;
+  assert.equal(h.queries, 2); assert.match(h.resultMessage.payload.content, /Top.Market/);
+});
+test('expired callbacks use the bot message endpoint once instead of retrying the invalid token', async () => {
+  const h = await harness(), interaction = h.component('refresh'); let callbacks = 0;
+  interaction.deferUpdate = async () => { callbacks++; throw Object.assign(Error('Unknown interaction'), { code: 10062 }); };
+  await h.handler(interaction);
+  assert.equal(callbacks, 1); assert.equal(interaction.replyPayload, undefined); assert.equal(interaction.followUpPayload, undefined);
+  assert.match(h.resultMessage.payload.content, /操作已逾時/); assert.deepEqual(h.resultMessage.payload.files, []);
+  assert.equal((await h.viewStore.loadView(h.id)).phase, 'draft'); assert.equal(h.queries, 1); assert.equal(h.renders, 1);
+  await h.handler(h.component('refresh')); assert.equal(h.queries, 2);
+});
+test('an expired older callback cannot replace a newer report state', async () => {
+  const h = await harness(), old = h.component('refresh');
+  await h.handler(h.component('period', ['7d']));
+  const latest = h.resultMessage.payload, edits = h.history.length;
+  old.deferUpdate = async () => { throw Object.assign(Error('Unknown interaction'), { code: 10062 }); };
+  await h.handler(old);
+  assert.strictEqual(h.resultMessage.payload, latest); assert.equal(h.history.length, edits); assert.equal(h.queries, 1);
 });

@@ -1,4 +1,5 @@
-import { SCOPES, OUTCOME_LABELS, DELIVERY_LABELS, CATEGORY_LABELS, dateRange, assetKey, money, displayTime, displayPoolName } from './model.mjs';
+import { SCOPES, dateRange, assetKey, displayPoolName } from './model.mjs';
+export { textReport } from './report-text.mjs';
 import { cashFlows } from './gavin.mjs';
 import { upgradeSpins } from './upgrade.mjs';
 import { traceLineage } from './lineage.mjs';
@@ -40,6 +41,7 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
   const unknownCostCount = realized.filter(row => row.pnlRaw === null).length;
   const laterProceedsKnown = Boolean(ledger.coverage.gavin?.complete) && coverage.every(c => c.status === 'verified' && c.complete);
   const proceedsFromUpgrade = cash.flows.filter(row => within(row) && row.direction === 'in' && row.assetActivities?.includes('upgrade') && lineagePoolMatches(row));
+  const upgradeRealized = realized.filter(row => row.activities.includes('upgrade'));
   const report = {
     version: 2, wallet: ledger.wallet, filter, range: { label: range.label }, asOf: ledger.asOf || null,
     title: `${SCOPES[filter.scope]}${pool ? ' · ' + displayPoolName(pool).slice(0, 100) : ''}`, poolName: pool ? displayPoolName(pool) : null,
@@ -55,13 +57,16 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
       winRate: settled.length ? won / settled.length : null,
       consumedRaw: consumedRaw.toString(), awardedRaw: awardedRaw.toString(), referenceChangeRaw: (awardedRaw - consumedRaw).toString(),
       valueUnknownCount: settled.length - comparable.length, laterProceedsRaw: laterProceedsKnown ? sum(proceedsFromUpgrade, 'raw') : null,
+      realizedCount: upgradeRealized.length, unknownCostCount: upgradeRealized.filter(row => row.pnlRaw === null).length,
+      realizedPnlRaw: upgradeRealized.some(row => row.pnlRaw !== null) ? sum(upgradeRealized.filter(row => row.pnlRaw !== null), 'pnlRaw') : null,
       spins: selectedSpins.filter(spin => within(spin.request) || spin.result && within(spin.result)).map(spin => ({
         ...spin, stakeLabel: describeCard(ledger, spin.request.stakeCollection, spin.request.stakeTokenId),
         targetLabel: describeCard(ledger, spin.request.targetCollection, spin.request.targetTokenId),
       })),
     },
     holdings: lineage.holdings.filter(lot => (!pool || (filter.dimension === 'origin' ? lot.originPoolId === pool.id : lot.poolIds?.includes(pool.id))) &&
-      (filter.scope === 'all' || lot.activities.includes(filter.scope))).map(lot => ({ ...lot,
+      (filter.scope === 'all' || lot.activities.includes(filter.scope) || filter.scope === 'staking' && lot.custody)).map(lot => ({ ...lot,
+      cardLabel: describeCard(ledger, lot.collection, lot.tokenId),
       ownershipStatus: ledger.ownershipCoverage?.[lot.collection] ? 'history-checked' : 'receipt-observed-only',
       ownershipCheckedThrough: ledger.ownershipCoverage?.[lot.collection] || null })),
     unassignedOriginCount: cash.flows.filter(row => within(row) && !row.originPoolId).length,
@@ -76,6 +81,12 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
   report.cash.netRaw = (BigInt(report.cash.inRaw) - BigInt(report.cash.outRaw)).toString();
   report.realizedSummary.knownCostRaw = sum(realized.filter(row => row.costRaw !== null), 'costRaw');
   report.realizedSummary.knownProceedsRaw = sum(realized.filter(row => row.costRaw !== null), 'proceedsRaw');
+  const confirmedHoldings = report.holdings.filter(lot => lot.ownershipStatus === 'history-checked');
+  report.holdingsSummary = { walletCount: confirmedHoldings.filter(lot => !lot.custody).length,
+    stakedCount: confirmedHoldings.filter(lot => lot.custody).length,
+    unverifiedCount: report.holdings.length - confirmedHoldings.length,
+    knownCostRaw: sum(confirmedHoldings.filter(lot => lot.costRaw !== null), 'costRaw'),
+    unknownCostCount: confirmedHoldings.filter(lot => lot.costRaw === null).length };
   const byActivity = new Map(), byPool = new Map();
   for (const flow of flows) {
     const poolId = filter.dimension === 'origin' ? flow.originPoolId : flow.poolId;
@@ -102,40 +113,4 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
 export function describeCard(ledger, collection, tokenId) {
   const name = ledger.cards?.[assetKey(collection, tokenId)]?.name || ledger.cards?.[collection]?.name;
   return `${name || '卡片'} · NFT #${tokenId}`;
-}
-export function textReport(report) {
-  const shortCard = label => {
-    if (label.length <= 55) return label;
-    const suffix = / · NFT #\d+$/.exec(label)?.[0] || '';
-    return label.slice(0, 54 - suffix.length).trimEnd() + '…' + suffix;
-  };
-  const lines = [`**Top.Market · ${report.title}**`, `\`${report.wallet}\``, report.range.label,
-    ...report.metrics.map(metric => `${metric.label}：${money(metric.raw)}${metric.raw == null ? '' : ' USDC'}`)];
-  if (['all', 'upgrade'].includes(report.filter.scope) && (report.filter.scope === 'upgrade' || report.upgrade.spins.length)) {
-    const u = report.upgrade;
-    lines.push(`升級 ${u.requests} 次｜成功 ${u.won}／失敗 ${u.lost}`);
-    const pending = [[u.pending, '待結算'], [u.rescued, '已救援'], [u.claimable, '待領取']].filter(([count]) => count).map(([count, label]) => `${label} ${count}`);
-    if (pending.length) lines.push(pending.join('｜'));
-    if (u.laterProceedsRaw && BigInt(u.laterProceedsRaw) > 0n) lines.push(`升級卡後續收入：${money(u.laterProceedsRaw)} USDC`);
-  }
-  const extra = [];
-  if (report.filter.detail === 'detail') {
-    for (const spin of report.upgrade.spins.slice(0, 4)) extra.push(`#${spin.request.spinId} ${shortCard(spin.stakeLabel)} → ${shortCard(spin.targetLabel)} · ${OUTCOME_LABELS[spin.status]} / ${DELIVERY_LABELS[spin.delivery]}`);
-    for (const flow of report.flows.slice(-4)) extra.push(`${flow.direction === 'in' ? '+' : '-'}${money(flow.raw)} ${CATEGORY_LABELS[flow.category] || SCOPES[flow.activity]} · ${flow.tx.slice(0, 12)}…`);
-  }
-  if (report.filter.detail !== 'summary') {
-    const s = report.realizedSummary;
-    if (s.knownCount) extra.push(`已實現 ${s.knownCount} 筆：收入 ${money(s.knownProceedsRaw)} − 成本 ${money(s.knownCostRaw)} USDC`);
-    for (const group of report.analysis.byPool.slice(0, 3)) extra.push(`${group.name.slice(0, 100)}：淨現金 ${money(group.netRaw)} USDC`);
-  }
-  const footer = [
-    ...(!report.complete ? ['部分資料待核對'] : []),
-    ...(report.pending.length ? [`${report.pending.length} 筆金額待核對`] : []),
-    ...(report.realizedSummary.unknownCostCount ? [`${report.realizedSummary.unknownCostCount} 筆成本未知`] : []),
-    `更新：${displayTime(report.asOf)}`];
-  for (const line of extra) {
-    if ([...lines, line, ...footer].join('\n').length > 1900) { lines.push('其餘逐筆明細與證據請見 CSV。'); break; }
-    lines.push(line);
-  }
-  return [...lines, ...footer].join('\n');
 }
