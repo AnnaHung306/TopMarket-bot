@@ -22,7 +22,9 @@ const FUNDS = /(?:funds|assets|crypto|資產|资产|損失|损失|款項|款项)
 // A clear warning is left for human review rather than automatically deleted.
 const WARNING = /(?:不要|請勿|请勿|切勿|別|别|千萬不要|千万不要|勿|do\s+not|don't|never).{0,16}(?:加|提供|輸入|输入|傳|发送|點|点|連接|连接|download|install|share|send|enter|click|connect)/iu;
 const BLOCKED_INVITE = /(?<![@\w.-])(?:https?:\/\/)?discordapp\.com\/invite\/complaint\/?(?=$|[?#\s,.;!<>()[\]])/iu;
+const TEST_BLOCKED_INVITE = /(?<![@\w.-])(?:https?:\/\/)?discord\.gg\/complaint\/?(?=$|[?#\s,.;!<>()[\]])/iu;
 const BLOCKED_REASON = '攔截指定的不安全邀請連結';
+const isBlockedInvite = (content, channelId) => BLOCKED_INVITE.test(content) || (channelId === MOD_CHANNEL && TEST_BLOCKED_INVITE.test(content));
 
 function eligibleMessage(message, inScope) {
   return inScope(message) && !message.author?.bot &&
@@ -33,7 +35,7 @@ export function classifyScamTest(message, inScope = privateScope) {
   const content = message.content.normalize('NFKC');
   const { hosts, text } = splitLinks(content);
   const hasLink = hosts.length > 0;
-  if (BLOCKED_INVITE.test(content)) return BLOCKED_REASON;
+  if (isBlockedInvite(content, message.channelId)) return BLOCKED_REASON;
   if (WARNING.test(text)) return null;
   if (SECRET.test(text) && REQUEST.test(text)) return '要求提供錢包敏感資訊';
   if (REPORT.test(text) && SUPPORT.test(text) && (FRIEND.test(text) || hasLink)) return '誤檢舉搭配客服及聯絡方式';
@@ -50,13 +52,13 @@ export function createScamTestHandler({ checkLinks = createLinkChecker(), now = 
   return async message => {
     if (!inScope(message) || typeof message.content !== 'string' || message.system || !message.author?.id) return;
     if (message.client?.user?.id && message.author.id === message.client.user.id) return;
-    const blockedInvite = BLOCKED_INVITE.test(message.content.normalize('NFKC'));
+    const blockedInvite = isBlockedInvite(message.content.normalize('NFKC'), message.channelId);
     if ((!blockedInvite && (targetOnly || !eligibleMessage(message, inScope))) || !await canAct()) return;
     let result;
     if (blockedInvite) {
       result = message.channelId === MOD_CHANNEL ? '已刪除測試訊息' : '已刪除訊息';
       try { await message.delete(); }
-      catch { result = '刪除失敗（訊息可能已刪除或權限不足）'; }
+      catch (error) { console.error('Blocked invite deletion failed:', error.code ?? error.message); result = '刪除失敗（訊息可能已刪除或權限不足）'; }
     }
     let modChannel;
     try { modChannel = await getModChannel(message); }

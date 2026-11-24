@@ -12,6 +12,9 @@ const positives = [
   'http://discordapp.com/invite/complaint',
   'https://discordapp.com/invite/complaint?x=1',
   '不要點 http://discordapp.com/invite/complaint，這是詐騙',
+  'http://discord.gg/complaint',
+  'Submit below >http://discord.gg/complaint>',
+  'https://discord.gg/complaint?x=1',
 ];
 const negatives = [
   '早安', '加我好友一起玩', 'add me as a friend', '今天有空投活動嗎？',
@@ -23,12 +26,14 @@ const negatives = [
   '空投活動資訊 https://example.com/airdrop', '討論 NFT 白名單 https://example.com/whitelist',
   'https://discordapp.com/invite/another', 'https://discordapp.com/invite/complaint2',
   'https://notdiscordapp.com/invite/complaint',
+  'https://discord.gg/complaint2', 'https://notdiscord.gg/complaint', 'https://discord.gg/another',
 ];
 for (const content of positives) assert.ok(classifyScamTest({ ...base, content }), content);
 for (const content of negatives) assert.equal(classifyScamTest({ ...base, content }), null, content);
 assert.equal(classifyScamTest({ ...base, channelId: 'another', content: positives[0] }), null);
 assert.equal(classifyScamTest({ ...base, author: { bot: true }, content: positives[0] }), null);
 assert.equal(classifyScamTest({ ...base, webhookId: '123', content: positives[0] }), null);
+assert.equal(classifyScamTest({ ...base, channelId: '1548950663008878683', content: 'http://discord.gg/complaint' }, () => true), null, 'new rule must stay in mod-only for trial');
 let deleted = false, alert;
 await createScamTestHandler()({ ...base, content: positives[0], delete: async () => { deleted = true; }, channel: { send: async value => { alert = value; } } });
 assert.ok(deleted); assert.match(alert.content, /疑似詐騙/); assert.match(alert.content, /已刪除/); assert.deepEqual(alert.allowedMentions, { parse: [] });
@@ -37,6 +42,9 @@ assert.match(alert.content, /刪除失敗/);
 deleted = false; alert = null;
 await createScamTestHandler({ checkLinks: async () => { throw Error('must not look up blocked link'); }, getModChannel: async () => { assert.ok(deleted, 'delete before resolving MOD channel'); return { send: async value => { alert = value; } }; } })({ ...base, content: 'http://discordapp.com/invite/complaint', delete: async () => { deleted = true; } });
 assert.ok(deleted); assert.match(alert.content, /攔截指定的不安全邀請連結/); assert.match(alert.content, /已刪除/);
+deleted = false; alert = null;
+await createScamTestHandler({ checkLinks: async () => { throw Error('blocked invite should skip DNS'); } })({ ...base, content: 'Submit below >http://discord.gg/complaint>', delete: async () => { deleted = true; }, channel: { send: async value => { alert = value; } } });
+assert.ok(deleted); assert.match(alert.content, /攔截指定的不安全邀請連結/); assert.match(alert.content, /已刪除測試訊息/);
 for (const extra of [{ author: { id: '321', bot: true } }, { webhookId: '123' }]) {
   deleted = false;
   await createScamTestHandler()({ ...base, ...extra, content: 'http://discordapp.com/invite/complaint', delete: async () => { deleted = true; }, channel: { send: async () => {} } });

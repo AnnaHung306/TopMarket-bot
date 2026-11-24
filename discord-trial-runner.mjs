@@ -1,5 +1,5 @@
 // Standalone, private-channel trial: do not register commands or handle wallet interactions.
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, PermissionFlagsBits } from 'discord.js';
 import { createKeywordReplyHandler } from './discord-keyword-replies.mjs';
 import { createRepeatWarningHandler } from './discord-repeat-warning.mjs';
 import { createRepeatIncidentStore } from './discord-repeat-incidents.mjs';
@@ -35,6 +35,13 @@ const summary = createSummaryLifecycle({
 });
 client.once('clientReady', () => {
   console.log(`Private channel trial ready; scam detection ${scamTestEnabled ? 'enabled' : 'disabled'}`);
+  console.log(`Community monitoring ${communityEnabled ? 'enabled' : 'disabled'}`);
+  if (communityEnabled && scamTestEnabled) {
+    void client.channels.fetch('1548950663008878683').then(channel => {
+      const permissions = channel?.permissionsFor?.(channel.guild.members.me);
+      console.log(`Chinese moderation permissions: view=${!!permissions?.has(PermissionFlagsBits.ViewChannel)} manageMessages=${!!permissions?.has(PermissionFlagsBits.ManageMessages)}`);
+    }).catch(error => console.error('Chinese moderation permission check failed:', error.message));
+  }
   if (!summaryEnabled || shuttingDown) return;
   if (!process.env.OPENAI_API_KEY?.trim()) { console.log('Daily summary disabled: API key is missing'); return; }
   summary.start();
