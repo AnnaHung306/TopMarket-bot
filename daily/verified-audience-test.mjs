@@ -28,3 +28,23 @@ await assert.rejects(()=>assertUnverifiedCannotView({guild:paged,channel:pgChann
 paged.members.list=async({after})=>after ? new Collection([[bulk[0].id,bulk[0]]]) : new Collection(bulk.map(m=>[m.id,m]));
 await assert.rejects(()=>assertUnverifiedCannotView({guild:paged,channel:pgChannel,unverifiedRoleId:unverified}),/DAILY_MEMBER_SCAN_INCOMPLETE/);
 console.log('verified audience pagination tests passed');
+
+// Reconcile only overlapping roles, then verify Discord's freshly fetched state.
+const verified='verified', removed=[];
+const overlap={id:'overlap',roles:{cache:new Map([[verified,{}],[unverified,{}]]),remove:async(id)=>removed.push(id)}};
+const remaining={id:'remaining',roles:{cache:new Map([[verified,{}]])}};
+let fetchCount=0;
+const overlapGuild={memberCount:1,members:{list:async()=>new Collection([[overlap.id,overlap]]),fetch:async({user,force})=>{assert.equal(user,overlap.id);assert.equal(force,true);return ++fetchCount%2 ? overlap : remaining;}}};
+await assertUnverifiedCannotView({guild:overlapGuild,channel,unverifiedRoleId:unverified,verifiedRoleId:verified});
+assert.deepEqual(removed,[unverified]);
+overlapGuild.members.fetch=async()=>overlap;
+await assert.rejects(()=>assertUnverifiedCannotView({guild:overlapGuild,channel,unverifiedRoleId:unverified,verifiedRoleId:verified}),/DAILY_UNVERIFIED_ROLE_RECONCILIATION_FAILED/);
+overlap.roles.remove=async()=>{throw Error('missing permission');};
+await assert.rejects(()=>assertUnverifiedCannotView({guild:overlapGuild,channel,unverifiedRoleId:unverified,verifiedRoleId:verified}),/DAILY_UNVERIFIED_ROLE_RECONCILIATION_FAILED/);
+let restored=false, step=0;
+overlap.roles.remove=async()=>{};
+const changed={id:overlap.id,roles:{cache:new Map(),add:async id=>{assert.equal(id,unverified);restored=true;}}};
+overlapGuild.members.fetch=async()=>++step===1 ? overlap : changed;
+await assert.rejects(()=>assertUnverifiedCannotView({guild:overlapGuild,channel,unverifiedRoleId:unverified,verifiedRoleId:verified}),/DAILY_UNVERIFIED_ROLE_RECONCILIATION_FAILED/);
+assert.equal(restored,true);
+console.log('verified and unverified role reconciliation tests passed');
