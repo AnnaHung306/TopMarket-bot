@@ -3,7 +3,7 @@ import { ChannelType, Collection, PermissionFlagsBits } from 'discord.js';
 import { createDailyModule } from './index.mjs';
 
 const guildId='10000000000000001', channelId='10000000000000002', modId='10000000000000003', moderator='10000000000000004', botRole='10000000000000005', boat='10000000000000006', category='10000000000000007', botId='10000000000000008';
-const event={day:'2026-11-20',kind:'quiz',correct:'A',message_id:'message',result:null,result_message_id:null,mod_result_message_id:null,mod_notice:null};
+const event={day:'2026-11-20',kind:'quiz',question:'哪一個是正確答案？',options:['選項一','選項二','選項三','選項四'],correct:'B',message_id:'message',result:null,result_message_id:null,mod_result_message_id:null,mod_notice:null};
 let time=Date.parse('2026-11-21T00:59:59Z'), sent=[], edits=0, page;
 const overwrite=new Map([[guildId,{id:guildId,deny:{has:bit=>bit===PermissionFlagsBits.ViewChannel},allow:{has:()=>false}}],[moderator,{id:moderator,allow:{has:bit=>bit===PermissionFlagsBits.ViewChannel}}]]);
 const channel={id:channelId,type:ChannelType.GuildText,permissionOverwrites:{cache:overwrite},permissionsFor:()=>({has:()=>true}),messages:{fetch:async arg=>typeof arg==='string'?{edit:async()=>{edits++;}}:new Collection()},send:async payload=>{sent.push(payload);return {id:'sent'};}};
@@ -36,6 +36,7 @@ assert.equal(edits,0); assert.equal(sent.length,0);
 time=Date.parse('2026-11-21T01:00:00Z'); // Saturday 09:00 Taipei
 await daily.tick();
 assert.equal(edits,1); assert.equal(sent.length,1); assert.match(sent[0].content,/每日答題結果/);
+assert.match(sent[0].content,/正確答案：B．選項二/);
 time=Date.parse('2026-11-21T01:59:59Z');
 await daily.tick();
 assert.equal(sent.length,1);

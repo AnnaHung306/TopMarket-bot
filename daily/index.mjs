@@ -103,7 +103,7 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
     if (!channel.permissionsFor(guild.members.me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory])) throw Error('DAILY_CHANNEL_PERMISSIONS_MISSING');
     if (publicEnabled) await guild.roles.fetch();
     assertActivityChannelPolicy({guild,channel,modChannel,moderatorRoleId,botRoleId,botId:client.user.id,boatId:giveawayBoatId,publicEnabled,unverifiedRoleId,verifiedRoleId,testUserId:privateTestChannelId && giveawayQualification ? env.DAILY_GIVEAWAY_TEST_USER_ID : null});
-    if (verifiedRoleId) await assertUnverifiedCannotView({guild,channel,unverifiedRoleId});
+    if (verifiedRoleId) await assertUnverifiedCannotView({guild,channel,unverifiedRoleId,verifiedRoleId});
     return { guild, channel, modChannel };
   }
   // Reconstruct counts from the actual message history at admission, so reconnects
@@ -186,7 +186,7 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
     if (!event.result_message_id) {
       const title = '每日答題';
       const winners = event.result.winners.map(id => `<@${id}>`).join('、') || '無';
-      const answer = `\n正確答案：${event.correct}`;
+      const answer = `\n正確答案：${event.correct}．${event.options['ABCD'.indexOf(event.correct)]}`;
       const msg = await send(channel, { content: `🏆 **${event.day} ${title}結果**${answer}\n得獎者：${winners}\n獎項：每人 2U；未產生名額：${2-event.result.winners.length}。請等待 MOD 發放。` }, `result:${event.kind}:${event.day}`);
       await sql`UPDATE daily_events SET result_message_id=${msg.id} WHERE day=${event.day} AND kind=${event.kind} AND result_message_id IS NULL`;
     }
