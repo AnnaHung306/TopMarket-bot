@@ -5,9 +5,10 @@ import { randomBytes } from 'node:crypto';
 import { FileLedgerStore } from '../store.mjs';
 import { recoverInterruptedReports } from '../recovery.mjs';
 import { draftPayload } from '../discord.mjs';
+import { testDirectory } from './helpers/directory.mjs';
 
 test('startup repairs a pre-fix interrupted loading message once and retains its owner, address and selection', async () => {
-  const store = new FileLedgerStore('work/wallet-v2/verification/recovery/' + randomBytes(8).toString('hex'));
+  const store = new FileLedgerStore(testDirectory('recovery'));
   const view = await store.saveView({ id: randomBytes(16).toString('hex'), phase: 'draft', channelId: 'thread', messageId: 'report',
     ownerId: 'owner', wallet: '0x' + '1'.repeat(40), selection: { scope: 'upgrade', period: 'all', detail: 'summary' } });
   let edits = 0;
@@ -26,7 +27,7 @@ test('startup repairs a pre-fix interrupted loading message once and retains its
 });
 
 test('startup leaves drafts, ready reports and messages authored by someone else unchanged', async () => {
-  const store = new FileLedgerStore('work/wallet-v2/verification/recovery-untouched/' + randomBytes(8).toString('hex'));
+  const store = new FileLedgerStore(testDirectory('recovery-untouched'));
   const messages = new Map();
   for (const [phase, content, author] of [['draft', '選項已變更，請按「更新資料」。', 'bot'], ['ready', 'real report', 'bot'], ['loading', 'loading...', 'other']]) {
     const id = randomBytes(16).toString('hex');

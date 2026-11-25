@@ -53,6 +53,7 @@ export function traceLineage(ledger, flows, spins) {
   const stakeByTransfer = new Map(spins.filter(s => s.stakeTransferId).map(s => [s.stakeTransferId, s]));
   const deliveryByTransfer = new Map(spins.filter(s => s.deliveryTransferId).map(s => [s.deliveryTransferId, s]));
   const outcomeById = new Map(spins.filter(s => s.result).map(s => [s.result.id, s]));
+  const recycleSpins = new Map(spins.filter(spin => spin.resolution?.category === 'WinRecycled').map(spin => [spin.resolution.id, spin]));
   const disposed = new Set();
   const record = (flow, bases, assets, reason) => {
     if (disposed.has(flow.id)) return;
@@ -84,8 +85,16 @@ export function traceLineage(ledger, flows, spins) {
     ...ledger.transfers.filter(t => t.kind === 'nft').map(t => ({ ...t, action: 'transfer' })),
     ...spins.filter(s => s.result).map(s => ({ ...s.result, action: 'outcome' })),
     ...saleFlows.map(flow => ({ ...flow, action: 'sale', flow })),
+    ...flows.filter(flow => flow.category === 'WinRecycled').map(flow => ({ ...flow, action: 'recycle', flow })),
   ].sort(ordered);
   for (const action of timeline) {
+    if (action.action === 'recycle') {
+      const spin = recycleSpins.get(action.flow.eventId);
+      if (!spin) throw Error('Upgrade recycle payment has no matching spin');
+      const basis = reserved.get(spin.id) || unknown('升級投入卡片的取得支出未知');
+      record(action.flow, [basis], [assetKey(spin.request.stakeCollection, spin.request.stakeTokenId)], basis.reason);
+      continue;
+    }
     if (action.action === 'outcome') {
       const spin = outcomeById.get(action.id), basis = reserved.get(spin.id) || unknown('投入卡片的取得成本或持有連續性未知');
       if (spin.status === 'lost') record({ id: `lost:${spin.id}`, tx: action.tx, timestamp: action.timestamp,

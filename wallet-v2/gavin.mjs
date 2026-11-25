@@ -26,6 +26,8 @@ export function cashFlows(events, transfers, wallet, catalog) {
     'staking-treasury', 'kept-disposal-confirmed', 'campaign-payout', 'raffle-income', 'raffle-refund']);
   const outflows = new Set(['raffle-participation']);
   const used = new Set(), flows = [], pending = [];
+  const recyclePayments = new Map(events.filter(event => event.category === 'WinRecycled' && event.recycleVerified)
+    .map(event => [event.recycleTransferId, event.id]));
   const paidByTx = new Map(), usdcById = new Map();
   for (const transfer of transfers) if (transfer.kind === 'usdc') {
     usdcById.set(transfer.id, transfer);
@@ -41,8 +43,18 @@ export function cashFlows(events, transfers, wallet, catalog) {
   }
   for (const event of events) {
     if (event.raw != null && !/^\d+$/.test(String(event.raw))) throw Error('Invalid unsigned USDC amount in evidence');
+    if (event.category === 'WinRecycled' && !event.recycleVerified) {
+      pending.push({ ...event, reason: event.paymentReason }); continue;
+    }
+    // The physical USDC transfer can also have a generic Gavin treasury label.
+    // The verified spin attribution wins; never count that payment twice.
+    const assignedRecycle = recyclePayments.get(eventId(event.tx, event.logIndex));
+    if (assignedRecycle && assignedRecycle !== event.id) continue;
     if (event.raw === null || event.raw === undefined || event.category === 'selfTrade') continue;
     let direction = null, proofIds = [], cashKey = eventId(event.tx, event.logIndex);
+    if (event.category === 'WinRecycled' && event.recycleVerified) {
+      direction = 'in'; cashKey = event.recycleTransferId; proofIds = [cashKey];
+    }
     if (inflows.has(event.category)) direction = 'in';
     if (outflows.has(event.category)) direction = 'out';
     if (event.category === 'pack' && event.paymentVerified) {
@@ -73,7 +85,8 @@ export function cashFlows(events, transfers, wallet, catalog) {
       timestamp: event.timestamp, activity: event.activity, category: event.category, direction, raw: event.raw,
       poolId: event.poolId || pool?.id || null, collection: event.collection, tokenId: event.tokenId,
       proofIds, legacyId: event.legacyId, saleIds: event.saleIds || [], claimId: event.claimId,
-      verification: event.category === 'purchaseGross' ? 'receipt-matched' : 'gavin-verified',
+      spinId: event.spinId,
+      verification: ['purchaseGross', 'WinRecycled'].includes(event.category) ? 'receipt-matched' : 'gavin-verified',
     });
   }
   return { flows, pending };

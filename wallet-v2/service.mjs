@@ -9,8 +9,11 @@ import { verifyAdapterAcquisitions } from './acquisition-evidence.mjs';
 import { updateCardLabels } from './card-labels.mjs';
 import { compactReceipt, observeEvidence, pruneTransfers, receiptContext } from './evidence.mjs';
 import { querySources, localDay, freshForDay, recordSourceChecks } from './freshness.mjs';
+import { cardValuesFresh, updateCardValues } from './card-values.mjs';
 
 const unique = rows => [...new Map(rows.map(row => [row.id, row])).values()];
+const alignedSnapshot = (ledger, sources) => !sources.has('upgrade') || ledger.catalog.filter(pool => pool.kind === 'upgrade')
+  .every(pool => ledger.coverage[pool.id]?.status === 'unsupported' || ledger.coverage[pool.id]?.through === ledger.coverage.gavin?.through);
 
 export function createWalletV2Service({ store, readerFactory = () => createReader(), catalogLoader = loadCatalog,
   gavinScanner = scanGavin, upgradeScanner = scanUpgrades, logger = console, now = Date.now } = {}) {
@@ -20,7 +23,8 @@ export function createWalletV2Service({ store, readerFactory = () => createReade
     const began = performance.now();
     let ledger = await store.load(wallet);
     if (ledger.version !== SCHEMA_VERSION) throw Error('Unsupported V2 schema');
-    if (!flight.force && freshForDay(ledger, [...flight.sources], localDay(now()))) {
+    const historyFresh = !flight.force && freshForDay(ledger, [...flight.sources], localDay(now())) && alignedSnapshot(ledger, flight.sources);
+    if (historyFresh && cardValuesFresh(ledger)) {
       const usage = { units: 0, requests: 0, retries: 0, splits: 0, methods: {}, provider: 'database',
         queryId: flight.id, pages: 0, queryMs: Math.round(performance.now() - began), estimated: true, cacheHit: true };
       logger.info('wallet_v2_query', JSON.stringify({ wallet, scope, ...usage }));
@@ -31,6 +35,17 @@ export function createWalletV2Service({ store, readerFactory = () => createReade
     flight.reader = reader;
     const chain = await reader.rpc('eth_chainId', []);
     if (Number(chain) !== 8453) throw Error('V2 只接受 Base Mainnet，RPC 鏈別不符');
+    if (historyFresh && !flight.force) {
+      const saved = ledger.coverage.gavin;
+      const block = await reader.rpc('eth_getBlockByNumber', [hex(saved.through), false]);
+      if (block?.hash !== saved.blockHash) throw Error('Saved V2 checkpoint no longer matches Base history');
+      await updateCardValues(reader, ledger);
+      ledger = await store.save(wallet, ledger.revision, ledger);
+      const usage = { ...reader.stats, queryId: flight.id, pages: 0, queryMs: Math.round(performance.now() - began),
+        estimated: true, cacheHit: false, valuationOnly: true };
+      logger.info('wallet_v2_query', JSON.stringify({ wallet, scope, ...usage }));
+      return { ledger, usage };
+    }
     const head = await reader.rpc('eth_getBlockByNumber', ['finalized', false]);
     const checkedAt = new Date(now()).toISOString();
     if (!head?.hash || !Number.isSafeInteger(Number(head.number))) throw Error('Cannot verify finalized Base head');
@@ -125,7 +140,8 @@ export function createWalletV2Service({ store, readerFactory = () => createReade
       async () => { const saved = await store.save(wallet, ledger.revision, ledger); ledger.revision = saved.revision; });
     // Ownership continuity is scanned only for actual NFT collections in this wallet's evidence.
     // Continuity can establish acquisition expenditure only after Gavin's acquisition history exists.
-    // An upgrade-only report must not launch unrelated NFT history scans or imply known basis.
+    // Both all/upgrade queries include Gavin, so upgrade proceeds and basis can
+    // be checked at the same finalized head as the upgrade outcomes.
     const collections = ledger.coverage.gavin?.complete
       ? [...new Set([...ledger.transfers.filter(t => t.kind === 'nft' && t.walletRelated).map(t => t.collection),
         ...ledger.events.filter(e => ['kept', 'purchaseGross', 'staked', 'unstaked'].includes(e.category) && e.collection).map(e => e.collection),
@@ -146,6 +162,7 @@ export function createWalletV2Service({ store, readerFactory = () => createReade
     }
     await hydrate([]);
     await updateCardLabels(ledger);
+    await updateCardValues(reader, ledger);
     recordSourceChecks(ledger, processed, through, checkedAt);
     ledger = await store.save(wallet, ledger.revision, ledger);
     const usage = { ...reader.stats, queryId: flight.id, pages, queryMs: Math.round(performance.now() - began), estimated: true, cacheHit: false };
@@ -161,7 +178,8 @@ export function createWalletV2Service({ store, readerFactory = () => createReade
         sources.forEach(source => existing.sources.add(source));
         if (options.force) existing.force = true;
         const result = await existing.promise;
-        const missing = !freshForDay(result.ledger, sources, day) || options.force && result.usage.cacheHit;
+        const missing = !freshForDay(result.ledger, sources, day) || !alignedSnapshot(result.ledger, new Set(sources)) ||
+          options.force && (result.usage.cacheHit || result.usage.valuationOnly);
         return missing ? api.query(wallet, options) : result;
       }
       const flight = { id: randomUUID(), sources: new Set(sources), force: Boolean(options.force), began: performance.now() };

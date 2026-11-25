@@ -1,0 +1,37 @@
+{
+  "implementation": "0x8de936c1681ade049ee66cbc573e5f59dde43fef",
+  "activationBlock": 61531772,
+  "upgradeTransaction": "0x4158ca74b6daebb4f40aa45deb0317f1bb9f90376bea7c050599c7ab5a2b72af",
+  "sourceUrl": "https://basescan.org/address/0x8de936c1681ade049ee66cbc573e5f59dde43fef#code",
+  "verification": "BaseScan exact match; explorer deployed bytecode independently compared with Alchemy eth_getCode",
+  "verifiedAt": "2026-11-25T07:04:05.169Z",
+  "sourceFile": "CardUpgradeKeepRecycle.sol",
+  "sourceSha256": "738a33a76df56c1e23331da4d427d96629cc91c83fa11072d9385f6b378f734e",
+  "abiFile": "card-upgrade-v2.abi.json",
+  "abiSha256": "d5474f1ebab14da1f0ad1b3844b4932d73987583ba17c38baabfd43b6c06272f",
+  "runtimeSha256": "07698c16063b8322d39f87289d28ec7f508a7a9c8c7bb12460d2cda634a546e7",
+  "events": [
+    {
+      "signature": "ChoicePending(uint256,address,uint64,uint256)",
+      "signatureHash32": "0xc4cc1b59b979502a8006b791b7f68e8f37aa7a0f57819b6f2df824a9a86aa18a"
+    },
+    {
+      "signature": "WinKept(uint256,address)",
+      "signatureHash32": "0x6d1e143a94e9c51cd6b5216ba332ae11a7d5b5cffce113c60e34be2f15bb17b2"
+    },
+    {
+      "signature": "WinRecycled(uint256,address,uint256)",
+      "signatureHash32": "0x238b84ebbe6efb2dacf9d620c23cb62391ceeb628b4390d4c205902c16a6499c"
+    }
+  ],
+  "functions": [
+    {
+      "signature": "settlementToken()",
+      "signatureHash4": "0x7b9e618d"
+    },
+    {
+      "signature": "treasury()",
+      "signatureHash4": "0x61d027b3"
+    }
+  ]
+}

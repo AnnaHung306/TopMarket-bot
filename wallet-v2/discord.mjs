@@ -1,73 +1,21 @@
 import { randomUUID, randomInt } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, ModalBuilder, SlashCommandBuilder,
-  StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
-import { SCOPES, address, dateRange, displayPoolName } from './model.mjs';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
+import { address, dateRange } from './model.mjs';
 import { buildReport, textReport } from './report.mjs';
-import { SCOPE_EMOJI } from './report-text.mjs';
+import { viewComponents, reportSelection, controlId as customId } from './report-controls.mjs';
+export { viewComponents, walletV2Command } from './report-controls.mjs';
 import { csvReport, renderPng } from './exports.mjs';
 import { mayManageActivity } from '../daily/moderator-access.mjs';
 import { isPrivateWalletThread, privateWalletThread } from '../discord-wallet-thread.mjs';
 
-// Exported definition only. Nothing in this module logs in, registers commands or changes the active bot.
-export const walletV2Command = new SlashCommandBuilder().setName('wallet').setDescription('查詢錢包收益，依活動與期間篩選')
-  .addStringOption(option => option.setName('address').setDescription('Base 錢包地址').setRequired(true))
-  .addStringOption(option => option.setName('scope').setDescription('分析範圍；也可查完再切換').addChoices(
-    ...Object.entries(SCOPES).map(([value, name]) => ({ name: `${SCOPE_EMOJI[value]} ${name}`, value }))))
-  .addStringOption(option => option.setName('period').setDescription('時間範圍').addChoices(
-    { name: '全期間', value: 'all' }, { name: '近 7 天', value: '7d' }, { name: '近 30 天', value: '30d' },
-    { name: '本月', value: 'month' }, { name: '自訂日期', value: 'custom' }))
-  .addStringOption(option => option.setName('from').setDescription('自訂起日 YYYY-MM-DD，台灣時間'))
-  .addStringOption(option => option.setName('to').setDescription('自訂迄日 YYYY-MM-DD，台灣時間'));
-
-const customId = (id, action, revision) => `wv2:${id}:${revision ? revision + ':' : ''}${action}`;
 const loading = () => ({ content: 'loading...', components: [], attachments: [], files: [], embeds: [], allowedMentions: { parse: [] } });
 const retryControls = view => view?.revision ? [new ActionRowBuilder().addComponents(new ButtonBuilder()
   .setCustomId(customId(view.id, 'refresh', view.revision)).setLabel('重試').setStyle(ButtonStyle.Primary))] : [];
-const controlCatalog = ledger => ledger.catalog.map(({ id, kind, name, enabled }) => ({ id, kind, name, enabled }));
+const controlCatalog = () => [];
 const controlsLedger = view => ({ catalog: view.controlCatalog || [] });
 export const draftPayload = (view, content = '選項已變更，請按「更新資料」。') => ({ ...loading(), content,
   components: viewComponents(controlsLedger(view), { ...view, phase: 'draft' }) });
-function poolChoices(ledger, view) {
-  let pools = ledger.catalog.filter(pool => pool.kind === 'packs');
-  if (view.search) pools = pools.filter(pool => displayPoolName(pool).toLowerCase().includes(view.search.toLowerCase()));
-  return pools;
-}
-const hasPackFilter = selection => ['all', 'packs', 'buyback'].includes(selection.scope);
-function tidySelection(selection) {
-  return { ...selection, dimension: 'location', poolId: hasPackFilter(selection) ? selection.poolId : null };
-}
-export function viewComponents(ledger, view) {
-  const pools = poolChoices(ledger, view), pages = Math.max(1, Math.ceil(pools.length / 23));
-  const page = Math.max(0, Math.min(view.poolPage || 0, pages - 1));
-  const pagePools = pools.slice(page * 23, (page + 1) * 23);
-  const selected = pools.find(pool => pool.id === view.selection.poolId) || ledger.catalog.find(pool => pool.kind === 'packs' && pool.id === view.selection.poolId);
-  if (selected && !pagePools.some(pool => pool.id === selected.id)) pagePools.push(selected);
-  const options = [{ label: '所有卡包', value: 'all', emoji: { name: '📦' }, default: !selected },
-    ...pagePools.map(pool => ({ label: displayPoolName(pool).slice(0, 100), value: pool.id, emoji: { name: '📦' }, default: pool.id === selected?.id,
-      ...(pool.enabled === false ? { description: '已結束' } : {}) }))];
-  const select = (action, placeholder, options) => new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
-    .setCustomId(customId(view.id, action, view.revision)).setPlaceholder(placeholder).addOptions(options));
-  const icons = { detail: view.selection.detail === 'summary' ? '📋' : '🔽', png: '🖼️', csv: '📄', refresh: '🔄', search: '🔍', 'clear-search': '🧹', previous: '⬅️', next: '➡️' };
-  const button = (action, label, style = ButtonStyle.Secondary) => new ButtonBuilder().setCustomId(customId(view.id, action, view.revision)).setLabel(label).setEmoji(icons[action]).setStyle(style);
-  const rows = [select('scope', '選擇收益範圍', Object.entries(SCOPES).map(([value, label]) => ({ label, value, emoji: { name: SCOPE_EMOJI[value] }, default: value === view.selection.scope })))];
-  const showPacks = hasPackFilter(view.selection) && pools.length > 0;
-  if (showPacks) rows.push(select('pool', pages > 1 ? `選擇卡包 ${page + 1}/${pages}` : '選擇卡包', options));
-  rows.push(
-    select('period', '選擇期間', [['all', '全期間'], ['7d', '近 7 天'], ['30d', '近 30 天'], ['month', '本月'], ['custom', '自訂日期']]
-      .map(([value, label]) => ({ label, value, emoji: { name: '🗓️' }, default: value === view.selection.period }))),
-    new ActionRowBuilder().addComponents(button('detail', view.selection.detail === 'summary' ? '詳細報表' : '收合明細'),
-      button('png', '下載 PNG').setDisabled(view.phase === 'draft'), button('csv', '匯出 CSV').setDisabled(view.phase === 'draft'),
-      button('refresh', '更新資料', ButtonStyle.Primary)));
-  if (hasPackFilter(view.selection) && (pages > 1 || view.search)) {
-    const navigation = [button('search', '搜尋卡包')];
-    if (view.search) navigation.push(button('clear-search', '清除搜尋'));
-    if (page > 0) navigation.push(button('previous', '上一頁'));
-    if (page < pages - 1) navigation.push(button('next', '下一頁'));
-    rows.push(new ActionRowBuilder().addComponents(...navigation));
-  }
-  return rows;
-}
 function input(id, label, value = '') {
   const field = new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100);
   if (value) field.setValue(value);
@@ -106,7 +54,7 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
     const png = await renderPoster(report);
     logger.info('wallet_v2_poster', JSON.stringify({ viewId: view.id, posterMs: Math.round(performance.now() - started), bytes: png.length }));
     return { content: textReport(report),
-      files: [{ attachment: png, name: 'wallet-v2.png' }], attachments: [], allowedMentions: { parse: [] } };
+      files: [{ attachment: png, name: 'wallet-report.png' }], attachments: [], allowedMentions: { parse: [] } };
   }
   async function completed(ledger, view) {
     const body = await payload(ledger, view);
@@ -122,15 +70,7 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       if (autocomplete) return interaction.respond([]);
       return privateReply(interaction, '請在已設定的工具箱頻道或其討論串使用錢包分析。');
     }
-    if (autocomplete) {
-      if (!hasPackFilter({ scope: interaction.options.getString('scope') || 'all' })) return interaction.respond([]);
-      const wallet = interaction.options.getString('address');
-      if (!/^0x[\da-f]{40}$/i.test(wallet || '')) return interaction.respond([]);
-      const ledger = await service.load(wallet);
-      const query = String(interaction.options.getFocused()).toLowerCase();
-      return interaction.respond(ledger.catalog.filter(pool => pool.kind === 'packs' && displayPoolName(pool).toLowerCase().includes(query))
-        .slice(0, 25).map(pool => ({ name: displayPoolName(pool).slice(0, 100), value: pool.id })));
-    }
+    if (autocomplete) return interaction.respond([]);
     let status, view, acquired = false, showingLoading = false, downloadPending = false;
     const started = performance.now(), receivedAt = Date.now(), action = command ? 'query' : match?.[3];
     const trace = stage => logger.info('wallet_v2_action', JSON.stringify({ interactionId: interaction.id,
@@ -140,7 +80,7 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
     try {
       // Component callbacks expire quickly: acknowledge before database access.
       // Modal opening must itself be the initial response, so it stays separate.
-      const opensModal = action === 'search' || action === 'period' && interaction.values?.[0] === 'custom';
+      const opensModal = action === 'period' && interaction.values?.[0] === 'custom';
       if (match && !opensModal) {
         if (['csv', 'png'].includes(action)) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         else await interaction.deferUpdate();
@@ -148,10 +88,9 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       }
       if (command) {
         const wallet = address(interaction.options.getString('address', true).trim());
-        const selection = { scope: interaction.options.getString('scope') || 'all', poolId: null,
+        const selection = reportSelection({ scope: 'all', poolId: null,
           period: interaction.options.getString('period') || 'all', from: interaction.options.getString('from'),
-          to: interaction.options.getString('to'), dimension: 'location', detail: 'summary' };
-        if (!SCOPES[selection.scope]) throw Error('無效範圍');
+          to: interaction.options.getString('to'), dimension: 'location', detail: 'summary' });
         dateRange(selection);
         const inPrivateThread = isPrivateWalletThread(interaction.channel);
         await interaction.deferReply(inPrivateThread ? {} : { flags: MessageFlags.Ephemeral });
@@ -159,7 +98,7 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
         if (!inPrivateThread) {
           await interaction.editReply({ content: '🔒 貓貓正在建立私人錢包討論串…', files: [await waitingGif()] });
           const name = String(interaction.member?.displayName || interaction.user.username).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 70);
-          thread = await privateWalletThread(interaction, `${name} 錢包分析 V2`, { logger });
+          thread = await privateWalletThread(interaction, `${name} 錢包分析`, { logger });
           await interaction.editReply({ content: `🔒 私人錢包報告：<#${thread.id}>`, attachments: [], files: [], allowedMentions: { parse: [] } });
           status = await thread.send(loading());
         } else status = await interaction.editReply(loading());
@@ -181,16 +120,23 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
       if (view.ownerId !== interaction.user.id) return privateReply(interaction, '這是其他成員的報告；請使用 /wallet 建立自己的分析。');
       if (view.channelId !== interaction.channelId || view.messageId && interaction.message?.id !== view.messageId)
         return privateReply(interaction, '報告與目前討論串不相符，請回原報告操作。');
-      view.selection = tidySelection(view.selection);
+      const selectionMigrated = view.selection.scope !== 'all' || Boolean(view.selection.poolId) || view.selection.dimension === 'origin';
+      view.selection = reportSelection(view.selection);
       if (busy.has(id)) return privateReply(interaction, '上一個操作正在完成，請稍候。');
       if (revision && Number(revision) !== view.revision || !revision && view.controlsVersion === 1) {
         trace('stale');
         return privateReply(interaction, '報告已更新，請使用最新的選項。');
       }
-      if (['pool', 'search', 'search-submit', 'clear-search', 'previous', 'next'].includes(action) && !hasPackFilter(view.selection))
-        return privateReply(interaction, '這個活動不需要選擇卡包，點「更新資料」即可使用精簡介面。');
-      if (action === 'search') return interaction.showModal(new ModalBuilder().setCustomId(customId(id, 'search-submit', view.revision))
-        .setTitle('搜尋卡包').addComponents(input('query', '卡包名稱', view.search)));
+      if (['scope', 'pool', 'dimension', 'search', 'search-submit', 'clear-search', 'previous', 'next'].includes(action)) {
+        view = await viewStore.saveView({ ...view, phase: 'draft', controlCatalog: [], controlsVersion: 1 }, view.revision);
+        await interaction.message.edit(draftPayload(view));
+        return;
+      }
+      if (selectionMigrated && action !== 'refresh') {
+        view = await viewStore.saveView({ ...view, phase: 'draft', controlCatalog: [], controlsVersion: 1 }, view.revision);
+        await interaction.message.edit(draftPayload(view));
+        if (['png', 'csv'].includes(action)) return privateReply(interaction, '請先按「更新資料」產生新版錢包報告，再下載。');
+      }
       if (action === 'period' && interaction.values?.[0] === 'custom') return interaction.showModal(
         new ModalBuilder().setCustomId(customId(id, 'dates-submit', view.revision)).setTitle('自訂日期（台灣時間）')
           .addComponents(input('from', '起日 YYYY-MM-DD', view.selection.from), input('to', '迄日 YYYY-MM-DD', view.selection.to)));
@@ -200,44 +146,31 @@ export function createV2InteractionHandler({ service, viewStore, renderPoster = 
         downloadPending = true;
         const report = buildReport(await service.load(view.wallet), view.selection);
         const file = action === 'csv' ? Buffer.from(csvReport(report)) : await renderPoster(report);
-        await interaction.editReply({ content: '', attachments: [], files: [{ attachment: file, name: `wallet-v2.${action}` }], allowedMentions: { parse: [] } });
+        await interaction.editReply({ content: '', attachments: [], files: [{ attachment: file, name: `wallet-report.${action}` }], allowedMentions: { parse: [] } });
         downloadPending = false;
         return;
       }
       busy.add(id);
       acquired = true;
       const next = { ...view, selection: { ...view.selection } };
-      if (action === 'scope') {
-        if (interaction.values[0] !== view.selection.scope) {
-          next.selection.scope = interaction.values[0]; next.selection.poolId = null; next.poolPage = 0; next.search = '';
-        }
-      }
-      else if (action === 'pool') next.selection.poolId = interaction.values[0] === 'all' ? null : interaction.values[0];
-      else if (action === 'period') next.selection.period = interaction.values[0];
+      if (action === 'period') next.selection.period = interaction.values[0];
       else if (action === 'detail') next.selection.detail = next.selection.detail === 'summary' ? 'detail' : 'summary';
-      else if (action === 'dimension') { next.selection.dimension = 'location'; next.selection.poolId = null; next.poolPage = 0; }
-      else if (action === 'next') next.poolPage++;
-      else if (action === 'previous') next.poolPage = Math.max(0, next.poolPage - 1);
-      else if (action === 'clear-search') { next.search = ''; next.poolPage = 0; }
-      else if (action === 'search-submit') { next.search = interaction.fields.getTextInputValue('query').trim().slice(0, 100); next.poolPage = 0; }
       else if (action === 'dates-submit') { next.selection.period = 'custom'; next.selection.from = interaction.fields.getTextInputValue('from').trim(); next.selection.to = interaction.fields.getTextInputValue('to').trim(); dateRange(next.selection); }
       else if (action !== 'refresh') throw Error('不支援的報告操作');
-      if (!SCOPES[next.selection.scope]) throw Error('無效範圍');
       dateRange(next.selection);
       if (action !== 'refresh') {
         const selectionChanged = JSON.stringify(next.selection) !== JSON.stringify(view.selection);
-        const menuChanged = (next.search || '') !== (view.search || '') || (next.poolPage || 0) !== (view.poolPage || 0);
-        if (!selectionChanged && !menuChanged) {
+        if (!selectionChanged) {
           trace('unchanged');
           return;
         }
         if (!interaction.deferred && !interaction.replied) await interaction.deferUpdate();
         // Save only small menu metadata. Changing requirements never scans or renders.
-        next.controlCatalog = view.controlCatalog || controlCatalog(await service.load(view.wallet));
-        next.phase = selectionChanged ? 'draft' : view.phase || 'ready';
+        next.controlCatalog = [];
+        next.phase = 'draft';
         view = await viewStore.saveView({ ...next, controlsVersion: 1 }, view.revision);
-        await interaction.message.edit(selectionChanged ? draftPayload(view) : { components: viewComponents(controlsLedger(view), view) });
-        trace(selectionChanged ? 'draft' : 'controls');
+        await interaction.message.edit(draftPayload(view));
+        trace('draft');
         return;
       }
       // Acknowledge and replace the old text/PNG before any ledger read, scan or render.

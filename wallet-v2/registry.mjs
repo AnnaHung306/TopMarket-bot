@@ -12,8 +12,18 @@ export async function upgradeDefinition() {
   const abi = JSON.parse(await readFile(new URL(manifest.abiFile, contractsDir), 'utf8'));
   const source = await readFile(new URL('CardUpgrade.sol', contractsDir));
   if (createHash('sha256').update(source).digest('hex') !== manifest.sourceSha256) throw Error('Verified upgrade source hash mismatch');
-  return { ...manifest, abi, topics: Object.fromEntries(manifest.events.map(e => [e.signature.split('(')[0], e.signatureHash32])),
-    selectors: Object.fromEntries(manifest.functions.map(f => [f.signature.split('(')[0], f.signatureHash4])) };
+  const recycleVersion = JSON.parse(await readFile(new URL('card-upgrade-v2.manifest.json', contractsDir), 'utf8'));
+  for (const [file, hash] of [[recycleVersion.sourceFile, recycleVersion.sourceSha256], [recycleVersion.abiFile, recycleVersion.abiSha256]]) {
+    if (createHash('sha256').update(await readFile(new URL(file, contractsDir))).digest('hex') !== hash) throw Error('Verified upgrade V2 source/ABI hash mismatch');
+  }
+  const recycleAbi = JSON.parse(await readFile(new URL(recycleVersion.abiFile, contractsDir), 'utf8'));
+  const eventShape = event => JSON.stringify([event.name, Boolean(event.anonymous), event.inputs.map(input => [input.type, Boolean(input.indexed)])]);
+  for (const event of abi.filter(item => item.type === 'event')) {
+    if (!recycleAbi.some(item => item.type === 'event' && eventShape(item) === eventShape(event))) throw Error('Upgrade V2 changes a legacy event ABI');
+  }
+  return { ...manifest, abi: recycleAbi, versions: [recycleVersion],
+    topics: Object.fromEntries([...manifest.events, ...recycleVersion.events].map(e => [e.signature.split('(')[0], e.signatureHash32])),
+    selectors: Object.fromEntries([...manifest.functions, ...recycleVersion.functions].map(f => [f.signature.split('(')[0], f.signatureHash4])) };
 }
 export async function officialJson(path, { fetchImpl = fetch, signal } = {}) {
   const response = await fetchImpl(new URL(path, 'https://api.top.market/api/'), {
@@ -67,7 +77,15 @@ export async function verifyUpgradeVersion(reader, pool, from, through) {
     getFilteredLogs(reader, { address: pool.address, topics: [definition.topics.Upgraded] }, start, through),
   ]);
   const implementations = [asAddress(before), asAddress(after), ...changes.map(l => asAddress(l.topics[1]))];
-  if (implementations.some(implementation => implementation !== definition.implementation)) {
+  const known = new Map([[definition.implementation, null], ...(definition.versions || []).map(version => [version.implementation, version])]);
+  if (implementations.some(implementation => !known.has(implementation))) {
     throw Error('活動合約在此期間使用尚未核實的 implementation；未把該活動列為零收益');
+  }
+  for (const implementation of new Set(implementations)) {
+    const version = known.get(implementation);
+    if (!version) continue;
+    const code = await reader.rpc('eth_getCode', [implementation, hex(through)]);
+    if (!/^0x(?:[\da-f]{2})+$/i.test(code) || createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex') !== version.runtimeSha256)
+      throw Error('活動合約 bytecode 尚未核實；未把該活動列為零收益');
   }
 }

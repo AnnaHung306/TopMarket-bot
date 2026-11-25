@@ -4,6 +4,9 @@ import { cashFlows } from './gavin.mjs';
 import { upgradeSpins } from './upgrade.mjs';
 import { traceLineage } from './lineage.mjs';
 import { reportAsOf } from './freshness.mjs';
+import { activitySummary } from './activity-summary.mjs';
+import { siteSummary } from './site-summary.mjs';
+import { cardValuesFresh, holdingsReferenceValue, raffleReferenceValue } from './card-values.mjs';
 
 const sum = (rows, field) => rows.reduce((total, row) => total + BigInt(row[field] ?? '0'), 0n).toString();
 export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
@@ -33,19 +36,29 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
   const consumedRaw = comparable.reduce((value, spin) => value + BigInt(spin.request.stakeValueRaw), 0n);
   const awardedRaw = comparable.filter(spin => spin.status === 'won').reduce((value, spin) => value + BigInt(spin.request.targetValueRaw), 0n);
   const won = settled.filter(spin => spin.status === 'won').length, lost = settled.length - won;
-  const requirements = filter.scope === 'upgrade' ? [] : ['gavin'];
+  const requirements = ['gavin'];
   if (['all', 'upgrade'].includes(filter.scope)) requirements.push(...ledger.catalog.filter(p => p.kind === 'upgrade' &&
     (!pool || filter.dimension === 'origin' || p.id === pool.id)).map(p => p.id));
   const coverage = requirements.map(key => ({ key, ...(ledger.coverage[key] || { status: 'not-scanned', complete: false }) }));
-  const complete = coverage.every(source => source.status === 'verified' && source.complete);
-  const pending = cash.pending.filter(row => within(row) && scopeMatches(row));
+  const pending = cash.pending.filter(row => within(row) && poolMatches(row) && scopeMatches(row));
   const unknownCostCount = realized.filter(row => row.pnlRaw === null).length;
-  const laterProceedsKnown = Boolean(ledger.coverage.gavin?.complete) && coverage.every(c => c.status === 'verified' && c.complete);
+  const upgradeCoverage = coverage.filter(source => source.key.startsWith('upgrade:'));
+  const upgradeValueKnown = upgradeCoverage.length > 0 && upgradeCoverage.every(source => source.status === 'verified' && source.complete) &&
+    comparable.length === settled.length;
+  const history = ledger.coverage.gavin;
+  const historyBehind = upgradeCoverage.some(source => Number.isSafeInteger(source.through) &&
+    (!Number.isSafeInteger(history?.through) || history.through < source.through));
+  const complete = !historyBehind && coverage.every(source => source.status === 'verified' && source.complete);
+  const incomePendingReason = history?.status !== 'verified' || !history.complete ? '買賣紀錄待補齊'
+    : historyBehind ? '買賣紀錄待更新'
+    : upgradeCoverage.some(source => source.status !== 'verified' || !source.complete) ? '升級紀錄待核對'
+    : pending.some(row => row.category === 'WinRecycled') ? '回購入帳待核對' : null;
+  const laterProceedsKnown = incomePendingReason === null;
   const proceedsFromUpgrade = cash.flows.filter(row => within(row) && row.direction === 'in' && row.assetActivities?.includes('upgrade') && lineagePoolMatches(row));
   const upgradeRealized = realized.filter(row => row.activities.includes('upgrade'));
   const report = {
     version: 2, wallet: ledger.wallet, filter, range: { label: range.label }, asOf: reportAsOf(ledger, filter.scope),
-    title: `${SCOPES[filter.scope]}${pool ? ' · ' + displayPoolName(pool).slice(0, 100) : ''}`, poolName: pool ? displayPoolName(pool) : null,
+    title: `${SCOPES[filter.scope]}${filter.scope === 'packs' ? '（含回購）' : ''}${pool ? ' · ' + displayPoolName(pool).slice(0, 100) : ''}`, poolName: pool ? displayPoolName(pool) : null,
     complete, coverage, flows, pending, realized,
     cash: { inRaw: sum(flows.filter(row => row.direction === 'in'), 'raw'), outRaw: sum(flows.filter(row => row.direction === 'out'), 'raw') },
     realizedSummary: { knownPnlRaw: sum(realized.filter(row => row.pnlRaw !== null), 'pnlRaw'),
@@ -54,10 +67,13 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
       pending: cohort.filter(spin => spin.status === 'pending').length,
       rescued: selectedSpins.filter(spin => spin.status === 'rescued' && within(spin.result)).length,
       claimable: cohort.filter(spin => spin.delivery === 'claimable').length,
+      awaitingChoice: cohort.filter(spin => spin.delivery === 'choice-pending').length,
       unverifiedDelivery: cohort.filter(spin => ['won', 'rescued'].includes(spin.status) && spin.delivery === 'unverified').length,
       winRate: settled.length ? won / settled.length : null,
       consumedRaw: consumedRaw.toString(), awardedRaw: awardedRaw.toString(), referenceChangeRaw: (awardedRaw - consumedRaw).toString(),
-      valueUnknownCount: settled.length - comparable.length, laterProceedsRaw: laterProceedsKnown ? sum(proceedsFromUpgrade, 'raw') : null,
+      valueUnknownCount: settled.length - comparable.length, incomePendingReason,
+      laterProceedsRaw: laterProceedsKnown ? sum(proceedsFromUpgrade, 'raw') : null,
+      recycleIncomeRaw: laterProceedsKnown ? sum(flows.filter(row => row.category === 'WinRecycled'), 'raw') : null,
       realizedCount: upgradeRealized.length, unknownCostCount: upgradeRealized.filter(row => row.pnlRaw === null).length,
       realizedPnlRaw: upgradeRealized.some(row => row.pnlRaw !== null) ? sum(upgradeRealized.filter(row => row.pnlRaw !== null), 'pnlRaw') : null,
       spins: selectedSpins.filter(spin => within(spin.request) || spin.result && within(spin.result)).map(spin => ({
@@ -76,18 +92,38 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
       ...(unknownCostCount ? [`${unknownCostCount} 筆結算的取得支出未知，未當成零成本`] : []),
       ...(filter.dimension === 'origin' ? ['來源卡池為另一分析角度，不可與交易分類加總；未知來源未強行分攤'] : []),
       ...(filter.scope === 'packs' ? ['抽卡視圖包含同卡池對應回購；不可與回購視圖重複加總'] : []),
-      ...(!laterProceedsKnown && ['all', 'upgrade'].includes(filter.scope) ? ['尚未取得完整抽卡／市場歷史；升級卡片的取得支出與後續實收仍為未知'] : []),
+      ...(!laterProceedsKnown && ['all', 'upgrade'].includes(filter.scope) ? [incomePendingReason] : []),
       ...(settled.some(s => s.request.valueDecimals !== 6) ? ['部分歷史估值精度未核實為 6 位，未混加'] : [])])],
   };
   report.cash.netRaw = (BigInt(report.cash.inRaw) - BigInt(report.cash.outRaw)).toString();
   report.realizedSummary.knownCostRaw = sum(realized.filter(row => row.costRaw !== null), 'costRaw');
   report.realizedSummary.knownProceedsRaw = sum(realized.filter(row => row.costRaw !== null), 'proceedsRaw');
+  const valuesFresh = cardValuesFresh(ledger);
+  if (valuesFresh) {
+    const values = ledger.cardValues.holdings;
+    if (filter.scope === 'all' && !pool) {
+      for (const record of Object.values(values)) {
+        if (record.status === 'not-held' || report.holdings.some(lot => assetKey(lot.collection, lot.tokenId) === assetKey(record.collection, record.tokenId))) continue;
+        report.holdings.push({ collection: record.collection, tokenId: record.tokenId, costRaw: null,
+          custody: record.status === 'staked', cardLabel: describeCard(ledger, record.collection, record.tokenId),
+          evidence: [], ownershipCheckedThrough: ledger.cardValues.through,
+          ownershipStatus: record.status === 'unknown' ? 'receipt-observed-only' : 'history-checked' });
+      }
+    }
+    report.holdings = report.holdings.filter(lot => values[assetKey(lot.collection, lot.tokenId)]?.status !== 'not-held').map(lot => {
+      const value = values[assetKey(lot.collection, lot.tokenId)];
+      return { ...lot, referenceRaw: value?.raw ?? null, custody: value ? value.status === 'staked' : lot.custody,
+        ownershipStatus: value && ['wallet', 'staked'].includes(value.status) ? 'history-checked' : 'receipt-observed-only' };
+    });
+  }
   const confirmedHoldings = report.holdings.filter(lot => lot.ownershipStatus === 'history-checked');
   report.holdingsSummary = { walletCount: confirmedHoldings.filter(lot => !lot.custody).length,
     stakedCount: confirmedHoldings.filter(lot => lot.custody).length,
     unverifiedCount: report.holdings.length - confirmedHoldings.length,
     knownCostRaw: sum(confirmedHoldings.filter(lot => lot.costRaw !== null), 'costRaw'),
     unknownCostCount: confirmedHoldings.filter(lot => lot.costRaw === null).length };
+  report.holdingsSummary.valueRaw = !complete ? null : filter.scope === 'all' && !pool ? holdingsReferenceValue(ledger)
+    : valuesFresh && report.holdings.every(lot => lot.referenceRaw != null) ? sum(report.holdings, 'referenceRaw') : null;
   const byActivity = new Map(), byPool = new Map();
   for (const flow of flows) {
     const poolId = filter.dimension === 'origin' ? flow.originPoolId : flow.poolId;
@@ -100,14 +136,20 @@ export function buildReport(ledger, selection = {}, { now = Date.now() } = {}) {
   const totals = row => ({ ...row, netRaw: (BigInt(row.inRaw) - BigInt(row.outRaw)).toString() });
   report.analysis = { byActivity: [...byActivity.values()].map(row => ({ ...totals(row), name: SCOPES[row.id] })),
     byPool: [...byPool.values()].map(row => { const pool = ledger.catalog.find(p => p.id === row.id); return { ...totals(row), name: pool ? displayPoolName(pool) : '其他收益' }; }) };
+  report.activitySummary = filter.scope === 'all' ? activitySummary(flows, pending, ledger.coverage, upgradeCoverage) : [];
+  report.siteSummary = siteSummary(flows, pending,
+    ledger.events.filter(row => within(row) && poolMatches(row) && scopeMatches(row)), ledger.coverage.gavin, filter.scope,
+    { upgradeIncomeKnown: upgradeCoverage.length > 0 && upgradeCoverage.every(source => source.status === 'verified' && source.complete) &&
+      report.upgrade.recycleIncomeRaw !== null,
+      raffleReferenceRaw: raffleReferenceValue(ledger, ledger.events.filter(row => within(row) && poolMatches(row) && scopeMatches(row))) });
   report.metrics = [
     ...(filter.scope === 'upgrade' ? [] : [
       { key: 'cashIn', label: '收入', raw: report.cash.inRaw, kind: 'cash' },
       { key: 'cashOut', label: '支出', raw: report.cash.outRaw, kind: 'cash' },
       { key: 'cashNet', label: complete && !pending.length ? '淨收支' : '淨收支（已核對部分）', raw: report.cash.netRaw, kind: 'cash' }]),
     ...(report.realized.length ? [{ key: 'realized', label: unknownCostCount ? '已實現收益（已核對部分）' : '已實現收益', raw: report.realizedSummary.knownCount ? report.realizedSummary.knownPnlRaw : null, kind: 'expenditure' }] : []),
-    ...(['all', 'upgrade'].includes(filter.scope) && (filter.scope === 'upgrade' || selectedSpins.length || coverage.some(c => c.key.startsWith('upgrade:') && c.status !== 'verified')) ? [{ key: 'upgradeValue', label: '卡片估值變化',
-      raw: coverage.some(c => c.key.startsWith('upgrade:') && c.status !== 'verified') ? null : report.upgrade.referenceChangeRaw, kind: 'reference' }] : []),
+    ...(['all', 'upgrade'].includes(filter.scope) ? [{ key: 'upgradeValue', label: filter.scope === 'all' ? '卡牌升級活動價差' : '升級價差',
+      raw: upgradeValueKnown ? report.upgrade.referenceChangeRaw : null, kind: 'reference' }] : []),
   ];
   return report;
 }

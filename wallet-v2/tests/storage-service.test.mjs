@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { resolve } from 'node:path';
 import { FileLedgerStore } from '../store.mjs';
 import { createWalletV2Service } from '../service.mjs';
 import { WALLET_HISTORY_START } from '../gavin.mjs';
 import { buildReport } from '../report.mjs';
 import { verifyUpgradeVersion, upgradeDefinition } from '../registry.mjs';
+import { testDirectory } from './helpers/directory.mjs';
 
-const directory = resolve('work/wallet-v2/verification/file-store');
+const directory = testDirectory('file-store');
 const newWallet = () => '0x' + randomBytes(20).toString('hex');
 const hash = block => '0x' + Number(block).toString(16).padStart(64, '0');
 function reader({ head = WALLET_HISTORY_START + 10, changedBlock } = {}) {

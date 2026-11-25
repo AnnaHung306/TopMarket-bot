@@ -1,1 +1,4 @@
 wallet-v2/contracts/*.sol text eol=lf
+# Verified files are hashed byte-for-byte against their original published source.
+wallet-v2/contracts/CardUpgradeKeepRecycle.sol -text -eol whitespace=cr-at-eol
+wallet-v2/contracts/card-upgrade-v2.abi.json -text whitespace=cr-at-eol

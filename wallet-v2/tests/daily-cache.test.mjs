@@ -5,8 +5,9 @@ import { FileLedgerStore } from '../store.mjs';
 import { createWalletV2Service } from '../service.mjs';
 import { WALLET_HISTORY_START } from '../gavin.mjs';
 import { freshForDay, localDay, reportAsOf } from '../freshness.mjs';
+import { testDirectory } from './helpers/directory.mjs';
 
-const directory = 'work/wallet-v2/verification/daily-cache';
+const directory = testDirectory('daily-cache');
 const wallet = () => '0x' + randomBytes(20).toString('hex');
 const quiet = { info() {}, error() {} };
 function setup(options = {}) {
@@ -110,16 +111,44 @@ test('partial checkpoints and pre-cache ledgers need a verified successful check
   assert.equal(freshForDay(partial, ['gavin'], '2026-11-24'), false);
 });
 
-test('a newly requested source is scanned; unsupported pools stay explicitly unsupported', async () => {
+test('upgrade profit obtains Gavin history once, then shares it with packs and cached upgrade queries', async () => {
   const h = setup(), id = wallet();
   await h.service.query(id, { scope: 'upgrade' });
   await h.service.query(id, { scope: 'packs' });
-  assert.equal(h.scans, 1); assert.equal(h.readers, 2);
+  const repeated = await h.service.query(id, { scope: 'upgrade' });
+  assert.equal(h.scans, 1); assert.equal(h.readers, 1);
+  assert.equal(repeated.usage.cacheHit, true); assert.equal(repeated.usage.units, 0);
   const ledger = await h.store.load(id);
   ledger.catalog.push({ id: 'upgrade:unknown', kind: 'upgrade' });
   assert.equal(freshForDay(ledger, ['upgrade'], '2026-11-24'), false);
   ledger.coverage['upgrade:unknown'] = { status: 'unsupported', reason: 'unverified contract' };
   assert.equal(freshForDay(ledger, ['upgrade'], '2026-11-24'), true);
+});
+
+test('a same-day old upgrade-only cache is enriched before it can satisfy a profit query', async () => {
+  const h = setup(), id = wallet();
+  const result = await h.service.query(id, { scope: 'upgrade' });
+  const legacy = structuredClone(result.ledger);
+  delete legacy.coverage.gavin; delete legacy.sourceChecks.gavin;
+  await h.store.save(id, legacy.revision, legacy);
+  const enriched = await h.service.query(id, { scope: 'upgrade' });
+  assert.equal(enriched.usage.cacheHit, false);
+  assert.equal(enriched.ledger.coverage.gavin.complete, true);
+  assert.equal(h.scans, 2);
+  const cached = await h.restart().query(id, { scope: 'upgrade' });
+  assert.equal(cached.usage.cacheHit, true); assert.equal(cached.usage.requests, 0);
+});
+
+test('the legacy upgrade parser cache is rechecked once before accepting keep/recycle coverage', async () => {
+  const h = setup(), id = wallet();
+  const first = await h.service.query(id, { scope: 'upgrade' });
+  const legacy = structuredClone(first.ledger); legacy.sourceChecks.upgrade.version = 1;
+  await h.store.save(id, legacy.revision, legacy);
+  const rechecked = await h.service.query(id, { scope: 'upgrade' });
+  assert.equal(rechecked.usage.cacheHit, false); assert.equal(h.readers, 2);
+  assert.equal(rechecked.ledger.sourceChecks.upgrade.version, 2);
+  assert.equal(rechecked.ledger.sourceChecks.gavin.version, 1);
+  assert.equal((await h.service.query(id, { scope: 'upgrade' })).usage.cacheHit, true);
 });
 
 test('mixed evidence displays its oldest relevant date rather than a newer global date', () => {
@@ -130,4 +159,15 @@ test('mixed evidence displays its oldest relevant date rather than a newer globa
   ledger.coverage.gavin.asOf = '2026-11-26T01:00:00Z';
   ledger.events = [{ category: 'UpgradeRequested' }];
   assert.equal(reportAsOf(ledger, 'packs'), '2026-11-25T01:00:00Z', 'cached upgrade lineage can affect holdings and realized expenditure');
+});
+
+test('an existing daily history gets valuation supplementation once without another history scan', async () => {
+  const h = setup(), id = wallet();
+  const result = await h.service.query(id), legacy = structuredClone(result.ledger);
+  delete legacy.cardValues;
+  await h.store.save(id, legacy.revision, legacy);
+  const checked = await h.service.query(id);
+  assert.equal(checked.usage.valuationOnly, true);
+  assert.equal(h.scans, 1); assert.equal(h.readers, 2);
+  assert.equal((await h.restart().query(id)).usage.requests, 0);
 });

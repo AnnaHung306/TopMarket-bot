@@ -1,12 +1,13 @@
 import { getFilteredLogs } from '../worker/history/chain.js';
 import { verifyUpgradeVersion } from './registry.mjs';
 import { address, asAddress, eventId, hex, word, words, TRANSFER, USDC } from './model.mjs';
+import { verifyUpgradeRecycles } from './upgrade-recycle.mjs';
 
 export function decodeUpgradeLog(log, pool) {
   if (address(log.address) !== pool.address || log.removed) throw Error('Invalid upgrade event source');
   const definition = pool.definition;
   const name = Object.entries(definition.topics).find(([, hash]) => hash === log.topics[0])?.[0];
-  if (!['UpgradeRequested', 'UpgradeSettled', 'UpgradeRescued', 'CardClaimable', 'CardClaimed'].includes(name)) return null;
+  if (!['UpgradeRequested', 'UpgradeSettled', 'UpgradeRescued', 'CardClaimable', 'CardClaimed', 'ChoicePending', 'WinKept', 'WinRecycled'].includes(name)) return null;
   if (log.topics.length < 2) throw Error('Missing spin ID');
   const values = words(log.data), uint = i => BigInt('0x' + values[i]).toString();
   const event = { id: eventId(log.transactionHash, log.logIndex), tx: log.transactionHash.toLowerCase(),
@@ -23,10 +24,19 @@ export function decodeUpgradeLog(log, pool) {
   } else if (name === 'UpgradeSettled') {
     if (values.length !== 2 || log.topics.length !== 2 || !['0', '1'].includes(uint(0))) throw Error('Upgrade settlement ABI mismatch');
     Object.assign(event, { won: uint(0) === '1', randomWord: uint(1) });
+  } else if (name === 'ChoicePending') {
+    if (values.length !== 2 || log.topics.length !== 3) throw Error('Upgrade choice ABI mismatch');
+    Object.assign(event, { player: asAddress(log.topics[2]), deadline: Number(uint(0)), recycleRaw: uint(1) });
+  } else if (name === 'WinRecycled') {
+    if (values.length !== 1 || log.topics.length !== 3) throw Error('Upgrade recycle ABI mismatch');
+    Object.assign(event, { player: asAddress(log.topics[2]), recycleRaw: uint(0) });
   } else if (['CardClaimable', 'CardClaimed'].includes(name)) {
     if (values.length !== 2 || log.topics.length !== 3) throw Error('Upgrade delivery ABI mismatch');
     Object.assign(event, { player: asAddress(log.topics[2]), collection: asAddress(values[0]), tokenId: uint(1) });
-  } else if (values.length || log.topics.length !== 3) throw Error('Upgrade rescue ABI mismatch');
+  } else {
+    if (values.length || log.topics.length !== 3) throw Error('Upgrade rescue/keep ABI mismatch');
+    event.player = asAddress(log.topics[2]);
+  }
   return event;
 }
 
@@ -43,14 +53,17 @@ export async function scanUpgrades(reader, wallet, pool, from, through, existing
   const results = [];
   for (let i = 0; i < ids.length; i += 100) {
     results.push(...await getFilteredLogs(reader, { address: pool.address, topics: [[definition.topics.UpgradeSettled,
-      definition.topics.UpgradeRescued, definition.topics.CardClaimable, definition.topics.CardClaimed],
+      definition.topics.UpgradeRescued, definition.topics.CardClaimable, definition.topics.CardClaimed,
+      definition.topics.ChoicePending, definition.topics.WinKept, definition.topics.WinRecycled],
     ids.slice(i, i + 100).map(id => '0x' + BigInt(id).toString(16).padStart(64, '0'))] }, outcomeStart, through));
   }
   // The oracle's decimals are read at the request block, not inferred from today's configuration.
   const oracleResults = await reader.batch(requests.map(e => ['eth_call', [{ to: pool.address, data: definition.selectors.oracle }, hex(e.block)]]));
   const decimals = await reader.batch(requests.map((e, index) => ['eth_call', [{ to: asAddress(oracleResults[index]), data: '0x05300b28' }, hex(e.block)]]));
   requests.forEach((event, index) => { event.valueDecimals = Number(BigInt(decimals[index])); });
-  return { from: start, to: through, events: [...requests, ...results.map(log => decodeUpgradeLog(log, pool))] };
+  const events = [...requests, ...results.map(log => decodeUpgradeLog(log, pool))];
+  await verifyUpgradeRecycles(reader, events, pool);
+  return { from: start, to: through, events };
 }
 
 export function receiptTransfers(receipt, wallet) {
@@ -75,23 +88,30 @@ export function upgradeSpins(events, transfers, wallet) {
     const result = settlements[0];
     const claim = group.filter(e => e.category === 'CardClaimed').sort((a, b) => a.block - b.block).at(-1);
     const claimable = group.find(e => e.category === 'CardClaimable');
+    const choice = group.find(e => e.category === 'ChoicePending');
+    const resolutions = group.filter(e => ['WinKept', 'WinRecycled'].includes(e.category));
+    if (resolutions.length > 1 || group.some(e => e.player && e.player !== wallet)) throw Error('Conflicting upgrade winner choice');
+    const resolution = resolutions[0];
     const status = !result ? 'pending' : result.category === 'UpgradeRescued' ? 'rescued' : result.won ? 'won' : 'lost';
     if (result?.category === 'UpgradeSettled') {
       const computed = BigInt(result.randomWord) % (BigInt(request.targetValueRaw) * 10000n) <
         BigInt(request.stakeValueRaw) * BigInt(10000 - request.edgeBps);
       if (computed !== result.won) throw Error('Upgrade outcome disagrees with verified contract rule');
     }
+    if ((choice || resolution) && status !== 'won') throw Error('Upgrade choice without a winning settlement');
     const returned = status === 'rescued';
     const collection = returned ? request.stakeCollection : request.targetCollection;
     const tokenId = returned ? request.stakeTokenId : request.targetTokenId;
-    const deliveryEvent = claim || result;
+    const deliveryEvent = claim || resolution || result;
     const delivered = deliveryEvent && transfers.filter(t => t.kind === 'nft' && t.tx === deliveryEvent.tx &&
       t.collection === collection && t.tokenId === tokenId && t.from === request.contract && t.to === wallet);
     const stakeProof = transfers.filter(t => t.kind === 'nft' && t.tx === request.tx && t.collection === request.stakeCollection &&
       t.tokenId === request.stakeTokenId && t.from === wallet && t.to === request.contract);
     spins.push({ id: `${request.contract}:${request.spinId}`, poolId: request.poolId, request, result,
-      status, delivery: status === 'lost' ? 'none' : delivered?.length === 1 ? 'delivered' : claimable && !claim ? 'claimable' : 'unverified',
-      claim, stakeVerified: stakeProof.length === 1, stakeTransferId: stakeProof.length === 1 ? stakeProof[0].id : null,
+      status, delivery: status === 'lost' ? 'none' : resolution?.category === 'WinRecycled'
+        ? resolution.recycleVerified ? 'recycled' : 'payout-unverified'
+        : delivered?.length === 1 ? 'delivered' : claimable && !claim ? 'claimable' : choice && !resolution ? 'choice-pending' : 'unverified',
+      choice, resolution, claim, stakeVerified: stakeProof.length === 1, stakeTransferId: stakeProof.length === 1 ? stakeProof[0].id : null,
       deliveryTransferId: delivered?.length === 1 ? delivered[0].id : null });
   }
   return spins;

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { upgradeDefinition } from '../registry.mjs';
 import { decodeUpgradeLog, receiptTransfers, upgradeSpins } from '../upgrade.mjs';
 import { buildReport, textReport } from '../report.mjs';
-import { csvReport } from '../exports.mjs';
+import { csvReport, htmlReport } from '../exports.mjs';
 import { assetKey, dateRange, taipeiDay, eventId, money } from '../model.mjs';
 import { STAKE } from '../../worker/index.js';
 import { viewComponents, walletV2Command } from '../discord.mjs';
@@ -42,10 +42,11 @@ test('verified public spin 148: decode request, independently recompute win and 
   assert.equal(report.cash.outRaw, '0');
   assert.equal(report.upgrade.referenceChangeRaw, '45000000');
   assert.equal(report.complete, false, 'sample receipts must not claim complete wallet history');
-  assert.match(textReport(report), /45\.00/);
-  assert.match(csvReport(report), /"upgradeValue".*"45000000"/);
+  assert.equal(report.metrics.find(metric => metric.key === 'upgradeValue').raw, null);
+  assert.match(textReport(report), /卡牌升級活動價差：待確認/);
+  assert.match(csvReport(report), /"upgrade".*"165000000".*"210000000"/);
   assert.equal(report.upgrade.laterProceedsRaw, null);
-  assert.match(textReport(report), /升級後已實現收益：待確認/);
+  assert.equal(buildReport(ledger, { scope: 'all' }).siteSummary.find(row => row.key === 'buyback').raw, null);
 });
 test('verified public spin 144 loses; no cash outflow is invented from its 45 reference-value stake', () => {
   const ledger = sampleLedger('144');
@@ -127,7 +128,8 @@ test('verified acquisition expenditure follows the winning NFT; oracle values ar
   assert.equal(report.upgrade.referenceChangeRaw, '45000000');
   assert.equal(report.upgrade.laterProceedsRaw, '250000000');
   assert.equal(report.upgrade.realizedPnlRaw, '170000000');
-  assert.match(textReport(report), /🏆 升級後已實現收益：170\.00 USDC/);
+  assert.match(textReport(report), /💎 卡牌升級活動價差：45\.00 USDC/);
+  assert.doesNotMatch(textReport(report), /已實現收益/);
   assert.equal(report.realized[0].originPoolId, originPool.id);
 });
 test('holdings separate checked wallet, staking and unverified ownership, with costs kept out of cash CSV fields', () => {
@@ -136,8 +138,8 @@ test('holdings separate checked wallet, staking and unverified ownership, with c
   assert.equal(known.holdingsSummary.walletCount, 1);
   assert.equal(known.holdingsSummary.knownCostRaw, '80000000');
   assert.equal(known.upgrade.laterProceedsRaw, '0');
-  assert.match(textReport(known), /📥 升級卡後續收入：0\.00 USDC/);
-  assert.match(textReport(known), /🏆 升級後已實現收益：尚未實現/);
+  assert.doesNotMatch(textReport(known), /回購／出售入帳|後續收入/);
+  assert.doesNotMatch(textReport(known), /已實現收益|尚未實現/);
   assert.match(csvReport(known), /"holding"/);
   const csv = csvReport(known).replace(/^\ufeff/, '').split('\r\n').map(row => row.slice(1, -1).split('","'));
   const holdingRow = csv.find(row => row[0] === 'holding');
@@ -151,13 +153,90 @@ test('holdings separate checked wallet, staking and unverified ownership, with c
   assert.equal(staked.holdingsSummary.walletCount, 0);
   assert.equal(staked.holdingsSummary.stakedCount, 1);
   assert.equal(staked.holdingsSummary.knownCostRaw, '80000000');
-  assert.match(textReport(staked), /🔒 質押 1 張/);
+  assert.match(textReport(staked), /參考價值：待確認/);
   assert.match(textReport(staked), /🃏 持倉明細/);
   ledger.ownershipCoverage = {};
   const uncertain = buildReport(ledger);
   assert.equal(uncertain.holdingsSummary.stakedCount, 0);
   assert.equal(uncertain.holdingsSummary.unverifiedCount, 1);
-  assert.match(textReport(uncertain), /🔎 1 張持有狀態待確認/);
+  assert.match(textReport(uncertain), /參考價值：待確認/);
+});
+
+test('upgrade-only stored evidence requests acquisition history instead of implying a complete profit report', () => {
+  const ledger = sampleLedger();
+  ledger.coverage[pool.id].complete = true;
+  const report = buildReport(ledger, { scope: 'upgrade' });
+  assert.equal(report.complete, false);
+  assert.equal(report.upgrade.referenceChangeRaw, '45000000');
+  assert.equal(report.upgrade.laterProceedsRaw, null);
+  assert.equal(report.upgrade.incomePendingReason, '買賣紀錄待補齊');
+  assert.equal(buildReport(ledger, { scope: 'all' }).siteSummary.find(row => row.key === 'buyback').raw, null);
+});
+
+test('a newer upgrade checkpoint cannot turn older sale history into a known zero', () => {
+  const ledger = withAcquisition(sampleLedger());
+  ledger.coverage.gavin.through = request148.block - 1;
+  ledger.coverage[pool.id].through = request148.block + 100;
+  const report = buildReport(ledger, { scope: 'upgrade' });
+  assert.equal(report.complete, false);
+  assert.equal(report.upgrade.laterProceedsRaw, null);
+  assert.equal(report.upgrade.incomePendingReason, '買賣紀錄待更新');
+});
+
+test('zero income with an unsold upgraded card differs from a sale with unknown cost', () => {
+  const unsold = buildReport(withAcquisition(sampleLedger()), { scope: 'upgrade' });
+  assert.equal(unsold.complete, true);
+  assert.equal(unsold.upgrade.incomePendingReason, null);
+  assert.doesNotMatch(textReport(unsold), /回購／出售入帳|後續收入/);
+  assert.match(textReport(unsold), /卡牌升級活動價差：45\.00 USDC/);
+  const ledger = withSale(withAcquisition(sampleLedger()));
+  ledger.ownershipCoverage = {};
+  const unknownCost = buildReport(ledger, { scope: 'upgrade' });
+  assert.equal(unknownCost.upgrade.laterProceedsRaw, '250000000');
+  assert.doesNotMatch(textReport(unknownCost), /升級回購入帳：250\.00 USDC/);
+  assert.doesNotMatch(textReport(unknownCost), /已實現收益/);
+});
+
+test('a winning settlement with missing or incompatible price precision is unknown, never zero', async () => {
+  for (const valueDecimals of [undefined, 18]) {
+    const ledger = withAcquisition(sampleLedger());
+    ledger.events.find(event => event.category === 'UpgradeRequested').valueDecimals = valueDecimals;
+    const report = buildReport(ledger, { scope: 'upgrade' });
+    assert.equal(report.upgrade.won, 1);
+    assert.equal(report.metrics.find(metric => metric.key === 'upgradeValue').raw, null);
+    assert.match(textReport(report), /卡牌升級活動價差：待確認/);
+    assert.match(await htmlReport(report), /data-key="upgradeValue" data-raw="unknown"[^>]*><span>卡牌升級活動價差<\/span><strong>待確認<\/strong>/);
+  }
+});
+
+test('verified no activity is zero; a failed upgrade deducts its stake and pending spins do not', () => {
+  const failed = withAcquisition(sampleLedger('144'));
+  assert.equal(buildReport(failed, { scope: 'upgrade' }).metrics.find(metric => metric.key === 'upgradeValue').raw, '-45000000');
+  failed.events = []; failed.transfers = [];
+  assert.equal(buildReport(failed, { scope: 'upgrade' }).metrics.find(metric => metric.key === 'upgradeValue').raw, '0');
+  const pending = withAcquisition(sampleLedger());
+  pending.events = pending.events.filter(event => event.category === 'UpgradeRequested');
+  assert.equal(buildReport(pending, { scope: 'upgrade' }).metrics.find(metric => metric.key === 'upgradeValue').raw, '0');
+});
+
+test('poster embeds the official logo offline and leaves emoji to text headings and field labels', async () => {
+  const report = buildReport(withSale(withAcquisition(sampleLedger())), { detail: 'detail' });
+  const html = await htmlReport(report);
+  assert.match(html, /<img class="brand" src="data:image\/svg\+xml;base64,/);
+  assert.doesNotMatch(html, /\p{Extended_Pictographic}/u);
+  assert.doesNotMatch(html, /<div class="brand">TOP\.MARKET/);
+  assert.doesNotMatch(html, /已實現收益|USDC 估值|data-key="realized"/);
+  assert.match(html, /data-key="upgradeValue" data-raw="45000000"[^>]*><span>卡牌升級活動價差<\/span><strong>45\.00<\/strong>/);
+  const svg = Buffer.from(/data:image\/svg\+xml;base64,([^"]+)/.exec(html)[1], 'base64').toString();
+  assert.equal(svg, await readFile(new URL('../../assets/top-market-logo.svg', import.meta.url), 'utf8'));
+  assert.doesNotMatch(svg, /<script|<image|href=/i);
+  const text = textReport(report);
+  assert.match(text, /\*\*⬆️ 升級明細\*\*\n#148/);
+  assert.match(text, /\*\*🔎 交易證據\*\*\n[+-]/);
+  assert.doesNotMatch(text, /收益分類|卡池收益|持倉成本/);
+  assert.match(text, /市場買卡：|市場賣卡：/);
+  assert.doesNotMatch(text, /🎮|✅|❌|👛/u);
+  assert.equal((text.match(/卡牌升級活動價差：/g) || []).length, 1);
 });
 test('report menus and compact text use consistent category emoji without changing the three-state controls', () => {
   const ledger = withAcquisition(sampleLedger());
@@ -173,6 +252,26 @@ test('report menus and compact text use consistent category emoji without changi
     assert.ok(rows[0].components[0].options.every(o => o.emoji?.name));
   }
 });
+
+test('Gavin report fields replace activity partitions in both text and poster', async () => {
+  const ledger = withSale(withAcquisition(sampleLedger()));
+  for (const detail of ['summary', 'detail']) {
+    const report = buildReport(ledger, { scope: 'all', detail });
+    assert.equal(report.siteSummary.length, 8);
+    assert.equal(report.siteSummary.find(row => row.key === 'pack').raw, '80000000');
+    assert.equal(report.siteSummary.find(row => row.key === 'sales').raw, '250000000');
+    const text = textReport(report), html = await htmlReport(report);
+    for (const row of report.siteSummary) {
+      assert.ok(text.includes(row.label)); assert.ok(html.includes('data-key="' + row.key + '"'));
+    }
+    assert.doesNotMatch(text, /CSV|已實現收益|各項收支|持倉成本|卡池收益/);
+    assert.match(text, /市場賣卡：250\.00/);
+    assert.doesNotMatch(text, /升級回購入帳：250\.00|回購／出售入帳：250\.00/);
+    assert.equal((html.match(/class="poster glass"/g) || []).length, 1);
+    assert.ok(text.length < 1900);
+  }
+});
+
 test('out-and-back transfers break continuity and prevent fabricated zero-cost realized profit', () => {
   const ledger = withSale(withAcquisition(sampleLedger()));
   const base = { collection: request148.stakeCollection, tokenId: request148.stakeTokenId, kind: 'nft', tx: '0x' + '9'.repeat(64) };
@@ -210,7 +309,7 @@ test('unsupported activity is unknown; current bot remains unregistered and pool
   assert.equal(walletV2Command.toJSON().name, 'wallet');
   for (let i = 0; i < 80; i++) ledger.catalog.push({ id: 'pack:' + i, kind: 'packs', name: 'Closed pack ' + i, address: originAddress, enabled: false });
   const components = viewComponents(ledger, { id: '1'.repeat(32), selection: { scope: 'all', period: 'all', poolId: 'pack:79', detail: 'summary' }, poolPage: 0 });
-  assert.equal(components.length, 5);
-  assert.ok(components[1].toJSON().components[0].options.length <= 25);
-  assert.ok(components[1].toJSON().components[0].options.some(option => option.value === 'pack:79' && option.default));
+  assert.equal(components.length, 2);
+  assert.deepEqual(components[0].toJSON().components[0].options.map(option => option.value), ['all', '7d', '30d', 'month', 'custom']);
+  assert.ok(!walletV2Command.toJSON().options.some(option => option.name === 'scope'));
 });

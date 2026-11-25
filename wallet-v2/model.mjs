@@ -7,11 +7,12 @@ export const SCOPES = Object.freeze({
   buyback: '回購', staking: '質押與留卡結算', campaign: '活動入帳',
 });
 export const OUTCOME_LABELS = Object.freeze({ won: '成功', lost: '失敗', pending: '待結算', rescued: '已救援退卡' });
-export const DELIVERY_LABELS = Object.freeze({ delivered: '已收到', claimable: '待領取', unverified: '交付待核對', none: '無獎品' });
-export const CATEGORY_LABELS = Object.freeze({ pack: '抽卡支出', purchaseGross: '市場買卡', sales: '市場出售實收',
+export const DELIVERY_LABELS = Object.freeze({ delivered: '已收到', claimable: '待領取', unverified: '交付待核對', none: '無獎品',
+  'choice-pending': '待選擇留卡或回購', recycled: '已回購入帳', 'payout-unverified': '回購入帳待核對' });
+export const CATEGORY_LABELS = Object.freeze({ pack: '抽卡支出', purchaseGross: '市場買卡', sales: '市場賣卡',
   'buyback-claim-confirmed': '回購實收', 'refund-confirmed': '抽卡退款', 'staking-confirmed': '質押收益',
   'staking-treasury': '質押收益', 'kept-disposal-confirmed': '留卡結算實收', 'campaign-payout': '活動入帳',
-  'raffle-participation': '奪寶參與', 'raffle-income': '奪寶收入', 'raffle-refund': '奪寶退款' });
+  'raffle-participation': '奪寶參與', 'raffle-income': '奪寶收入', 'raffle-refund': '奪寶退款', WinRecycled: '升級卡回購實收' });
 export function address(value) {
   if (typeof value !== 'string' || !/^0x[\da-f]{40}$/i.test(value)) throw Error('無效的錢包或合約地址');
   return value.toLowerCase();

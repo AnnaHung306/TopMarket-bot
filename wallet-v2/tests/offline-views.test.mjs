@@ -7,6 +7,8 @@ import { upgradeDefinition } from '../registry.mjs';
 import { decodeUpgradeLog, receiptTransfers } from '../upgrade.mjs';
 import { createV2InteractionHandler, viewComponents } from '../discord.mjs';
 import { ChannelType, MessageFlags, PermissionFlagsBits, PermissionsBitField } from 'discord.js';
+import { testDirectory } from './helpers/directory.mjs';
+const directory = testDirectory('offline-views');
 const fixture = JSON.parse(await readFile(new URL('../fixtures/public-upgrades.json', import.meta.url)));
 const definition = await upgradeDefinition(), pool = { ...definition, definition, supported: true };
 const times = new Map(fixture.blocks.map(block => [Number(block.number), Number(block.timestamp)]));
@@ -25,7 +27,7 @@ async function harness({ toolbox = false, publicThread = false, privatePermissio
   let queries = 0, threads = 0, renders = 0, loads = 0, renderHook, queryHook, controlPrefix;
   const history = [], invitations = [], createOptions = [], publicMessages = [], queryOptions = [];
   let archived = false, parentFetches = 0;
-  const viewStore = new FileLedgerStore('work/wallet-v2/verification/offline-views');
+  const viewStore = new FileLedgerStore(directory);
   const fixtureLedger = structuredClone(ledger);
   for (let i = 0; i < packCount; i++) fixtureLedger.catalog.push({ id: `pack:test${i}`, kind: 'packs', name: `Test Pack ${i + 1}` });
   const service = { load: async () => { loads++; return structuredClone(fixtureLedger); }, query: async (_wallet, options) => { queries++; queryOptions.push(options); await queryHook?.(); return { ledger: structuredClone(fixtureLedger) }; } };
@@ -86,8 +88,8 @@ async function harness({ toolbox = false, publicThread = false, privatePermissio
 test('existing private-thread replies stay in place; toolbox creates a private thread and invites only its requester', async () => {
   const inThread = await harness();
   assert.equal(inThread.threads, 0); assert.equal(inThread.queries, 1);
-  assert.equal(inThread.resultMessage.payload.files[0].name, 'wallet-v2.png');
-  assert.equal(inThread.resultMessage.payload.components.length, 3);
+  assert.equal(inThread.resultMessage.payload.files[0].name, 'wallet-report.png');
+  assert.equal(inThread.resultMessage.payload.components.length, 2);
   const toolbox = await harness({ toolbox: true });
   assert.equal(toolbox.threads, 1); assert.equal(toolbox.queries, 1);
   assert.equal(toolbox.createOptions[0].type, ChannelType.PrivateThread);
@@ -163,7 +165,7 @@ test('offline downloads do not mutate the visible report; refresh explicitly req
   const h = await harness();
   const before = await h.viewStore.loadView(h.id);
   const csv = h.component('csv'); await h.handler(csv);
-  assert.equal(csv.editPayload.files[0].name, 'wallet-v2.csv');
+  assert.equal(csv.editPayload.files[0].name, 'wallet-report.csv');
   assert.deepEqual(await h.viewStore.loadView(h.id), before);
   assert.equal(h.queries, 1);
   await h.handler(h.component('refresh'));
@@ -188,19 +190,19 @@ test('upgrade controls never offer pack/source/search inputs, including a persis
   const rows = viewComponents({ ...ledger, catalog: [...ledger.catalog, pack] }, { id: 'a'.repeat(32), selection: {
     scope: 'upgrade', poolId: pack.id, dimension: 'origin', period: 'all', detail: 'summary' } }).map(row => row.toJSON());
   const ids = rows.flatMap(row => row.components.map(component => component.custom_id.split(':').at(-1)));
-  assert.deepEqual(ids, ['scope', 'period', 'detail', 'png', 'csv', 'refresh']);
-  assert.equal(rows.length, 3);
+  assert.deepEqual(ids, ['period', 'detail', 'png', 'csv', 'refresh']);
+  assert.equal(rows.length, 2);
 });
-test('small pack lists show names without contract descriptions or unused navigation', () => {
-  const pack = { id: 'pack:' + '0x' + '1'.repeat(40), kind: 'packs', name: 'Starter Pack', address: '0x' + '1'.repeat(40), enabled: false };
-  const rows = viewComponents({ ...ledger, catalog: [pack] }, { id: 'a'.repeat(32), selection: {
-    scope: 'packs', period: 'all', detail: 'summary' } }).map(row => row.toJSON());
-  assert.equal(rows.length, 4);
-  const options = rows[1].components[0].options;
-  assert.equal(options[1].label, 'Starter Pack'); assert.equal(options[1].description, '已結束');
-  assert.ok(options.every(option => !/0x/i.test(option.label + (option.description || ''))));
-  assert.ok(rows.flatMap(row => row.components).every(component => !/search|previous|next|dimension/.test(component.custom_id)));
+test('catalog size never adds activity, pack or navigation menus', () => {
+  for (const count of [1, 80]) {
+    const catalog = Array.from({ length: count }, (_, i) => ({ id: 'pack:' + i, kind: 'packs', name: 'Pack ' + i }));
+    const rows = viewComponents({ catalog }, { id: 'a'.repeat(32), selection: { scope: 'packs', period: 'all', detail: 'summary' } }).map(row => row.toJSON());
+    assert.equal(rows.length, 2);
+    assert.ok(rows.flatMap(row => row.components).every(component => !/scope|pool|search|previous|next|dimension/.test(component.custom_id)));
+    assert.equal(rows[0].components[0].options.length, 5);
+  }
 });
+
 test('refresh immediately removes the old report before a delayed query and publishes text/PNG together', async () => {
   const h = await harness(); let release, entered;
   const started = new Promise(resolve => { entered = resolve; });
@@ -212,7 +214,7 @@ test('refresh immediately removes the old report before a delayed query and publ
   assert.deepEqual(pending.components, []);
   release(); await operation;
   assert.match(h.resultMessage.payload.content, /Top.Market/);
-  assert.equal(h.resultMessage.payload.files[0].name, 'wallet-v2.png');
+  assert.equal(h.resultMessage.payload.files[0].name, 'wallet-report.png');
   assert.equal(h.history.filter(body => body.content === 'loading...').length, 2, 'initial query plus explicit refresh');
 });
 test('failure leaves no old PNG and retry preserves the requested period', async () => {
@@ -228,7 +230,7 @@ test('failure leaves no old PNG and retry preserves the requested period', async
   assert.equal(refresh.label, '更新資料');
   h.setRenderHook(); await h.handler(h.component('refresh'));
   assert.match(h.resultMessage.payload.content, /近 7 天/);
-  assert.equal(h.resultMessage.payload.files[0].name, 'wallet-v2.png');
+  assert.equal(h.resultMessage.payload.files[0].name, 'wallet-report.png');
 });
 test('late clicks from older controls cannot overwrite a newer report or start a delayed refresh', async () => {
   const h = await harness(), late = h.component('refresh');
@@ -250,11 +252,12 @@ test('existing unversioned reports migrate on their next real action', async () 
   await h.handler(legacy);
   let migrated = await h.viewStore.loadView(h.id);
   assert.equal(migrated.controlsVersion, 1); assert.equal(migrated.phase, 'draft');
-  assert.equal(h.queries, 1); assert.equal(h.renders, 1); assert.equal(h.loads, 1, 'one metadata migration, no chain query');
+  assert.equal(h.queries, 1); assert.equal(h.renders, 1); assert.equal(h.loads, 0, 'period controls no longer need a catalog read');
   await h.handler(h.component('refresh')); migrated = await h.viewStore.loadView(h.id);
   assert.equal(h.queries, 2); assert.equal(migrated.phase, 'ready');
-  assert.match(h.resultMessage.payload.components[0].toJSON().components[0].custom_id, new RegExp(`:${migrated.revision}:scope$`));
+  assert.match(h.resultMessage.payload.components[0].toJSON().components[0].custom_id, new RegExp(`:${migrated.revision}:period$`));
 });
+
 test('a failed PNG download clears its own loading reply without changing the visible report', async () => {
   const h = await harness(), original = h.resultMessage.payload;
   h.setRenderHook(async () => { throw Error('simulated download failure'); });
@@ -265,7 +268,6 @@ test('a failed PNG download clears its own loading reply without changing the vi
 });
 test('choosing unchanged requirements leaves the report visible without loading or generation', async () => {
   const h = await harness(), original = h.resultMessage.payload, edits = h.history.length;
-  await h.handler(h.component('scope', ['upgrade']));
   await h.handler(h.component('period', ['all']));
   assert.strictEqual(h.resultMessage.payload, original); assert.equal(h.history.length, edits);
   assert.equal(h.queries, 1); assert.equal(h.renders, 1); assert.equal(h.loads, 0);
@@ -273,7 +275,7 @@ test('choosing unchanged requirements leaves the report visible without loading 
 });
 test('multiple requirement changes stay editable and only explicit refresh queries and renders', async () => {
   const h = await harness();
-  await h.handler(h.component('scope', ['all']));
+  await h.handler(h.component('period', ['7d']));
   await h.handler(h.component('period', ['30d']));
   await h.handler(h.component('detail'));
   const draft = h.resultMessage.payload;
@@ -281,13 +283,13 @@ test('multiple requirement changes stay editable and only explicit refresh queri
   assert.deepEqual(draft.files, []); assert.deepEqual(draft.attachments, []);
   const controls = draft.components.flatMap(row => row.toJSON().components);
   assert.ok(controls.find(item => item.custom_id.endsWith(':refresh')));
-  assert.ok(controls.find(item => item.custom_id.endsWith(':scope')));
+  assert.ok(controls.find(item => item.custom_id.endsWith(':period')));
   assert.equal(h.queries, 1); assert.equal(h.renders, 1); assert.equal(h.loads, 0);
   assert.equal((await h.viewStore.loadView(h.id)).phase, 'draft');
   await h.handler(h.component('refresh'));
   assert.equal(h.queries, 2); assert.equal(h.renders, 2);
   assert.match(h.resultMessage.payload.content, /近 30 天/);
-  assert.equal(h.resultMessage.payload.files[0].name, 'wallet-v2.png');
+  assert.equal(h.resultMessage.payload.files[0].name, 'wallet-report.png');
   assert.equal((await h.viewStore.loadView(h.id)).phase, 'ready');
 });
 test('drafts disable downloads and reject older download requests without exposing mismatched data', async () => {
@@ -311,19 +313,55 @@ test('a new controller retains pending requirements and waits for refresh', asyn
   await restarted(h.component('refresh'));
   assert.equal(h.queries, 2); assert.match(h.resultMessage.payload.content, /近 7 天/);
 });
-test('pack navigation keeps the report and reselecting the same activity preserves a chosen pack', async () => {
-  const h = await harness({ packCount: 30, initialScope: 'all' }), original = h.resultMessage.payload;
-  await h.handler(h.component('next'));
-  assert.equal(h.resultMessage.payload.content, original.content);
-  assert.deepEqual(h.resultMessage.payload.files, original.files);
-  assert.equal((await h.viewStore.loadView(h.id)).phase, 'ready');
+test('legacy pack navigation migrates to a complete wallet report without querying', async () => {
+  const h = await harness({ packCount: 30, initialScope: 'all' });
+  const saved = await h.viewStore.loadView(h.id);
+  const legacy = await h.viewStore.saveView({ ...saved, selection: { ...saved.selection, scope: 'packs', poolId: 'pack:test23', period: '7d' } }, saved.revision);
+  const action = h.component('next');
+  action.customId = `wv2:${h.id}:${legacy.revision}:next`;
+  await h.handler(action);
+  const migrated = await h.viewStore.loadView(h.id);
+  assert.equal(migrated.selection.scope, 'all'); assert.equal(migrated.selection.poolId, null);
+  assert.equal(migrated.selection.period, '7d'); assert.equal(migrated.phase, 'draft');
   assert.equal(h.queries, 1); assert.equal(h.renders, 1);
-  await h.handler(h.component('pool', ['pack:test23']));
-  const edits = h.history.length;
-  await h.handler(h.component('scope', ['all']));
-  assert.equal((await h.viewStore.loadView(h.id)).selection.poolId, 'pack:test23');
-  assert.equal(h.history.length, edits); assert.equal(h.queries, 1); assert.equal(h.renders, 1);
+  assert.deepEqual(h.resultMessage.payload.files, []);
 });
+
+test('old filtered report cannot download a new unfiltered PNG until explicitly updated', async () => {
+  const h = await harness(), saved = await h.viewStore.loadView(h.id);
+  const legacy = await h.viewStore.saveView({ ...saved, selection: { ...saved.selection, scope: 'upgrade', poolId: 'pack:old', period: '30d' } }, saved.revision);
+  const download = h.component('png'); download.customId = `wv2:${h.id}:${legacy.revision}:png`;
+  await h.handler(download);
+  const migrated = await h.viewStore.loadView(h.id);
+  assert.equal(migrated.phase, 'draft'); assert.equal(migrated.selection.scope, 'all');
+  assert.equal(migrated.selection.period, '30d'); assert.equal(h.renders, 1); assert.equal(h.queries, 1);
+  assert.match(privateBody(download).content, /更新資料/); assert.deepEqual(h.resultMessage.payload.files, []);
+});
+
+test('same period on an old filtered report still hides its mismatched report without querying', async () => {
+  const h = await harness(), saved = await h.viewStore.loadView(h.id);
+  const legacy = await h.viewStore.saveView({ ...saved, selection: { ...saved.selection, scope: 'packs', poolId: 'pack:old' } }, saved.revision);
+  const action = h.component('period', ['all']); action.customId = `wv2:${h.id}:${legacy.revision}:period`;
+  await h.handler(action);
+  const migrated = await h.viewStore.loadView(h.id);
+  assert.equal(migrated.phase, 'draft'); assert.equal(migrated.selection.poolId, null);
+  assert.equal(h.renders, 1); assert.equal(h.queries, 1); assert.deepEqual(h.resultMessage.payload.files, []);
+});
+
+test('old activity controls cannot switch away from all and retain the selected period', async () => {
+  const h = await harness({ initialScope: 'raffle' });
+  assert.equal(h.queryOptions[0].scope, 'all');
+  await h.handler(h.component('period', ['7d']));
+  await h.handler(h.component('scope', ['upgrade']));
+  const view = await h.viewStore.loadView(h.id);
+  assert.equal(view.selection.scope, 'all'); assert.equal(view.selection.period, '7d');
+  assert.equal(view.phase, 'draft'); assert.equal(h.queries, 1); assert.equal(h.renders, 1);
+  const ids = h.resultMessage.payload.components.flatMap(row => row.toJSON().components).map(item => item.custom_id.split(':').at(-1));
+  assert.deepEqual(ids, ['period', 'detail', 'png', 'csv', 'refresh']);
+  await h.handler(h.component('refresh'));
+  assert.equal(h.queryOptions.at(-1).scope, 'all'); assert.match(h.resultMessage.payload.content, /錢包報告/);
+});
+
 test('component acknowledgement happens before a delayed view lookup', async () => {
   const h = await harness(), interaction = h.component('refresh');
   const load = h.viewStore.loadView.bind(h.viewStore); let release, entered;
