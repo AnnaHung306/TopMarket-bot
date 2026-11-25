@@ -7,13 +7,16 @@ export async function createProductionWalletV2({ env = process.env, logger = con
   for (const key of ['ALCHEMY_API_KEY', 'WALLET_V2_DATABASE_URL', 'DISCORD_WALLET_CHANNEL_ID']) {
     if (!env[key]?.trim()) throw Error(`Wallet V2 missing ${key}`);
   }
+  logger.info('wallet_v2_startup', JSON.stringify({ stage: 'dependencies' }));
   const [{ PostgresLedgerStore }, { createWalletV2Service }, { createReader }, discord, exports] = await Promise.all([
     import('./store.mjs'), import('./service.mjs'), import('./reader.mjs'), import('./discord.mjs'), import('./exports.mjs'),
   ]);
   // Deployment explicitly permits additive wallet_v2_* tables in the existing
   // PostgreSQL. No original wallet, daily, giveaway or binding table is changed.
   const store = new PostgresLedgerStore(env.WALLET_V2_DATABASE_URL, { allowRemote: true, allowSharedDatabase: true, logger });
+  logger.info('wallet_v2_startup', JSON.stringify({ stage: 'database' }));
   try { await store.initialize(); } catch (error) { await store.close(); throw error; }
+  logger.info('wallet_v2_startup', JSON.stringify({ stage: 'initialized' }));
   const acquireRpc = createRpcConcurrency();
   const service = createWalletV2Service({ store, readerFactory: () => createReader({ alchemyKey: env.ALCHEMY_API_KEY, acquireRpc }), logger });
   return { command: discord.walletV2Command, service, store,

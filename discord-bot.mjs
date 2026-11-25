@@ -9,16 +9,21 @@ import { createDailyModule } from './daily/index.mjs';
 import { createToolboxHandler, toolboxCommands } from './toolbox.mjs';
 import { createProductionWalletV2 } from './wallet-v2/runtime.mjs';
 
+const startup = stage => console.info('bot_startup', JSON.stringify({ stage, at: new Date().toISOString() }));
+startup('entry');
 try { loadEnvFile(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 for (const key of ['DISCORD_TOKEN', 'DISCORD_CLIENT_ID']) {
   if (!process.env[key]?.trim()) throw Error(`缺少環境變數 ${key}`);
 }
 // Gavin's RPC module reads its environment at import time, as in dev.mjs.
+startup('gavin-imports');
 const [{ walletCachePage }, { renderGavinPoster: renderPoster }] = await Promise.all([
   import('./worker/wallet-cache.js'),
   import('./discord-gavin-poster.mjs'),
 ]);
+startup('wallet-initializing');
 const walletV2 = await createProductionWalletV2();
+startup('wallet-initialized');
 const command = walletV2?.command || new SlashCommandBuilder().setName('wallet').setDescription('查詢 Top.Market 錢包收支摘要')
   .addStringOption(option => option.setName('address').setDescription('Base 錢包地址').setRequired(true));
 const intents = [GatewayIntentBits.Guilds];
@@ -36,11 +41,13 @@ if (process.env.DAILY_ENABLED === 'true') {
 }
 const queryWallet = createWalletQuery((address, afterBlock) => walletCachePage(database(), address, afterBlock));
 client.once('clientReady', async () => {
+  startup('gateway-ready');
   try {
     const rest = new REST().setToken(process.env.DISCORD_TOKEN);
     const app = process.env.DISCORD_CLIENT_ID;
     const route = process.env.DISCORD_GUILD_ID ? Routes.applicationGuildCommands(app, process.env.DISCORD_GUILD_ID) : Routes.applicationCommands(app);
     await rest.post(route, { body: command.toJSON() });
+    startup('wallet-command-registered');
     for (const body of toolboxCommands) await rest.post(route, { body });
     if (walletV2) {
       try { console.info('wallet_v2_startup_recovery', JSON.stringify(await walletV2.recoverInterruptedReports(client))); }
@@ -67,4 +74,5 @@ toolboxSql.transaction = queries => getToolboxDatabase().transaction(queries);
 const toolboxHandler = createToolboxHandler({ sql: toolboxSql });
 client.on('interactionCreate', interaction => void toolboxHandler(interaction).catch(error => console.error('TOOLBOX_INTERACTION_FAILED', error)));
 if (daily) client.on('interactionCreate', interaction => void daily.handle(interaction).catch(error => console.error('DAILY_INTERACTION_FAILED', error)));
+startup('gateway-login');
 await client.login(process.env.DISCORD_TOKEN);
