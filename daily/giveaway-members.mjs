@@ -71,12 +71,9 @@ export function createMemberGiveawayQualification({guildId,roleId,boatId,channel
         if (member && !member.roles?.cache) throw Error('DAILY_GIVEAWAY_MEMBER_ROLES_UNAVAILABLE');
         if(member?.roles.cache.has(roleId) && (cancelled || (unverifiedRoleId && member.roles.cache.has(unverifiedRoleId)))) await member.roles.remove(roleId,cancelled ? 'Moderator cancelled giveaway eligibility' : 'Member is not verified');
       }
-      const [currentSession]=await sql`SELECT channel_id,message_id FROM daily_giveaway_sessions WHERE day=${day}`;
-      if(!currentSession || currentSession.channel_id!==channelId) throw Error('DAILY_GIVEAWAY_SESSION_UNREGISTERED');
-      const activityChannel=await guild.channels.fetch(channelId);
-      const message=await activityChannel?.messages.fetch({message:currentSession.message_id,force:true});
-      const buttons=(message?.components||[]).flatMap(row=>row.components||[]);
-      if(message?.id!==currentSession.message_id || message?.author?.id!==boatId || !buttons.some(button=>(button.customId??button.custom_id)==='giveaway_message' && button.disabled===false)) throw Error('DAILY_GIVEAWAY_SESSION_NOT_OPEN');
+      // Today's message-count eligibility is independent of whether the
+      // giveaway has been created. Previous grants still require a confirmed
+      // draw before removal in the rollover logic above.
       const {start,end}=eventTimes(day,'giveaway');
       const members=await collect({guild,categoryId,start,end:Math.min(time+1,end),onlyChannelId});
       for(const userId of members) {
