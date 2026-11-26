@@ -7,7 +7,7 @@ const ENDPOINTS = {
 export function splitLinks(text) {
   const links = [];
   const remainder = text.replace(URL_PATTERN, raw => {
-    const value = raw.replace(/[.,!?;:，。！？；：]+$/u, '');
+    const value = raw.replace(/(?:\*+|__|~~|\|\|)+$/u, '').replace(/[.,!?;:，。！？；：]+$/u, '');
     try {
       const url = new URL(/^https?:\/\//iu.test(value) ? value : `https://${value}`);
       if (url.protocol === 'http:' || url.protocol === 'https:') links.push(url.hostname.toLowerCase().replace(/\.$/u, ''));

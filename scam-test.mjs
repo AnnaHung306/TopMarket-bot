@@ -1,8 +1,34 @@
 import assert from 'node:assert/strict';
 import { classifyScamTest, createScamTestHandler, createScamUpdateHandler } from './discord-scam-test.mjs';
 import { createLinkChecker, splitLinks } from './discord-link-check.mjs';
+import { isRestrictedVerifiedLink } from './discord-verified-link-policy.mjs';
+import { PermissionFlagsBits } from 'discord.js';
 const base = { guildId: '1541304826674155550', channelId: '1572821315507855430', author: { id: '123', bot: false } };
+const verifiedMember = (ids, admin = false) => ({ roles: { cache: new Map(ids.map(id => [id, true])) }, permissions: { has: bit => admin && bit === PermissionFlagsBits.Administrator } });
+const verifiedMessage = { ...base, content: 'https://example.com', member: verifiedMember(['1547133122343084043']) };
+assert.deepEqual(splitLinks('**https://example.com**').hosts, ['example.com']);
+assert.equal(await isRestrictedVerifiedLink({ ...verifiedMessage, content: '**https://example.com**' }, 'trial'), true);
+assert.equal(await isRestrictedVerifiedLink(verifiedMessage, 'trial'), true);
+assert.equal(await isRestrictedVerifiedLink(verifiedMessage, 'off'), false);
+assert.equal(await isRestrictedVerifiedLink({ ...verifiedMessage, channelId: '1548950663008878683' }, 'trial'), false);
+assert.equal(await isRestrictedVerifiedLink({ ...verifiedMessage, channelId: '1548950663008878683' }, 'chinese'), true);
+assert.equal(await isRestrictedVerifiedLink({ ...verifiedMessage, channelId: '1541307245311164496' }, 'chinese'), false);
+assert.equal(await isRestrictedVerifiedLink({ ...verifiedMessage, member: verifiedMember(['1547133122343084043','1571738627460038736']) }, 'trial'), false);
+assert.equal(await isRestrictedVerifiedLink({ ...verifiedMessage, member: verifiedMember(['1547133122343084043'], true) }, 'trial'), false);
+assert.equal(await isRestrictedVerifiedLink({ ...verifiedMessage, content: '只說文字' }, 'trial'), false);
+assert.equal(await isRestrictedVerifiedLink({ ...verifiedMessage, member: verifiedMember([]) }, 'trial'), true);
+let restrictedDeleted = false, restrictedAlert;
+await createScamTestHandler({ verifiedLinkMode: 'trial' })({ ...verifiedMessage, delete: async () => { restrictedDeleted = true; }, channel: { send: async value => { restrictedAlert = value; } } });
+assert.equal(restrictedDeleted, true);
+assert.match(restrictedAlert.content, /連結限制提醒/);
+assert.doesNotMatch(restrictedAlert.content, /疑似詐騙/);
+restrictedDeleted = false;
+await createScamUpdateHandler({ verifiedLinkMode: 'trial' })({ content: '舊訊息' }, { ...verifiedMessage, delete: async () => { restrictedDeleted = true; }, channel: { send: async () => {} } });
+assert.equal(restrictedDeleted, true);
 const positives = [
+  '**http://discordapp.com/invite/complaint**',
+  '>**http://discordapp.com/invite/complaint**',
+  '**https://discord.gg/complaint**',
   '我不小心檢舉你，快加客服好友申訴',
   'I accidentally reported you, add me as a friend to contact support',
   '恭喜獲得 NFT 白名單，連接錢包領取 https://example.invalid',

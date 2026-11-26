@@ -1,6 +1,7 @@
 // Scope is private by default; community monitoring needs explicit configuration.
 import { createLinkChecker, splitLinks } from './discord-link-check.mjs';
 import { createChannelScope, moderatorChannel, MOD_CHANNEL } from './discord-channel-scope.mjs';
+import { isRestrictedVerifiedLink } from './discord-verified-link-policy.mjs';
 const privateScope = createChannelScope();
 const FRIEND = /(?:加.{0,4}(?:好友|朋友|微信|賴|line)|add\s+(?:me|him|her|my\s+account).{0,12}friend|friend\s+request)/iu;
 const REWARD = /(?:free\s+nitro|nitro.{0,16}(?:giveaway|gift|free)|免費\s*nitro|免费\s*nitro|airdrop|giveaway|whitelist|白名單|白名单|空投|中獎|中奖|獎勵|奖励|領獎|领奖)/iu;
@@ -21,7 +22,7 @@ const RECOVER = /(?:recover|recovery|追回|找回|恢復|恢复)/iu;
 const FUNDS = /(?:funds|assets|crypto|資產|资产|損失|损失|款項|款项)/iu;
 // A clear warning is left for human review rather than automatically deleted.
 const WARNING = /(?:不要|請勿|请勿|切勿|別|别|千萬不要|千万不要|勿|do\s+not|don't|never).{0,16}(?:加|提供|輸入|输入|傳|发送|點|点|連接|连接|download|install|share|send|enter|click|connect)/iu;
-const BLOCKED_INVITE = /(?<![@\w.-])(?:https?:\/\/)?(?:discordapp\.com\/invite|discord\.gg)\/complaint\/?(?=$|[?#\s,.;!<>()[\]])/iu;
+const BLOCKED_INVITE = /(?<![@\w.-])(?:https?:\/\/)?(?:discordapp\.com\/invite|discord\.gg)\/complaint\/?(?=$|[?#\s,.;!<>()[\]*_~`|])/iu;
 const BLOCKED_REASON = '攔截指定的不安全邀請連結';
 const isBlockedInvite = content => BLOCKED_INVITE.test(content);
 
@@ -46,15 +47,16 @@ export function classifyScamTest(message, inScope = privateScope) {
   return null;
 }
 
-export function createScamTestHandler({ checkLinks = createLinkChecker(), now = Date.now, canAct = async () => true, inScope = privateScope, getModChannel = moderatorChannel, targetOnly = false } = {}) {
+export function createScamTestHandler({ checkLinks = createLinkChecker(), now = Date.now, canAct = async () => true, inScope = privateScope, getModChannel = moderatorChannel, targetOnly = false, verifiedLinkMode = 'off' } = {}) {
   let lastUnavailableAlert = 0;
   return async message => {
     if (!inScope(message) || typeof message.content !== 'string' || message.system || !message.author?.id) return;
     if (message.client?.user?.id && message.author.id === message.client.user.id) return;
     const blockedInvite = isBlockedInvite(message.content.normalize('NFKC'));
-    if ((!blockedInvite && (targetOnly || !eligibleMessage(message, inScope))) || !await canAct()) return;
+    const verifiedLink = !blockedInvite && await isRestrictedVerifiedLink(message, verifiedLinkMode);
+    if ((!blockedInvite && !verifiedLink && (targetOnly || !eligibleMessage(message, inScope))) || !await canAct()) return;
     let result;
-    if (blockedInvite) {
+    if (blockedInvite || verifiedLink) {
       result = message.channelId === MOD_CHANNEL ? '已刪除測試訊息' : '已刪除訊息';
       try { await message.delete(); }
       catch (error) { console.error('Blocked invite deletion failed:', error.code ?? error.message); result = '刪除失敗（訊息可能已刪除或權限不足）'; }
@@ -64,7 +66,7 @@ export function createScamTestHandler({ checkLinks = createLinkChecker(), now = 
     catch (error) { console.error('Scam moderation channel unavailable:', error.message); return; }
     const { hosts } = splitLinks(message.content.normalize('NFKC'));
     let lookup = { reason: null, unavailable: false };
-    if (hosts.length && !blockedInvite) {
+    if (hosts.length && !blockedInvite && !verifiedLink) {
       try { lookup = await checkLinks(hosts); }
       catch { lookup = { reason: null, unavailable: true }; }
     }
@@ -73,11 +75,11 @@ export function createScamTestHandler({ checkLinks = createLinkChecker(), now = 
       try { await modChannel.send({ content: `${message.channelId === MOD_CHANNEL ? '⚠️ 測試提醒' : '⚠️ 提醒'}：部分網域無法完成風險查詢，請 Mod 人工檢查；未查到不代表安全。`, allowedMentions: { parse: [] } }); }
       catch (error) { console.error('Link lookup alert failed:', error.message); }
     }
-    const reason = blockedInvite ? BLOCKED_REASON : lookup.reason || classifyScamTest(message, inScope);
+    const reason = blockedInvite ? BLOCKED_REASON : verifiedLink ? '一般成員發布連結' : lookup.reason || classifyScamTest(message, inScope);
     if (!reason || !await canAct()) return;
     const kind = reason === 'Cloudflare 分類為成人內容網域' ? '成人內容' : '詐騙';
-    const title = `⚠️ 疑似${kind}${message.channelId === MOD_CHANNEL ? '測試' : ''}提醒`;
-    if (!blockedInvite) {
+    const title = verifiedLink ? '🔗 連結限制提醒' : `⚠️ 疑似${kind}${message.channelId === MOD_CHANNEL ? '測試' : ''}提醒`;
+    if (!blockedInvite && !verifiedLink) {
       result = message.channelId === MOD_CHANNEL ? '已刪除測試訊息' : '已刪除訊息';
       try { await message.delete(); }
       catch { result = '刪除失敗（訊息可能已刪除或權限不足）'; }

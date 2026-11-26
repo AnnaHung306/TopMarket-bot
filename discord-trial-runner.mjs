@@ -57,8 +57,9 @@ client.on('messageCreate', createRepeatWarningHandler({ canAct: lock.canAct, inS
   return { ...counts, giveawayWindow: giveaway, quizWindow: quiz };
 } }));
 if (scamTestEnabled) {
-  client.on('messageCreate', createScamTestHandler({ canAct: lock.canAct, inScope }));
-  client.on('messageUpdate', createScamUpdateHandler({ canAct: lock.canAct, inScope }));
+  const verifiedLinkMode = process.env.DISCORD_VERIFIED_LINK_MODE || 'off';
+  client.on('messageCreate', createScamTestHandler({ canAct: lock.canAct, inScope, verifiedLinkMode }));
+  client.on('messageUpdate', createScamUpdateHandler({ canAct: lock.canAct, inScope, verifiedLinkMode }));
 }
 const heartbeat = setInterval(async () => {
   if (shuttingDown || await lock.canAct()) return;
