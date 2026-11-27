@@ -2,6 +2,10 @@ import {ChannelType, PermissionFlagsBits} from 'discord.js';
 import {scanSnapshotChannel} from './message-snapshot.mjs';
 import {dateKey,eventTimes,isActivityDay,reportTime} from './time.mjs';
 import {fetchConfirmedBoatResult} from './giveaway-boat-result.mjs';
+import {randomUUID} from 'node:crypto';
+import {giveawayCountWindow} from './giveaway-count-window.mjs';
+import {resetFixedGiveawayRole} from './giveaway-fixed-reset.mjs';
+import {grantQualifiedAddOnly} from './giveaway-add-only.mjs';
 
 const DAY=86_400_000;
 const idPattern=/^\d{17,20}$/;
@@ -23,9 +27,11 @@ export async function qualifyingMembers({guild,categoryId,start,end,threshold=20
 
 // Disabled unless explicitly configured. Rollover only touches recorded grants
 // after each registered old draw is confirmed; no member enumeration intent.
-export function createMemberGiveawayQualification({guildId,roleId,boatId,channelId,categoryId,client,sql,now=Date.now,onlyChannelId=null,unverifiedRoleId=null,collect=qualifyingMembers}) {
+export function createMemberGiveawayQualification({guildId,roleId,boatId,channelId,categoryId,client,sql,now=Date.now,onlyChannelId=null,unverifiedRoleId=null,collect=qualifyingMembers,fixedResetFrom=process.env.DAILY_GIVEAWAY_PERSIST_SAFE_START_DAY}) {
   if (![guildId,roleId,boatId,channelId,categoryId].every(v=>idPattern.test(v||'')) || (unverifiedRoleId && !idPattern.test(unverifiedRoleId))) throw Error('DAILY_GIVEAWAY_CONFIGURATION_INVALID');
+  if(fixedResetFrom && onlyChannelId) throw Error('DAILY_GIVEAWAY_FIXED_RESET_PRIVATE_TEST_REQUIRES_ISOLATION');
   let running=false;
+  const resetOwner=randomUUID();
   async function initialize() {
     // Retain legacy rows for audit; production grants have a separate ledger.
     await sql`CREATE TABLE IF NOT EXISTS daily_giveaway_role_grants (user_id text PRIMARY KEY, activity_day text NOT NULL)`;
@@ -33,12 +39,32 @@ export function createMemberGiveawayQualification({guildId,roleId,boatId,channel
     await sql`CREATE TABLE IF NOT EXISTS daily_giveaway_member_role_grants (user_id text PRIMARY KEY, activity_day text NOT NULL)`;
     await sql`CREATE TABLE IF NOT EXISTS daily_giveaway_sessions (day text PRIMARY KEY, channel_id text NOT NULL, message_id text NOT NULL UNIQUE)`;
     await sql`CREATE TABLE IF NOT EXISTS daily_disqualifications (day text NOT NULL, kind text NOT NULL, user_id text NOT NULL, moderator_id text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(day,kind,user_id))`;
+    if(fixedResetFrom) await sql`CREATE TABLE IF NOT EXISTS daily_giveaway_fixed_role_resets (day text PRIMARY KEY, owner_id text NOT NULL, completed_at timestamptz)`;
   }
   async function tick() {
     if(running) return;
     running=true;
     try {
       const time=now();
+      if(fixedResetFrom) {
+        const guild=await client.guilds.fetch(guildId);
+        const reset=await resetFixedGiveawayRole({guild,sql,roleId,enabledFrom:fixedResetFrom,ownerId:resetOwner,now});
+        if(reset.active) {
+          const window=giveawayCountWindow(time);
+          if(!window) return;
+          const currentGrants=await sql`SELECT user_id,activity_day FROM daily_giveaway_member_role_grants WHERE activity_day=${window.day}`;
+          for(const row of currentGrants) {
+            const [cancelled]=await sql`SELECT 1 FROM daily_disqualifications WHERE day=${window.day} AND kind='giveaway' AND user_id=${row.user_id}`;
+            if(!cancelled && !unverifiedRoleId) continue;
+            let member;
+            try {member=await guild.members.fetch({user:row.user_id,force:true});}
+            catch(error) {if(error.code!==10007) throw error;}
+            if(member && !member.roles?.cache) throw Error('DAILY_GIVEAWAY_MEMBER_ROLES_UNAVAILABLE');
+            if(member?.roles.cache.has(roleId) && (cancelled || (unverifiedRoleId && member.roles.cache.has(unverifiedRoleId)))) await member.roles.remove(roleId,cancelled ? 'Moderator cancelled giveaway eligibility' : 'Member is not verified');
+          }
+          return await grantQualifiedAddOnly({guild,sql,roleId,categoryId,unverifiedRoleId,onlyChannelId,now,collect});
+        }
+      }
       const day=[dateKey(time-DAY),dateKey(time)].find(d=>isActivityDay(d)&&time>=eventTimes(d,'giveaway').start&&time<eventTimes(d,'giveaway').end);
       const unclassified=await sql`SELECT g.user_id,g.activity_day FROM daily_giveaway_role_grants g LEFT JOIN daily_giveaway_legacy_test_grants t ON t.user_id=g.user_id AND t.activity_day=g.activity_day AND t.test_role_id<>${roleId} AND t.test_channel_id<>${channelId} AND length(btrim(t.evidence))>0 WHERE t.user_id IS NULL ORDER BY g.activity_day,g.user_id`;
       if(unclassified.length) throw Error('DAILY_GIVEAWAY_LEGACY_GRANTS_UNCLASSIFIED');
