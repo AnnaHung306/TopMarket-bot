@@ -55,16 +55,17 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
   if(publicEnabled && privateTestChannelId) throw Error('DAILY_PUBLIC_TEST_CONFIGURATION_INVALID');
   const snapshotsEnabled = env.DAILY_SNAPSHOT_ENABLED === 'true';
   const memberGiveawayEnabled = env.DAILY_GIVEAWAY_ENABLED === 'true';
+  const fixedResetEnabled = memberGiveawayEnabled && Boolean(env.DAILY_GIVEAWAY_PERSIST_SAFE_START_DAY);
   if (memberGiveawayEnabled && env.DAILY_GIVEAWAY_TEST_ENABLED === 'true') throw Error('DAILY_GIVEAWAY_MODES_CONFLICT');
   if (publicEnabled && env.DAILY_GIVEAWAY_TEST_ENABLED === 'true') throw Error('DAILY_PUBLIC_TEST_CONFIGURATION_INVALID');
   const giveawayQualification = memberGiveawayEnabled ? createMemberGiveawayQualification({
-    guildId,roleId:env.DAILY_GIVEAWAY_ROLE_ID,boatId:giveawayBoatId,channelId,categoryId:groupCategoryId,client,sql,now,onlyChannelId:privateTestChannelId,unverifiedRoleId,
+    guildId,roleId:env.DAILY_GIVEAWAY_ROLE_ID,boatId:giveawayBoatId,channelId,categoryId:groupCategoryId,client,sql,now,onlyChannelId:privateTestChannelId,unverifiedRoleId,fixedResetFrom:env.DAILY_GIVEAWAY_PERSIST_SAFE_START_DAY,
   }) : env.DAILY_GIVEAWAY_TEST_ENABLED === 'true' ? createGiveawayQualification({
     guildId, roleId: env.DAILY_GIVEAWAY_ROLE_ID, testerId: env.DAILY_GIVEAWAY_TEST_USER_ID, boatId:giveawayBoatId, testChannelId:modChannelId,
     channelIds: groupChannelIds, categoryId: groupCategoryId, client, sql, now,
     checkEligibility: ({guild,userId,start,end,required}) => eligible(guild,userId,required,end,start),
   }) : null;
-  let timer, ticking = false, lastSnapshotPruneDay = null;
+  let timer, qualificationTimer, qualificationPending=false, ticking = false, lastSnapshotPruneDay = null;
   const locks = new Map();
   async function locked(key, task) {
     const previous = locks.get(key) || Promise.resolve();
@@ -266,7 +267,7 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
         if (time >= start && time < end) await open(day,kind,channel);
       }
       // Settlement and reports must not wait behind an hourly history scan.
-      if (giveawayQualification) {
+      if (giveawayQualification && !fixedResetEnabled) {
         try { await locked('giveaway:qualification', () => giveawayQualification.tick()); }
         catch (error) { logger.error('DAILY_GIVEAWAY_QUALIFICATION_FAILED', error); }
       }
@@ -384,5 +385,14 @@ export function createDailyModule({ client, sql, incidentSql = sql, env = proces
       });
     } catch (error) { logger.error('DAILY_ELIGIBILITY_FAILED',error); return interaction.editReply({content:'目前無法驗證發言資格，請稍後重試或聯絡 MOD。',components:[]}); }
   }
-  return { guildId, commands:[command.toJSON(),reviewCommand.toJSON(),cancelCommand.toJSON(),...(giveawayQualification ? [giveawayTrackCommand.toJSON()] : [])], handle, tick, initialize, async start() { await initialize(); if (giveawayQualification) await giveawayQualification.initialize(); await tick(); timer = setInterval(tick, 30000); }, stop() { clearInterval(timer); } };
+  function scheduleFixedQualification() {
+    if(!fixedResetEnabled || qualificationPending) return;
+    qualificationPending=true;
+    void (async()=>{
+      await guildAndChannel();
+      await locked('giveaway:qualification',()=>giveawayQualification.tick());
+    })().catch(error=>logger.error('DAILY_GIVEAWAY_QUALIFICATION_FAILED',error))
+      .finally(()=>{qualificationPending=false;});
+  }
+  return { guildId, commands:[command.toJSON(),reviewCommand.toJSON(),cancelCommand.toJSON(),...(giveawayQualification ? [giveawayTrackCommand.toJSON()] : [])], handle, tick, initialize, async start() { await initialize(); if (giveawayQualification) await giveawayQualification.initialize(); scheduleFixedQualification(); await tick(); timer = setInterval(tick, 30000); if(fixedResetEnabled) qualificationTimer=setInterval(scheduleFixedQualification,30000); }, stop() { clearInterval(timer); clearInterval(qualificationTimer); } };
 }
